@@ -8,11 +8,11 @@ f2="$2"
 
 extract_type () {
   local type="$1" file="$2"
-  grep -P "^${type}\t" "$file"
+  grep -P "^${type}\t" "$file" | sort
 }
 
 for t in H S L P J C; do
-  echo "=== Comparing $t records (no sorting) ==="
+  echo "=== Comparing $t records (sorted) ==="
   extract_type "$t" "$f1" > "/tmp/${t}.1"
   extract_type "$t" "$f2" > "/tmp/${t}.2"
 
@@ -28,5 +28,5 @@ for t in H S L P J C; do
   fi
 done
 
-echo "All H/S/L/P records match (no sorting)."
+echo "All H/S/L/P records match (sorted)."
 

@@ -10,6 +10,31 @@ A high-performance C++/CUDA library and command-line tool for compressing and de
 - **Command-Line Interface**: Easy to use `gfaz` CLI for quick compression/decompression.
 - **Efficient Binary Formats**: Dedicated, magic-number-versioned binary file formats for CPU (`.gfaz`) and GPU (`.gfaz_gpu`).
 
+## Performance
+
+| Dataset | Metrics | Gzip | Zstd | sqz | sqz+bgzip | sqz+Zstd | GBZ | gfaz(CPU) | gfaz(GPU) |
+|:---|:---|---:|---:|---:|---:|---:|---:|---:|---:|
+| chr1. | Ratio | 5.59 | 7.54 | 3.09 | 18.0 | 16.7 | 9.52 | **35.4** | **31.7** |
+| | Co. | 46.2 | 2178 | 3.95 | 3.97 | 4.00 | 12.1 | **385** | **2754** |
+| | De. | 359 | 1618 | 21.6 | 21.4 | 21.2 | 284 | **1658** | **8124** |
+| chr6. | Ratio | 5.04 | 6.99 | 5.51 | 20.8 | 19.2 | 19.2 | **35.4** | **28.18** |
+| | Co. | 41.0 | 1712 | 3.56 | 3.56 | 3.59 | 10.7 | **348** | **3791** |
+| | De. | 348 | 1515 | 20.1 | 20.4 | 20.2 | 281 | **1758** | **7230** |
+| E.coli | Ratio | 4.69 | 5.67 | 1.26 | 7.46 | 6.79 | 5.58 | **18.3** | **16.7** |
+| | Co. | 33.3 | 1356 | 4.57 | 4.53 | 4.62 | 20.2 | **190** | **678** |
+| | De. | 310 | 1258 | 34.0 | 32.2 | 34.5 | 197 | **491** | **1430** |
+| HPRCv1.1 | Ratio | 4.02 | 5.32 | - | - | - | 14.0 | **22.4** | **20.4** |
+| | Co. | 36.4 | 1657 | - | - | - | 84.5 | **231** | **4843** |
+| | De. | 319 | 1234 | - | - | - | 650 | **1058** | **9435** |
+| HPRCv2.0 | Ratio | 4.19 | 6.49 | - | - | - | 66.8 | **83.9** | **76.4** |
+| | Co. | 49.1 | 1514 | - | - | - | 130 | **367** | **-** |
+| | De. | 342 | 1240 | - | - | - | 648 | **1652** | **-** |
+| HPRCv2.1 | Ratio | 4.19 | 6.43 | - | - | - | 64.2 | **82.8** | **74.2** |
+| | Co. | 48.9 | 1540 | - | - | - | 136 | **348** | **-** |
+| | De. | 343 | 1241 | - | - | - | 652 | **1559** | **-** |
+
+> **Note**: `Ratio` indicates compression ratio, `Co.` indicates compression speed/time, and `De.` indicates decompression speed/time. Bold values indicate the best performance. The system configuration used: AMD Ryzen Threadripper PRO 9955WX (16 cores), an NVIDIA RTX Pro 6000 GPU, and 512 GB of DDR5 6400 MHz memory.
+
 ## Quick Start (CLI)
 
 First, install the prerequisites using conda:
