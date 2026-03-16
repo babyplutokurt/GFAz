@@ -1,0 +1,13 @@
+[submodule "extern/pybind11"]
+	path = extern/pybind11
+	url = https://github.com/pybind/pybind11.git
+[submodule "extern/fse"]
+	path = extern/fse
+	url = https://github.com/Cyan4973/FiniteStateEntropy.git
+	branch = dev
+[submodule "extern/zstd"]
+	path = extern/zstd
+	url = https://github.com/facebook/zstd.git
+[submodule "extern/cuCollections"]
+	path = extern/cuCollections
+	url = https://github.com/NVIDIA/cuCollections.git

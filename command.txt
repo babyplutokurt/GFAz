@@ -1,0 +1,8 @@
+conda create -n gfa python=3.11
+conda activate gfa
+conda install -c conda-forge pybind11 numpy
+conda install -c conda-forge nvcomp
+pip install nvidia-libnvcomp-cu12
+
+python test_gpu_roundtrip.py <Input.gfa>
+
