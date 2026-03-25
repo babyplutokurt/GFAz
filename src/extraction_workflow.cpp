@@ -46,27 +46,6 @@ size_t compute_offset(const std::vector<uint32_t> &lengths, size_t index) {
   return offset;
 }
 
-std::vector<int32_t> extract_encoded_sequence(const ZstdCompressedBlock &block,
-                                              const std::vector<uint32_t> &lengths,
-                                              size_t index) {
-  if (index >= lengths.size()) {
-    throw std::out_of_range(std::string(kExtractionErrorPrefix) +
-                            "sequence index out of range");
-  }
-
-  const std::vector<int32_t> flat = Codec::zstd_decompress_int32_vector(block);
-  const size_t offset = compute_offset(lengths, index);
-  const size_t length = lengths[index];
-
-  if (offset + length > flat.size()) {
-    throw std::runtime_error(std::string(kExtractionErrorPrefix) +
-                             "flattened sequence block is truncated");
-  }
-
-  return std::vector<int32_t>(flat.begin() + static_cast<std::ptrdiff_t>(offset),
-                              flat.begin() + static_cast<std::ptrdiff_t>(offset + length));
-}
-
 std::vector<NodeId>
 extract_encoded_sequence_from_flat(const std::vector<int32_t> &flat,
                                    const std::vector<uint32_t> &lengths,
@@ -290,7 +269,22 @@ std::string extract_walk_line(const CompressedData &data,
                               int64_t seq_start,
                               int64_t seq_end,
                               int num_threads) {
+  WalkLookupKey key;
+  key.sample_id = sample_id;
+  key.hap_index = hap_index;
+  key.seq_id = seq_id;
+  key.seq_start = seq_start;
+  key.seq_end = seq_end;
+  return extract_walk_lines(data, {key}, num_threads).front();
+}
+
+std::vector<std::string>
+extract_walk_lines(const CompressedData &data,
+                   const std::vector<WalkLookupKey> &walk_keys,
+                   int num_threads) {
   ScopedOMPThreads omp_scope(num_threads);
+  if (walk_keys.empty())
+    return {};
 
   const std::vector<std::string> sample_ids = decompress_string_column(
       data.walk_sample_ids_zstd, data.walk_sample_id_lengths_zstd);
@@ -306,36 +300,59 @@ std::string extract_walk_line(const CompressedData &data,
       Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
                                      data.walk_lengths.size());
 
-  size_t walk_index = data.walk_lengths.size();
-  for (size_t i = 0; i < data.walk_lengths.size(); ++i) {
-    if (i < sample_ids.size() && i < hap_indices.size() && i < seq_ids.size() &&
-        i < seq_starts.size() && i < seq_ends.size() &&
-        sample_ids[i] == sample_id && hap_indices[i] == hap_index &&
-        seq_ids[i] == seq_id && seq_starts[i] == seq_start &&
-        seq_ends[i] == seq_end) {
-      walk_index = i;
-      break;
+  std::vector<size_t> indices;
+  indices.reserve(walk_keys.size());
+  for (const auto &walk_key : walk_keys) {
+    size_t walk_index = data.walk_lengths.size();
+    for (size_t i = 0; i < data.walk_lengths.size(); ++i) {
+      if (i < sample_ids.size() && i < hap_indices.size() && i < seq_ids.size() &&
+          i < seq_starts.size() && i < seq_ends.size() &&
+          sample_ids[i] == walk_key.sample_id &&
+          hap_indices[i] == walk_key.hap_index &&
+          seq_ids[i] == walk_key.seq_id &&
+          seq_starts[i] == walk_key.seq_start &&
+          seq_ends[i] == walk_key.seq_end) {
+        walk_index = i;
+        break;
+      }
     }
-  }
 
-  if (walk_index == data.walk_lengths.size()) {
-    throw std::runtime_error(std::string(kExtractionErrorPrefix) +
-                             "walk not found for the provided identifier");
+    if (walk_index == data.walk_lengths.size()) {
+      throw std::runtime_error(std::string(kExtractionErrorPrefix) +
+                               "walk not found for the provided identifier: " +
+                               walk_key.sample_id + "\t" +
+                               std::to_string(walk_key.hap_index) + "\t" +
+                               walk_key.seq_id + "\t" +
+                               std::to_string(walk_key.seq_start) + "\t" +
+                               std::to_string(walk_key.seq_end));
+    }
+    indices.push_back(walk_index);
   }
 
   const auto [rules_first, rules_second] = decode_rules(data);
-  const std::vector<int32_t> encoded =
-      extract_encoded_sequence(data.walks_zstd, data.walk_lengths, walk_index);
-  const uint32_t original_length =
-      (walk_index < data.original_walk_lengths.size())
-          ? data.original_walk_lengths[walk_index]
-          : static_cast<uint32_t>(encoded.size());
-  const std::vector<NodeId> decoded =
-      decode_sequence(encoded, rules_first, rules_second, data.min_rule_id(),
-                      original_length, data.delta_round);
+  const std::vector<int32_t> flat =
+      Codec::zstd_decompress_int32_vector(data.walks_zstd);
 
-  return format_walk_line(sample_id, hap_index, seq_id, seq_start, seq_end,
-                          decoded);
+  std::vector<std::string> lines;
+  lines.reserve(walk_keys.size());
+  for (size_t request_idx = 0; request_idx < walk_keys.size(); ++request_idx) {
+    const size_t walk_index = indices[request_idx];
+    const std::vector<NodeId> encoded =
+        extract_encoded_sequence_from_flat(flat, data.walk_lengths, walk_index);
+    const uint32_t original_length =
+        (walk_index < data.original_walk_lengths.size())
+            ? data.original_walk_lengths[walk_index]
+            : static_cast<uint32_t>(encoded.size());
+    const std::vector<NodeId> decoded =
+        decode_sequence(encoded, rules_first, rules_second, data.min_rule_id(),
+                        original_length, data.delta_round);
+
+    const auto &walk_key = walk_keys[request_idx];
+    lines.push_back(format_walk_line(walk_key.sample_id, walk_key.hap_index,
+                                     walk_key.seq_id, walk_key.seq_start,
+                                     walk_key.seq_end, decoded));
+  }
+  return lines;
 }
 
 std::string extract_walk_line_by_name(const CompressedData &data,
@@ -386,35 +403,21 @@ extract_walk_lines_by_name(const CompressedData &data,
       Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
                                      data.walk_lengths.size());
 
-  const auto [rules_first, rules_second] = decode_rules(data);
-  const std::vector<int32_t> flat =
-      Codec::zstd_decompress_int32_vector(data.walks_zstd);
-
-  std::vector<std::string> lines;
-  lines.reserve(walk_names.size());
+  std::vector<WalkLookupKey> walk_keys;
+  walk_keys.reserve(walk_names.size());
   for (size_t request_idx = 0; request_idx < walk_names.size(); ++request_idx) {
     const size_t walk_index = indices[request_idx];
-    const std::vector<NodeId> encoded =
-        extract_encoded_sequence_from_flat(flat, data.walk_lengths, walk_index);
-    const uint32_t original_length =
-        (walk_index < data.original_walk_lengths.size())
-            ? data.original_walk_lengths[walk_index]
-            : static_cast<uint32_t>(encoded.size());
-    const std::vector<NodeId> decoded =
-        decode_sequence(encoded, rules_first, rules_second, data.min_rule_id(),
-                        original_length, data.delta_round);
-
-    const uint32_t hap_index =
+    WalkLookupKey walk_key;
+    walk_key.sample_id = walk_names[request_idx];
+    walk_key.hap_index =
         (walk_index < hap_indices.size()) ? hap_indices[walk_index] : 0;
-    const std::string seq_id =
+    walk_key.seq_id =
         (walk_index < seq_ids.size()) ? seq_ids[walk_index] : "unknown";
-    const int64_t seq_start =
+    walk_key.seq_start =
         (walk_index < seq_starts.size()) ? seq_starts[walk_index] : -1;
-    const int64_t seq_end =
+    walk_key.seq_end =
         (walk_index < seq_ends.size()) ? seq_ends[walk_index] : -1;
-
-    lines.push_back(format_walk_line(walk_names[request_idx], hap_index, seq_id,
-                                     seq_start, seq_end, decoded));
+    walk_keys.push_back(std::move(walk_key));
   }
-  return lines;
+  return extract_walk_lines(data, walk_keys, num_threads);
 }

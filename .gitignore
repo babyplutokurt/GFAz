@@ -43,3 +43,7 @@ env/
 AGENTS.md
 
 test_data/
+
+rebuttal.md
+
+extract_benchmark.csv

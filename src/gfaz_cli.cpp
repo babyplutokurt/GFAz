@@ -104,7 +104,9 @@ void print_extract_walk_help() {
 gfaz extract-walk - Extract a single walk line from a GFAZ file
 
 USAGE:
-    gfaz extract-walk [OPTIONS] <input.gfaz> <walk_name> [walk_name ...]
+    gfaz extract-walk [OPTIONS] <input.gfaz>
+                      <sample_id> <hap_index> <seq_id> <seq_start> <seq_end>
+                      [<sample_id> <hap_index> <seq_id> <seq_start> <seq_end> ...]
 
 OPTIONS:
     -j, --threads <N>       Number of threads (default: 0 = auto)
@@ -114,8 +116,9 @@ OUTPUT:
     Writes the reconstructed W-lines to stdout, in the same order as requested.
 
 NOTE:
-    Walk lookup matches the walk name stored in the W-line sample_id field.
-    If more than one walk has the same name, extraction fails as ambiguous.
+    Walk lookup uses the full W-line identifier tuple:
+    (sample_id, hap_index, seq_id, seq_start, seq_end).
+    Use '*' for seq_start / seq_end values from the original W-line.
     The current CPU .gfaz format does not store original segment names, so
     segment references are emitted as numeric IDs.
 
@@ -501,21 +504,38 @@ int do_extract_walk(int argc, char *argv[]) {
     }
   }
 
-  if (optind + 1 >= argc) {
-    std::cerr << "Error: Expected <input.gfaz> and at least one <walk_name>\n";
+  if (optind + 5 >= argc) {
+    std::cerr << "Error: Expected <input.gfaz> and at least one walk identifier "
+                 "tuple\n";
     print_extract_walk_help();
     return 1;
   }
 
   const std::string input_path = argv[optind];
-  std::vector<std::string> walk_names;
-  for (int i = optind + 1; i < argc; ++i)
-    walk_names.push_back(argv[i]);
+  const int remaining = argc - (optind + 1);
+  if (remaining % 5 != 0) {
+    std::cerr << "Error: Walk identifiers must be provided in groups of 5: "
+                 "<sample_id> <hap_index> <seq_id> <seq_start> <seq_end>\n";
+    print_extract_walk_help();
+    return 1;
+  }
 
   try {
+    std::vector<WalkLookupKey> walk_keys;
+    for (int i = optind + 1; i < argc; i += 5) {
+      WalkLookupKey walk_key;
+      walk_key.sample_id = argv[i];
+      walk_key.hap_index = static_cast<uint32_t>(std::stoul(argv[i + 1]));
+      walk_key.seq_id = argv[i + 2];
+      walk_key.seq_start =
+          (std::string(argv[i + 3]) == "*") ? -1 : std::stoll(argv[i + 3]);
+      walk_key.seq_end =
+          (std::string(argv[i + 4]) == "*") ? -1 : std::stoll(argv[i + 4]);
+      walk_keys.push_back(std::move(walk_key));
+    }
+
     const CompressedData data = deserialize_compressed_data(input_path);
-    for (const auto &line :
-         extract_walk_lines_by_name(data, walk_names, num_threads)) {
+    for (const auto &line : extract_walk_lines(data, walk_keys, num_threads)) {
       std::cout << line;
     }
     return 0;

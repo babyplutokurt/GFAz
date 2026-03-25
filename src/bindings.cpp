@@ -105,6 +105,14 @@ PYBIND11_MODULE(gfa_compression, m) {
       .def_readwrite("seq_starts", &WalkData::seq_starts)
       .def_readwrite("seq_ends", &WalkData::seq_ends);
 
+  py::class_<WalkLookupKey>(m, "WalkLookupKey")
+      .def(py::init<>())
+      .def_readwrite("sample_id", &WalkLookupKey::sample_id)
+      .def_readwrite("hap_index", &WalkLookupKey::hap_index)
+      .def_readwrite("seq_id", &WalkLookupKey::seq_id)
+      .def_readwrite("seq_start", &WalkLookupKey::seq_start)
+      .def_readwrite("seq_end", &WalkLookupKey::seq_end);
+
   py::class_<GfaGraph>(m, "GfaGraph")
       .def(py::init<>())
       .def_readonly("node_name_to_id", &GfaGraph::node_name_to_id)
@@ -591,7 +599,11 @@ PYBIND11_MODULE(gfa_compression, m) {
         "Extract a single W-line from CompressedData using walk name",
         py::arg("data"), py::arg("walk_name"),
         py::arg("num_threads") = kDefaultNumThreads);
-  m.def("extract_walk_lines", &extract_walk_lines_by_name,
+  m.def("extract_walk_lines", &extract_walk_lines,
+        "Extract multiple W-lines from CompressedData using full walk identifiers",
+        py::arg("data"), py::arg("walk_keys"),
+        py::arg("num_threads") = kDefaultNumThreads);
+  m.def("extract_walk_lines_by_name", &extract_walk_lines_by_name,
         "Extract multiple W-lines from CompressedData using walk names",
         py::arg("data"), py::arg("walk_names"),
         py::arg("num_threads") = kDefaultNumThreads);

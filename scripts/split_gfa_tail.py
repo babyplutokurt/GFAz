@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+from collections import deque
 from pathlib import Path
 import sys
 
@@ -56,34 +57,29 @@ def main() -> int:
         extracted_output = Path(args.extracted_output)
 
     try:
-        lines = input_path.read_text().splitlines(keepends=True)
-    except OSError as exc:
-        print(f"Error: failed to read {input_path}: {exc}", file=sys.stderr)
-        return 1
-
-    pw_indices = [
-        i for i, line in enumerate(lines) if line.startswith("P\t") or line.startswith("W\t")
-    ]
-    extract_count = min(args.count, len(pw_indices))
-    extracted_index_set = set(pw_indices[-extract_count:])
-
-    trimmed_lines = []
-    extracted_lines = []
-    for i, line in enumerate(lines):
-        if i in extracted_index_set:
-            extracted_lines.append(line)
-        else:
-            trimmed_lines.append(line)
-
-    try:
-        trimmed_output.write_text("".join(trimmed_lines))
-        extracted_output.write_text("".join(extracted_lines))
+        with open(input_path, "r") as f_in, \
+             open(trimmed_output, "w") as f_trim, \
+             open(extracted_output, "w") as f_ext:
+            pending_pw = deque()
+            total_pw = 0
+            for line in f_in:
+                if line.startswith("P\t") or line.startswith("W\t"):
+                    pending_pw.append(line)
+                    total_pw += 1
+                    if len(pending_pw) > args.count:
+                        f_trim.write(pending_pw.popleft())
+                else:
+                    f_trim.write(line)
+            while pending_pw:
+                f_ext.write(pending_pw.popleft())
     except OSError as exc:
         print(f"Error: failed to write outputs: {exc}", file=sys.stderr)
         return 1
 
+    extract_count = min(args.count, total_pw)
+
     print(f"Input: {input_path}")
-    print(f"Total P/W lines: {len(pw_indices)}")
+    print(f"Total P/W lines: {total_pw}")
     print(f"Extracted trailing P/W lines: {extract_count}")
     print(f"Trimmed GFA: {trimmed_output}")
     print(f"Extracted text: {extracted_output}")
