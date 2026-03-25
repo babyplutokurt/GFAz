@@ -150,6 +150,7 @@ set(GFA_CORE_SOURCES
   src/rule_generator.cpp
   src/path_encoder.cpp
   src/rule_processor.cpp
+  src/add_haplotypes_workflow.cpp
   src/extraction_workflow.cpp
   src/compression_workflow.cpp
   src/decompression_workflow.cpp

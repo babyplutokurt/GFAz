@@ -1,6 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "add_haplotypes_workflow.hpp"
 #include "compression_workflow.hpp"
 #include "debug_log.hpp"
 #include "decompression_workflow.hpp"
@@ -594,6 +595,15 @@ PYBIND11_MODULE(gfa_compression, m) {
         "Extract multiple W-lines from CompressedData using walk names",
         py::arg("data"), py::arg("walk_names"),
         py::arg("num_threads") = kDefaultNumThreads);
+  m.def(
+      "add_haplotypes",
+      [](CompressedData data, const std::string &haplotypes_path, int threads) {
+        add_haplotypes(data, haplotypes_path, threads);
+        return data;
+      },
+      "Append path-only or walk-only haplotypes to CompressedData using the existing rulebook",
+      py::arg("data"), py::arg("haplotypes_path"),
+      py::arg("threads") = kDefaultNumThreads);
 
   // CPU helper utilities.
   m.def("cpu_reconstruct_path", &reconstruct_path_cpu,

@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 
+#include "add_haplotypes_workflow.hpp"
 #include "compression_workflow.hpp"
 #include "decompression_workflow.hpp"
 #include "extraction_workflow.hpp"
@@ -32,13 +33,15 @@ USAGE:
     gfaz compress [OPTIONS] <input.gfa> [output.gfaz|output.gfaz_gpu]
     gfaz decompress [OPTIONS] <input.gfaz|input.gfaz_gpu> [output.gfa]
     gfaz extract-path [OPTIONS] <input.gfaz> <path_name>
-    gfaz extract-walk [OPTIONS] <input.gfaz> <sample_id> <hap_index> <seq_id> <seq_start> <seq_end>
+    gfaz extract-walk [OPTIONS] <input.gfaz> <walk_name>
+    gfaz add-haplotypes [OPTIONS] <input.gfaz> <paths_or_walks.gfa> [output.gfaz]
 
 SUBCOMMANDS:
     compress      Compress a GFA file to GFAZ format
     decompress    Decompress a GFAZ file to GFA format
     extract-path  Extract a single P-line to stdout
     extract-walk  Extract a single W-line to stdout
+    add-haplotypes  Append path-only or walk-only haplotypes using the existing rulebook
 
 OPTIONS (compress):
     -r, --rounds <N>        Number of compression rounds (default: 8)
@@ -115,6 +118,30 @@ NOTE:
     If more than one walk has the same name, extraction fails as ambiguous.
     The current CPU .gfaz format does not store original segment names, so
     segment references are emitted as numeric IDs.
+
+)";
+}
+
+void print_add_haplotypes_help() {
+  std::cout << R"(
+gfaz add-haplotypes - Append path-only or walk-only haplotypes to a CPU GFAZ file
+
+USAGE:
+    gfaz add-haplotypes [OPTIONS] <input.gfaz> <paths_or_walks.gfa> [output.gfaz]
+
+OPTIONS:
+    -j, --threads <N>       Number of threads (default: 0 = auto)
+    -h, --help              Show this help message
+
+BEHAVIOR:
+    - The append file must contain only H/P lines or only H/W lines.
+    - The existing rulebook is reused; no new grammar rules are generated.
+    - Appended path/walk names must be unique.
+    - Because the CPU .gfaz format does not store original segment names,
+      appended paths/walks must use numeric segment IDs.
+    - If no output path is provided, writes <input>.updated.gfaz.
+    - If delta encoding causes appended IDs to collide with the stored rule
+      region, the command fails without writing output.
 
 )";
 }
@@ -498,6 +525,59 @@ int do_extract_walk(int argc, char *argv[]) {
   }
 }
 
+int do_add_haplotypes(int argc, char *argv[]) {
+  int num_threads = kDefaultNumThreads;
+
+  static struct option long_options[] = {{"threads", required_argument, 0, 'j'},
+                                         {"help", no_argument, 0, 'h'},
+                                         {0, 0, 0, 0}};
+
+  int opt;
+  optind = 1;
+  while ((opt = getopt_long(argc, argv, "j:h", long_options, nullptr)) != -1) {
+    switch (opt) {
+    case 'j':
+      num_threads = std::stoi(optarg);
+      break;
+    case 'h':
+      print_add_haplotypes_help();
+      return 0;
+    default:
+      print_add_haplotypes_help();
+      return 1;
+    }
+  }
+
+  if (optind + 1 >= argc) {
+    std::cerr << "Error: Expected <input.gfaz> and <paths_or_walks.gfa>\n";
+    print_add_haplotypes_help();
+    return 1;
+  }
+
+  const std::string input_path = argv[optind];
+  const std::string haplotypes_path = argv[optind + 1];
+  std::string output_path;
+  if (optind + 2 < argc) {
+    output_path = argv[optind + 2];
+  } else if (input_path.size() > 5 &&
+             input_path.substr(input_path.size() - 5) == ".gfaz") {
+    output_path =
+        input_path.substr(0, input_path.size() - 5) + ".updated.gfaz";
+  } else {
+    output_path = input_path + ".updated.gfaz";
+  }
+
+  try {
+    CompressedData data = deserialize_compressed_data(input_path);
+    add_haplotypes(data, haplotypes_path, num_threads);
+    serialize_compressed_data(data, output_path);
+    return 0;
+  } catch (const std::exception &e) {
+    std::cerr << "Error: " << e.what() << std::endl;
+    return 1;
+  }
+}
+
 int main(int argc, char *argv[]) {
   if (argc < 2) {
     print_usage();
@@ -519,6 +599,8 @@ int main(int argc, char *argv[]) {
     return do_extract_path(argc - 1, argv + 1);
   } else if (command == "extract-walk") {
     return do_extract_walk(argc - 1, argv + 1);
+  } else if (command == "add-haplotypes") {
+    return do_add_haplotypes(argc - 1, argv + 1);
   } else {
     std::cerr << "Unknown command: " << command << std::endl;
     print_usage();
