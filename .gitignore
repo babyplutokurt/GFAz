@@ -1,5 +1,6 @@
 # Build artifacts
 build/
+build_cpu/
 bin/
 *.o
 *.so
@@ -37,3 +38,6 @@ env/
 
 ./scripts/eval_results.csv
 ./scripts/Ecoli*
+
+
+AGENTS.md

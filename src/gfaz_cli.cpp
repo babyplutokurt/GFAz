@@ -5,6 +5,7 @@
 
 #include "compression_workflow.hpp"
 #include "decompression_workflow.hpp"
+#include "extraction_workflow.hpp"
 #include "gfa_parser.hpp"
 #include "gfa_writer.hpp"
 #include "serialization.hpp"
@@ -30,10 +31,14 @@ gfaz - GFA Compression Tool (2-mer with reordering)
 USAGE:
     gfaz compress [OPTIONS] <input.gfa> [output.gfaz|output.gfaz_gpu]
     gfaz decompress [OPTIONS] <input.gfaz|input.gfaz_gpu> [output.gfa]
+    gfaz extract-path [OPTIONS] <input.gfaz> <path_name>
+    gfaz extract-walk [OPTIONS] <input.gfaz> <sample_id> <hap_index> <seq_id> <seq_start> <seq_end>
 
 SUBCOMMANDS:
     compress      Compress a GFA file to GFAZ format
     decompress    Decompress a GFAZ file to GFA format
+    extract-path  Extract a single P-line to stdout
+    extract-walk  Extract a single W-line to stdout
 
 OPTIONS (compress):
     -r, --rounds <N>        Number of compression rounds (default: 8)
@@ -66,6 +71,50 @@ EXAMPLES:
     gfaz decompress input.gfaz                   # -> input.gfa (removes .gfaz)
     gfaz decompress --gpu input.gfaz_gpu         # -> input.gfa (removes .gfaz_gpu)
     gfaz decompress input.gfaz output.gfa        # -> output.gfa
+
+)";
+}
+
+void print_extract_path_help() {
+  std::cout << R"(
+gfaz extract-path - Extract a single path line from a GFAZ file
+
+USAGE:
+    gfaz extract-path [OPTIONS] <input.gfaz> <path_name>
+
+OPTIONS:
+    -j, --threads <N>       Number of threads (default: 0 = auto)
+    -h, --help              Show this help message
+
+OUTPUT:
+    Writes the reconstructed P-line to stdout.
+
+NOTE:
+    The current CPU .gfaz format does not store original segment names, so
+    segment references are emitted as numeric IDs.
+
+)";
+}
+
+void print_extract_walk_help() {
+  std::cout << R"(
+gfaz extract-walk - Extract a single walk line from a GFAZ file
+
+USAGE:
+    gfaz extract-walk [OPTIONS] <input.gfaz> <walk_name>
+
+OPTIONS:
+    -j, --threads <N>       Number of threads (default: 0 = auto)
+    -h, --help              Show this help message
+
+OUTPUT:
+    Writes the reconstructed W-line to stdout.
+
+NOTE:
+    Walk lookup matches the walk name stored in the W-line sample_id field.
+    If more than one walk has the same name, extraction fails as ambiguous.
+    The current CPU .gfaz format does not store original segment names, so
+    segment references are emitted as numeric IDs.
 
 )";
 }
@@ -355,6 +404,90 @@ int do_decompress(int argc, char *argv[]) {
   }
 }
 
+int do_extract_path(int argc, char *argv[]) {
+  int num_threads = kDefaultNumThreads;
+
+  static struct option long_options[] = {{"threads", required_argument, 0, 'j'},
+                                         {"help", no_argument, 0, 'h'},
+                                         {0, 0, 0, 0}};
+
+  int opt;
+  optind = 1;
+  while ((opt = getopt_long(argc, argv, "j:h", long_options, nullptr)) != -1) {
+    switch (opt) {
+    case 'j':
+      num_threads = std::stoi(optarg);
+      break;
+    case 'h':
+      print_extract_path_help();
+      return 0;
+    default:
+      print_extract_path_help();
+      return 1;
+    }
+  }
+
+  if (optind + 1 >= argc) {
+    std::cerr << "Error: Expected <input.gfaz> and <path_name>\n";
+    print_extract_path_help();
+    return 1;
+  }
+
+  const std::string input_path = argv[optind];
+  const std::string path_name = argv[optind + 1];
+
+  try {
+    const CompressedData data = deserialize_compressed_data(input_path);
+    std::cout << extract_path_line_by_name(data, path_name, num_threads);
+    return 0;
+  } catch (const std::exception &e) {
+    std::cerr << "Error: " << e.what() << std::endl;
+    return 1;
+  }
+}
+
+int do_extract_walk(int argc, char *argv[]) {
+  int num_threads = kDefaultNumThreads;
+
+  static struct option long_options[] = {{"threads", required_argument, 0, 'j'},
+                                         {"help", no_argument, 0, 'h'},
+                                         {0, 0, 0, 0}};
+
+  int opt;
+  optind = 1;
+  while ((opt = getopt_long(argc, argv, "j:h", long_options, nullptr)) != -1) {
+    switch (opt) {
+    case 'j':
+      num_threads = std::stoi(optarg);
+      break;
+    case 'h':
+      print_extract_walk_help();
+      return 0;
+    default:
+      print_extract_walk_help();
+      return 1;
+    }
+  }
+
+  if (optind + 1 >= argc) {
+    std::cerr << "Error: Expected <input.gfaz> and <walk_name>\n";
+    print_extract_walk_help();
+    return 1;
+  }
+
+  const std::string input_path = argv[optind];
+  const std::string walk_name = argv[optind + 1];
+
+  try {
+    const CompressedData data = deserialize_compressed_data(input_path);
+    std::cout << extract_walk_line_by_name(data, walk_name, num_threads);
+    return 0;
+  } catch (const std::exception &e) {
+    std::cerr << "Error: " << e.what() << std::endl;
+    return 1;
+  }
+}
+
 int main(int argc, char *argv[]) {
   if (argc < 2) {
     print_usage();
@@ -372,6 +505,10 @@ int main(int argc, char *argv[]) {
     return do_compress(argc - 1, argv + 1);
   } else if (command == "decompress") {
     return do_decompress(argc - 1, argv + 1);
+  } else if (command == "extract-path") {
+    return do_extract_path(argc - 1, argv + 1);
+  } else if (command == "extract-walk") {
+    return do_extract_walk(argc - 1, argv + 1);
   } else {
     std::cerr << "Unknown command: " << command << std::endl;
     print_usage();

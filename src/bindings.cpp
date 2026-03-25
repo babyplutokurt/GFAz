@@ -4,6 +4,7 @@
 #include "compression_workflow.hpp"
 #include "debug_log.hpp"
 #include "decompression_workflow.hpp"
+#include "extraction_workflow.hpp"
 #include "gfa_parser.hpp"
 #include "gfa_writer.hpp"
 #include "gpu/gfa_graph_gpu.hpp"
@@ -572,6 +573,19 @@ PYBIND11_MODULE(gfa_compression, m) {
 
   m.def("write_gfa", &write_gfa, "Write GfaGraph to GFA file", py::arg("graph"),
         py::arg("output_path"));
+  m.def("extract_path_line", &extract_path_line_by_name,
+        "Extract a single P-line from CompressedData", py::arg("data"),
+        py::arg("path_name"),
+        py::arg("num_threads") = kDefaultNumThreads);
+  m.def("extract_walk_line", &extract_walk_line,
+        "Extract a single W-line from CompressedData", py::arg("data"),
+        py::arg("sample_id"), py::arg("hap_index"), py::arg("seq_id"),
+        py::arg("seq_start"), py::arg("seq_end"),
+        py::arg("num_threads") = kDefaultNumThreads);
+  m.def("extract_walk_line_by_name", &extract_walk_line_by_name,
+        "Extract a single W-line from CompressedData using walk name",
+        py::arg("data"), py::arg("walk_name"),
+        py::arg("num_threads") = kDefaultNumThreads);
 
   // CPU helper utilities.
   m.def("cpu_reconstruct_path", &reconstruct_path_cpu,
