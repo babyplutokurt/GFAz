@@ -80,14 +80,14 @@ void print_extract_path_help() {
 gfaz extract-path - Extract a single path line from a GFAZ file
 
 USAGE:
-    gfaz extract-path [OPTIONS] <input.gfaz> <path_name>
+    gfaz extract-path [OPTIONS] <input.gfaz> <path_name> [path_name ...]
 
 OPTIONS:
     -j, --threads <N>       Number of threads (default: 0 = auto)
     -h, --help              Show this help message
 
 OUTPUT:
-    Writes the reconstructed P-line to stdout.
+    Writes the reconstructed P-lines to stdout, in the same order as requested.
 
 NOTE:
     The current CPU .gfaz format does not store original segment names, so
@@ -101,14 +101,14 @@ void print_extract_walk_help() {
 gfaz extract-walk - Extract a single walk line from a GFAZ file
 
 USAGE:
-    gfaz extract-walk [OPTIONS] <input.gfaz> <walk_name>
+    gfaz extract-walk [OPTIONS] <input.gfaz> <walk_name> [walk_name ...]
 
 OPTIONS:
     -j, --threads <N>       Number of threads (default: 0 = auto)
     -h, --help              Show this help message
 
 OUTPUT:
-    Writes the reconstructed W-line to stdout.
+    Writes the reconstructed W-lines to stdout, in the same order as requested.
 
 NOTE:
     Walk lookup matches the walk name stored in the W-line sample_id field.
@@ -428,17 +428,22 @@ int do_extract_path(int argc, char *argv[]) {
   }
 
   if (optind + 1 >= argc) {
-    std::cerr << "Error: Expected <input.gfaz> and <path_name>\n";
+    std::cerr << "Error: Expected <input.gfaz> and at least one <path_name>\n";
     print_extract_path_help();
     return 1;
   }
 
   const std::string input_path = argv[optind];
-  const std::string path_name = argv[optind + 1];
+  std::vector<std::string> path_names;
+  for (int i = optind + 1; i < argc; ++i)
+    path_names.push_back(argv[i]);
 
   try {
     const CompressedData data = deserialize_compressed_data(input_path);
-    std::cout << extract_path_line_by_name(data, path_name, num_threads);
+    for (const auto &line :
+         extract_path_lines_by_name(data, path_names, num_threads)) {
+      std::cout << line;
+    }
     return 0;
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;
@@ -470,17 +475,22 @@ int do_extract_walk(int argc, char *argv[]) {
   }
 
   if (optind + 1 >= argc) {
-    std::cerr << "Error: Expected <input.gfaz> and <walk_name>\n";
+    std::cerr << "Error: Expected <input.gfaz> and at least one <walk_name>\n";
     print_extract_walk_help();
     return 1;
   }
 
   const std::string input_path = argv[optind];
-  const std::string walk_name = argv[optind + 1];
+  std::vector<std::string> walk_names;
+  for (int i = optind + 1; i < argc; ++i)
+    walk_names.push_back(argv[i]);
 
   try {
     const CompressedData data = deserialize_compressed_data(input_path);
-    std::cout << extract_walk_line_by_name(data, walk_name, num_threads);
+    for (const auto &line :
+         extract_walk_lines_by_name(data, walk_names, num_threads)) {
+      std::cout << line;
+    }
     return 0;
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;

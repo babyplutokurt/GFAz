@@ -577,6 +577,10 @@ PYBIND11_MODULE(gfa_compression, m) {
         "Extract a single P-line from CompressedData", py::arg("data"),
         py::arg("path_name"),
         py::arg("num_threads") = kDefaultNumThreads);
+  m.def("extract_path_lines", &extract_path_lines_by_name,
+        "Extract multiple P-lines from CompressedData", py::arg("data"),
+        py::arg("path_names"),
+        py::arg("num_threads") = kDefaultNumThreads);
   m.def("extract_walk_line", &extract_walk_line,
         "Extract a single W-line from CompressedData", py::arg("data"),
         py::arg("sample_id"), py::arg("hap_index"), py::arg("seq_id"),
@@ -585,6 +589,10 @@ PYBIND11_MODULE(gfa_compression, m) {
   m.def("extract_walk_line_by_name", &extract_walk_line_by_name,
         "Extract a single W-line from CompressedData using walk name",
         py::arg("data"), py::arg("walk_name"),
+        py::arg("num_threads") = kDefaultNumThreads);
+  m.def("extract_walk_lines", &extract_walk_lines_by_name,
+        "Extract multiple W-lines from CompressedData using walk names",
+        py::arg("data"), py::arg("walk_names"),
         py::arg("num_threads") = kDefaultNumThreads);
 
   // CPU helper utilities.

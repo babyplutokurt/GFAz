@@ -5,6 +5,12 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
+
+std::vector<std::string>
+extract_path_lines_by_name(const CompressedData &data,
+                           const std::vector<std::string> &path_names,
+                           int num_threads = 0);
 
 std::string extract_path_line_by_name(const CompressedData &data,
                                       const std::string &path_name,
@@ -17,6 +23,11 @@ std::string extract_walk_line(const CompressedData &data,
                               int64_t seq_start,
                               int64_t seq_end,
                               int num_threads = 0);
+
+std::vector<std::string>
+extract_walk_lines_by_name(const CompressedData &data,
+                           const std::vector<std::string> &walk_names,
+                           int num_threads = 0);
 
 std::string extract_walk_line_by_name(const CompressedData &data,
                                       const std::string &walk_name,
