@@ -126,3 +126,7 @@ if has_gpu:
 
 - The CPU (`.gfaz`) and GPU (`.gfaz_gpu`) binary formats are fundamentally distinct and not interchangeable. 
 - You must specify `--gpu` when decompressing a `.gfaz_gpu` file via the CLI. It does not auto-detect the backend via file magic.
+
+## License
+
+This project is licensed under the MIT License.
