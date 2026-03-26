@@ -386,6 +386,57 @@ void validate_unique_names(const std::vector<std::string> &existing,
   }
 }
 
+std::string make_walk_identity_key(std::string_view sample_id, uint32_t hap_index,
+                                   std::string_view seq_id, int64_t seq_start,
+                                   int64_t seq_end) {
+  std::string key;
+  key.reserve(sample_id.size() + seq_id.size() + 64);
+  key += sample_id;
+  key.push_back('\x1f');
+  key += std::to_string(hap_index);
+  key.push_back('\x1f');
+  key += seq_id;
+  key.push_back('\x1f');
+  key += std::to_string(seq_start);
+  key.push_back('\x1f');
+  key += std::to_string(seq_end);
+  return key;
+}
+
+void validate_unique_walk_keys(const std::vector<std::string> &existing_sample_ids,
+                               const std::vector<uint32_t> &existing_hap_indices,
+                               const std::vector<std::string> &existing_seq_ids,
+                               const std::vector<int64_t> &existing_seq_starts,
+                               const std::vector<int64_t> &existing_seq_ends,
+                               const WalkData &incoming) {
+  std::unordered_set<std::string> seen;
+  seen.reserve(existing_sample_ids.size() + incoming.sample_ids.size());
+
+  for (size_t i = 0; i < existing_sample_ids.size(); ++i) {
+    seen.insert(make_walk_identity_key(existing_sample_ids[i],
+                                       existing_hap_indices[i],
+                                       existing_seq_ids[i],
+                                       existing_seq_starts[i],
+                                       existing_seq_ends[i]));
+  }
+
+  for (size_t i = 0; i < incoming.sample_ids.size(); ++i) {
+    const std::string key =
+        make_walk_identity_key(incoming.sample_ids[i], incoming.hap_indices[i],
+                               incoming.seq_ids[i], incoming.seq_starts[i],
+                               incoming.seq_ends[i]);
+    if (!seen.insert(key).second) {
+      throw std::runtime_error(
+          std::string(kAddHaplotypesErrorPrefix) +
+          "walk identifier already exists or is duplicated: " +
+          incoming.sample_ids[i] + "\t" + std::to_string(incoming.hap_indices[i]) +
+          "\t" + incoming.seq_ids[i] + "\t" +
+          std::to_string(incoming.seq_starts[i]) + "\t" +
+          std::to_string(incoming.seq_ends[i]));
+    }
+  }
+}
+
 void apply_delta_and_validate(std::vector<std::vector<NodeId>> &sequences,
                               int delta_round, uint32_t min_rule_id,
                               bool has_rule_region) {
@@ -454,8 +505,6 @@ void append_walks(CompressedData &data, const AppendInput &input,
                   const std::vector<CompressionRules2Mer> &layers) {
   std::vector<std::string> existing_sample_ids = decompress_string_column(
       data.walk_sample_ids_zstd, data.walk_sample_id_lengths_zstd);
-  validate_unique_names(existing_sample_ids, input.walks.sample_ids, "walk");
-
   std::vector<uint32_t> hap_indices =
       Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
   std::vector<std::string> seq_ids =
@@ -467,6 +516,8 @@ void append_walks(CompressedData &data, const AppendInput &input,
   std::vector<int64_t> seq_ends =
       Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
                                      data.walk_lengths.size());
+  validate_unique_walk_keys(existing_sample_ids, hap_indices, seq_ids,
+                            seq_starts, seq_ends, input.walks);
   std::vector<int32_t> flat =
       Codec::zstd_decompress_int32_vector(data.walks_zstd);
 
