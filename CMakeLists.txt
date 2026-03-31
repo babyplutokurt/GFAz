@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Feature toggles
 option(ENABLE_CUDA "Enable GPU acceleration with CUDA" OFF)
 option(ENABLE_PROFILING "Enable gperftools CPU profiling" OFF)
+option(GFAZ_USE_SYSTEM_ZSTD "Use system-installed Zstd instead of vendored copy" OFF)
 set(CUDA_PATH "" CACHE PATH "Root directory of the CUDA Toolkit (e.g., /usr/local/cuda)")
 
 # Find Python with development headers (required for pybind11 + optional nvComp auto-detect)
@@ -123,18 +124,37 @@ if(BUILD_PYTHON_BINDINGS)
   add_subdirectory(extern/pybind11)
 endif()
 
-# Build ZSTD as a static library
-file(GLOB ZSTD_COMMON_SRC extern/zstd/lib/common/*.c)
-file(GLOB ZSTD_COMPRESS_SRC extern/zstd/lib/compress/*.c)
-file(GLOB ZSTD_DECOMPRESS_SRC extern/zstd/lib/decompress/*.c)
+# Configure ZSTD dependency
+if(GFAZ_USE_SYSTEM_ZSTD)
+  find_package(ZSTD QUIET)
+  add_library(gfaz_zstd INTERFACE)
 
-add_library(zstd_static STATIC
-  ${ZSTD_COMMON_SRC}
-  ${ZSTD_COMPRESS_SRC}
-  ${ZSTD_DECOMPRESS_SRC}
-)
-target_include_directories(zstd_static PUBLIC extern/zstd/lib)
-target_compile_definitions(zstd_static PRIVATE ZSTD_DISABLE_ASM)
+  if(ZSTD_FOUND AND TARGET ZSTD::ZSTD)
+    message(STATUS "Using system ZSTD via find_package(ZSTD)")
+    target_link_libraries(gfaz_zstd INTERFACE ZSTD::ZSTD)
+  else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBZSTD REQUIRED IMPORTED_TARGET libzstd)
+    message(STATUS "Using system ZSTD via pkg-config")
+    target_link_libraries(gfaz_zstd INTERFACE PkgConfig::LIBZSTD)
+  endif()
+else()
+  message(STATUS "Using vendored ZSTD")
+  file(GLOB ZSTD_COMMON_SRC extern/zstd/lib/common/*.c)
+  file(GLOB ZSTD_COMPRESS_SRC extern/zstd/lib/compress/*.c)
+  file(GLOB ZSTD_DECOMPRESS_SRC extern/zstd/lib/decompress/*.c)
+
+  add_library(zstd_static STATIC
+    ${ZSTD_COMMON_SRC}
+    ${ZSTD_COMPRESS_SRC}
+    ${ZSTD_DECOMPRESS_SRC}
+  )
+  target_include_directories(zstd_static PUBLIC extern/zstd/lib)
+  target_compile_definitions(zstd_static PRIVATE ZSTD_DISABLE_ASM)
+
+  add_library(gfaz_zstd INTERFACE)
+  target_link_libraries(gfaz_zstd INTERFACE zstd_static)
+endif()
 
 # OpenMP is optional
 find_package(OpenMP)
@@ -171,13 +191,10 @@ set(GFA_CUDA_SOURCES
 function(configure_gfa_target target_name)
   target_include_directories(${target_name} PRIVATE
     include
-    extern/zstd/lib
-    extern/zstd/lib/common
     extern/robin_hood
   )
 
-  target_compile_definitions(${target_name} PRIVATE ZSTD_DISABLE_ASM)
-  target_link_libraries(${target_name} PRIVATE zstd_static)
+  target_link_libraries(${target_name} PRIVATE gfaz_zstd)
 
   if(OpenMP_CXX_FOUND)
     # In odgi BUILD_STATIC=ON builds, linking OpenMP::OpenMP_CXX can inject a
