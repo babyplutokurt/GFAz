@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.30)
+cmake_minimum_required(VERSION 3.15)
 project(GfaCompression LANGUAGES C CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -23,6 +23,10 @@ set(PYBIND11_FINDPYTHON ON)
 # Optional CUDA configuration
 set(NVCOMP_FOUND FALSE)
 if(ENABLE_CUDA)
+  if(CMAKE_VERSION VERSION_LESS 3.23.1)
+    message(FATAL_ERROR "ENABLE_CUDA=ON requires CMake 3.23.1 or newer because extern/cuCollections enforces that minimum.")
+  endif()
+
   # If CUDA_PATH is provided, use it to find nvcc
   if(CUDA_PATH)
     if(EXISTS "${CUDA_PATH}/bin/nvcc")
