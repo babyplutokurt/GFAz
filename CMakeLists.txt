@@ -10,15 +10,26 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(ENABLE_CUDA "Enable GPU acceleration with CUDA" OFF)
 option(ENABLE_PROFILING "Enable gperftools CPU profiling" OFF)
 option(GFAZ_USE_SYSTEM_ZSTD "Use system-installed Zstd instead of vendored copy" OFF)
+option(BUILD_PYTHON_BINDINGS "Build Pybind11 Python bindings" ON)
+option(BUILD_CLI "Build the gfaz CLI executable" ON)
 set(CUDA_PATH "" CACHE PATH "Root directory of the CUDA Toolkit (e.g., /usr/local/cuda)")
 
-# Find Python with development headers (required for pybind11 + optional nvComp auto-detect)
-find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-message(STATUS "Python3 found: ${Python3_EXECUTABLE}")
-message(STATUS "Python3 include: ${Python3_INCLUDE_DIRS}")
+# Python is only required for bindings, or for CUDA nvComp auto-detect.
+if(BUILD_PYTHON_BINDINGS)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+  message(STATUS "Python3 found: ${Python3_EXECUTABLE}")
+  message(STATUS "Python3 include: ${Python3_INCLUDE_DIRS}")
 
-# Tell pybind11 to use the Python we found
-set(PYBIND11_FINDPYTHON ON)
+  # Tell pybind11 to use the Python we found
+  set(PYBIND11_FINDPYTHON ON)
+elseif(ENABLE_CUDA)
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    message(STATUS "Python3 interpreter found for nvComp auto-detect: ${Python3_EXECUTABLE}")
+  else()
+    message(STATUS "Python3 interpreter not found; skipping nvComp Python-package auto-detect")
+  endif()
+endif()
 
 # Optional CUDA configuration
 set(NVCOMP_FOUND FALSE)
@@ -65,7 +76,7 @@ if(ENABLE_CUDA)
   add_subdirectory(extern/cuCollections)
 
   # nvComp (optional): auto-detect root from Python package unless provided
-  if(NOT DEFINED NVCOMP_ROOT)
+  if(NOT DEFINED NVCOMP_ROOT AND Python3_Interpreter_FOUND)
     execute_process(
       COMMAND ${Python3_EXECUTABLE} -c "import nvidia.libnvcomp; import os; print(os.path.dirname(nvidia.libnvcomp.__file__))"
       OUTPUT_VARIABLE NVCOMP_ROOT_AUTO
@@ -119,9 +130,6 @@ else()
   message(STATUS "CUDA disabled - building CPU-only version")
   message(STATUS "To enable GPU support, use: cmake -DENABLE_CUDA=ON ..")
 endif()
-
-option(BUILD_PYTHON_BINDINGS "Build Pybind11 Python bindings" ON)
-option(BUILD_CLI "Build the gfaz CLI executable" ON)
 
 # Third-party dependencies
 if(BUILD_PYTHON_BINDINGS)
