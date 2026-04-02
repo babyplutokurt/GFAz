@@ -76,7 +76,11 @@ struct ContainmentData {
 struct GfaGraph {
   std::string header_line;
 
-  // Segments (S-lines) - index 0 is placeholder for 1-based node IDs
+  // Segments (S-lines) - index 0 is placeholder for 1-based node IDs.
+  // In the CPU .gfaz format, decompression intentionally reconstructs
+  // segments with dense numeric names "1", "2", ..., so original segment
+  // names are not preserved there. The graph model still stores names because
+  // the parser and writer operate on full-fidelity in-memory GFAs.
   std::unordered_map<std::string, uint32_t> node_name_to_id;
   std::vector<std::string> node_id_to_name;
   std::vector<std::string> node_sequences;

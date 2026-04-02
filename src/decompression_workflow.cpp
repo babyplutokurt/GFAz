@@ -442,7 +442,10 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
       Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
 #endif
 
-  // Reconstruct segments (index 0 is placeholder for 1-based IDs)
+  // Reconstruct segments (index 0 is placeholder for 1-based IDs).
+  // CPU .gfaz intentionally restores dense numeric names instead of original
+  // segment names, because the serialized CPU representation stores segments
+  // by implicit 1-based ID order only.
   graph.node_id_to_name.push_back("");
   graph.node_sequences.push_back("");
 
