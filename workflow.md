@@ -2,6 +2,8 @@
 
 This document describes the current end-to-end data flow for CPU and GPU paths.
 
+See also [backend_schema_map.md](/home/kurty/Release/gfa_compression/backend_schema_map.md) for a field-by-field mapping of `GfaGraph`, `CompressedData`, `GfaGraph_gpu`, and `CompressedData_gpu`.
+
 ## High-Level Pipelines
 
 ### CPU pipeline
