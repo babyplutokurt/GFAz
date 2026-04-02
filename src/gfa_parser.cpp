@@ -2,12 +2,12 @@
 #include "debug_log.hpp"
 #include "threading_utils.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
-#include <fstream>
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -121,6 +121,18 @@ inline std::string_view next_field(std::string_view line, size_t &pos) {
   return line.substr(start, pos - start);
 }
 
+inline uint32_t parse_overlap_num(std::string_view overlap_view, char &op) {
+  uint32_t num = 0;
+  size_t i = 0;
+  while (i < overlap_view.size() &&
+         std::isdigit(static_cast<unsigned char>(overlap_view[i]))) {
+    num = num * 10 + static_cast<uint32_t>(overlap_view[i] - '0');
+    ++i;
+  }
+  op = (i < overlap_view.size()) ? overlap_view[i] : '\0';
+  return num;
+}
+
 } // namespace
 
 GfaParser::GfaParser() = default;
@@ -138,13 +150,17 @@ bool GfaParser::is_numeric(std::string_view s) {
 GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   ScopedOMPThreads omp_scope(num_threads);
   GfaGraph graph;
+  segment_field_meta_.clear();
+  link_field_meta_.clear();
+  node_name_lookup_.clear();
+  num_segments_hint_ = 0;
+  num_links_hint_ = 0;
+  all_segment_names_numeric_ = true;
 
   // Index 0 is a placeholder to support 1-based node IDs.
   // This allows NodeId sign to encode orientation without ambiguity.
   graph.node_id_to_name.push_back("");
   graph.node_sequences.push_back("");
-
-  prescan_optional_fields(gfa_file_path, graph);
 
   int fd = open(gfa_file_path.c_str(), O_RDONLY);
   if (fd == -1) {
@@ -211,6 +227,36 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
     }
   }
 
+  num_segments_hint_ = s_offsets.size();
+  num_links_hint_ = l_offsets.size();
+
+  graph.node_id_to_name.reserve(num_segments_hint_ + 1);
+  graph.node_sequences.reserve(num_segments_hint_ + 1);
+  graph.node_name_to_id.reserve(num_segments_hint_);
+  node_name_lookup_.reserve(num_segments_hint_);
+
+  graph.links.from_ids.reserve(num_links_hint_);
+  graph.links.to_ids.reserve(num_links_hint_);
+  graph.links.from_orients.reserve(num_links_hint_);
+  graph.links.to_orients.reserve(num_links_hint_);
+  graph.links.overlap_nums.reserve(num_links_hint_);
+  graph.links.overlap_ops.reserve(num_links_hint_);
+
+  graph.jumps.from_ids.reserve(j_offsets.size());
+  graph.jumps.from_orients.reserve(j_offsets.size());
+  graph.jumps.to_ids.reserve(j_offsets.size());
+  graph.jumps.to_orients.reserve(j_offsets.size());
+  graph.jumps.distances.reserve(j_offsets.size());
+  graph.jumps.rest_fields.reserve(j_offsets.size());
+
+  graph.containments.container_ids.reserve(c_offsets.size());
+  graph.containments.container_orients.reserve(c_offsets.size());
+  graph.containments.contained_ids.reserve(c_offsets.size());
+  graph.containments.contained_orients.reserve(c_offsets.size());
+  graph.containments.positions.reserve(c_offsets.size());
+  graph.containments.overlaps.reserve(c_offsets.size());
+  graph.containments.rest_fields.reserve(c_offsets.size());
+
   // Phase 1: Parse S-lines (sequential - must populate node_name_to_id first)
   for (const auto &off : s_offsets) {
     std::string_view line(mmap_data + off.offset, off.length);
@@ -219,16 +265,6 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
 
   // Pad optional field columns to segment count
   size_t num_segments = graph.node_id_to_name.size() - 1;
-  for (auto &col : graph.segment_optional_fields) {
-    if (col.type == 'Z' || col.type == 'J' || col.type == 'H') {
-      auto it = string_field_stats_.find(col.tag);
-      if (it != string_field_stats_.end() && it->second.second > 0) {
-        size_t avg_len = it->second.first / it->second.second;
-        col.concatenated_strings.reserve(avg_len * num_segments);
-      }
-    }
-  }
-
   for (auto &col : graph.segment_optional_fields) {
     switch (col.type) {
     case 'i':
@@ -357,68 +393,14 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   return graph;
 }
 
-void GfaParser::prescan_optional_fields(const std::string &gfa_file_path,
-                                        GfaGraph &graph) {
-  std::ifstream file(gfa_file_path);
-  if (!file.is_open()) {
-    throw std::runtime_error(std::string(kParserErrorPrefix) +
-                             "failed to open file for optional field scan '" +
-                             gfa_file_path + "'");
-  }
-
-  segment_field_meta_.clear();
-  string_field_stats_.clear();
-
-  std::string line;
-  int s_line_count = 0;
-  const int max_scan_lines = 100;
-
-  while (std::getline(file, line) && s_line_count < max_scan_lines) {
-    if (line.empty() || line[0] != 'S')
-      continue;
-    s_line_count++;
-
-    std::istringstream iss(line);
-    std::string type_str, name, sequence, field;
-    iss >> type_str >> name >> sequence;
-
-    while (iss >> field) {
-      if (field.size() < 5 || field[2] != ':' || field[4] != ':')
-        continue;
-
-      std::string tag = field.substr(0, 2);
-      char type = field[3];
-
-      if (segment_field_meta_.find(tag) == segment_field_meta_.end()) {
-        size_t col_index = graph.segment_optional_fields.size();
-        segment_field_meta_[tag] = {type, col_index};
-
-        OptionalFieldColumn col;
-        col.tag = tag;
-        col.type = type;
-        graph.segment_optional_fields.push_back(col);
-      }
-
-      if (type == 'Z' || type == 'J' || type == 'H') {
-        std::string value = field.substr(5);
-        auto &stat = string_field_stats_[tag];
-        stat.first += value.size();
-        stat.second += 1;
-      }
-    }
-  }
-}
-
 void GfaParser::parse_s_line(std::string_view line, GfaGraph &graph) {
   size_t pos = 1;
   std::string_view node_name_view = next_field(line, pos);
   std::string_view sequence_view = next_field(line, pos);
 
-  std::string node_name(node_name_view);
-  std::string sequence(sequence_view);
-
   size_t segment_index = 0;
-  if (graph.node_name_to_id.find(node_name) == graph.node_name_to_id.end()) {
+  auto lookup_it = node_name_lookup_.find(node_name_view);
+  if (lookup_it == node_name_lookup_.end()) {
     if (all_segment_names_numeric_ && !is_numeric(node_name_view))
       all_segment_names_numeric_ = false;
 
@@ -426,18 +408,19 @@ void GfaParser::parse_s_line(std::string_view line, GfaGraph &graph) {
 
     // Validate fast-path: numeric segment names must match their assigned IDs
     if (all_segment_names_numeric_) {
-      uint32_t numeric_name =
-          static_cast<uint32_t>(std::strtoul(node_name.c_str(), nullptr, 10));
+      uint32_t numeric_name = parse_uint32(node_name_view);
       if (numeric_name != new_id)
         all_segment_names_numeric_ = false;
     }
 
+    std::string node_name(node_name_view);
     graph.node_name_to_id[node_name] = new_id;
     graph.node_id_to_name.push_back(node_name);
-    graph.node_sequences.push_back(sequence);
+    graph.node_sequences.emplace_back(sequence_view);
+    node_name_lookup_.emplace(graph.node_id_to_name.back(), new_id);
     segment_index = new_id - 1;
   } else {
-    segment_index = graph.node_name_to_id[node_name] - 1;
+    segment_index = lookup_it->second - 1;
   }
 
   while (pos < line.size()) {
@@ -456,17 +439,13 @@ void GfaParser::parse_l_line(std::string_view line, GfaGraph &graph) {
   std::string_view to_orient_view = next_field(line, pos);
   std::string_view overlap_view = next_field(line, pos);
 
-  std::string from_name(from_name_view);
-  std::string to_name(to_name_view);
-
-  auto from_it = graph.node_name_to_id.find(from_name);
-  auto to_it = graph.node_name_to_id.find(to_name);
-  if (from_it == graph.node_name_to_id.end() ||
-      to_it == graph.node_name_to_id.end())
+  uint32_t from_id = resolve_node_id(from_name_view);
+  uint32_t to_id = resolve_node_id(to_name_view);
+  if (from_id == 0 || to_id == 0)
     return;
 
-  graph.links.from_ids.push_back(from_it->second);
-  graph.links.to_ids.push_back(to_it->second);
+  graph.links.from_ids.push_back(from_id);
+  graph.links.to_ids.push_back(to_id);
   graph.links.from_orients.push_back(
       from_orient_view.empty() ? '+' : from_orient_view[0]);
   graph.links.to_orients.push_back(to_orient_view.empty() ? '+'
@@ -476,16 +455,8 @@ void GfaParser::parse_l_line(std::string_view line, GfaGraph &graph) {
     graph.links.overlap_nums.push_back(0);
     graph.links.overlap_ops.push_back('\0');
   } else {
-    uint32_t num = 0;
     char op = '\0';
-    size_t i = 0;
-    while (i < overlap_view.size() && std::isdigit(overlap_view[i])) {
-      num = num * 10 + (overlap_view[i] - '0');
-      ++i;
-    }
-    if (i < overlap_view.size())
-      op = overlap_view[i];
-    graph.links.overlap_nums.push_back(num);
+    graph.links.overlap_nums.push_back(parse_overlap_num(overlap_view, op));
     graph.links.overlap_ops.push_back(op);
   }
 
@@ -522,6 +493,7 @@ void GfaParser::parse_p_line(std::string_view line, GfaGraph &graph,
   std::string overlaps(line.substr(pos));
 
   std::vector<NodeId> path;
+  path.reserve(1 + std::count(nodes_str.begin(), nodes_str.end(), ','));
   size_t node_start = 0;
 
   for (size_t i = 0; i <= nodes_str.size(); ++i) {
@@ -534,23 +506,8 @@ void GfaParser::parse_p_line(std::string_view line, GfaGraph &graph,
           std::string_view node_name_view =
               node_with_orient.substr(0, node_with_orient.size() - 1);
 
-          uint32_t node_id = 0;
-          bool found = false;
-
-          if (all_segment_names_numeric_) {
-            for (char c : node_name_view)
-              node_id = node_id * 10 + (c - '0');
-            found = true;
-          } else {
-            std::string node_name(node_name_view);
-            auto it = graph.node_name_to_id.find(node_name);
-            if (it != graph.node_name_to_id.end()) {
-              node_id = it->second;
-              found = true;
-            }
-          }
-
-          if (found) {
+          uint32_t node_id = resolve_node_id(node_name_view);
+          if (node_id != 0) {
             NodeId oriented_node_id = node_id;
             if (orientation == '-')
               oriented_node_id = -node_id;
@@ -562,7 +519,6 @@ void GfaParser::parse_p_line(std::string_view line, GfaGraph &graph,
     }
   }
 
-  path.shrink_to_fit();
   graph.paths[index] = std::move(path);
   graph.path_names[index] = std::move(path_name);
   graph.path_overlaps[index] = std::move(overlaps);
@@ -579,6 +535,12 @@ void GfaParser::parse_w_line(std::string_view line, GfaGraph &graph,
   std::string_view walk_str = next_field(line, pos);
 
   std::vector<NodeId> walk;
+  size_t walk_steps = 0;
+  for (char c : walk_str) {
+    if (c == '>' || c == '<')
+      ++walk_steps;
+  }
+  walk.reserve(walk_steps);
   size_t walk_pos = 0;
 
   while (walk_pos < walk_str.size()) {
@@ -598,23 +560,8 @@ void GfaParser::parse_w_line(std::string_view line, GfaGraph &graph,
       std::string_view node_name_view =
           walk_str.substr(name_start, name_end - name_start);
 
-      uint32_t node_id = 0;
-      bool found = false;
-
-      if (all_segment_names_numeric_) {
-        for (char c : node_name_view)
-          node_id = node_id * 10 + (c - '0');
-        found = true;
-      } else {
-        std::string node_name(node_name_view);
-        auto it = graph.node_name_to_id.find(node_name);
-        if (it != graph.node_name_to_id.end()) {
-          node_id = it->second;
-          found = true;
-        }
-      }
-
-      if (found) {
+      uint32_t node_id = resolve_node_id(node_name_view);
+      if (node_id != 0) {
         NodeId oriented_node_id = node_id;
         if (orient_char == '<')
           oriented_node_id = -node_id;
@@ -625,7 +572,6 @@ void GfaParser::parse_w_line(std::string_view line, GfaGraph &graph,
     walk_pos = name_end;
   }
 
-  walk.shrink_to_fit();
   graph.walks.walks[index] = std::move(walk);
   graph.walks.sample_ids[index] = std::string(sample_id_view);
   graph.walks.hap_indices[index] = 0;
@@ -644,28 +590,41 @@ void GfaParser::parse_segment_field(std::string_view field,
   if (field.size() < 5 || field[2] != ':' || field[4] != ':')
     return;
 
-  std::string tag(field.substr(0, 2));
+  uint16_t tag_key = field_tag_key(field);
   char type = field[3];
   std::string_view value_view = field.substr(5);
 
-  auto it = segment_field_meta_.find(tag);
+  auto it = segment_field_meta_.find(tag_key);
   if (it == segment_field_meta_.end()) {
     size_t col_index = graph.segment_optional_fields.size();
-    segment_field_meta_[tag] = {type, col_index};
+    segment_field_meta_[tag_key] = {type, col_index};
 
     OptionalFieldColumn col;
-    col.tag = tag;
+    col.tag = std::string(field.substr(0, 2));
     col.type = type;
+    if (type == 'i')
+      col.int_values.reserve(num_segments_hint_);
+    else if (type == 'f')
+      col.float_values.reserve(num_segments_hint_);
+    else if (type == 'A')
+      col.char_values.reserve(num_segments_hint_);
+    else if (type == 'Z' || type == 'J' || type == 'H')
+      col.string_lengths.reserve(num_segments_hint_);
+    else if (type == 'B') {
+      col.b_subtypes.reserve(num_segments_hint_);
+      col.b_lengths.reserve(num_segments_hint_);
+    }
     graph.segment_optional_fields.push_back(col);
 
-    it = segment_field_meta_.find(tag);
+    it = segment_field_meta_.find(tag_key);
   }
 
   char expected_type = it->second.first;
   size_t col_index = it->second.second;
 
   if (type != expected_type) {
-    throw std::runtime_error("Type mismatch for tag '" + tag + "': expected '" +
+    throw std::runtime_error("Type mismatch for tag '" + graph.segment_optional_fields[col_index].tag +
+                             "': expected '" +
                              std::string(1, expected_type) + "', got '" +
                              std::string(1, type) + "'");
   }
@@ -790,7 +749,7 @@ void GfaParser::parse_segment_field(std::string_view field,
 
   default:
     std::cerr << kParserWarningPrefix << "unsupported optional field type '"
-              << type << "' for tag '" << tag << "'" << std::endl;
+              << type << "' for tag '" << col.tag << "'" << std::endl;
     break;
   }
 }
@@ -800,31 +759,44 @@ void GfaParser::parse_link_field(std::string_view field, size_t link_index,
   if (field.size() < 5 || field[2] != ':' || field[4] != ':')
     return;
 
-  std::string tag(field.substr(0, 2));
+  uint16_t tag_key = field_tag_key(field);
   char type = field[3];
   std::string_view value_view = field.substr(5);
 
-  auto it = link_field_meta_.find(tag);
+  auto it = link_field_meta_.find(tag_key);
   if (it == link_field_meta_.end()) {
     size_t col_index = graph.link_optional_fields.size();
-    link_field_meta_[tag] = {type, col_index};
+    link_field_meta_[tag_key] = {type, col_index};
 
     OptionalFieldColumn col;
-    col.tag = tag;
+    col.tag = std::string(field.substr(0, 2));
     col.type = type;
+    if (type == 'i')
+      col.int_values.reserve(num_links_hint_);
+    else if (type == 'f')
+      col.float_values.reserve(num_links_hint_);
+    else if (type == 'A')
+      col.char_values.reserve(num_links_hint_);
+    else if (type == 'Z' || type == 'J' || type == 'H')
+      col.string_lengths.reserve(num_links_hint_);
+    else if (type == 'B') {
+      col.b_subtypes.reserve(num_links_hint_);
+      col.b_lengths.reserve(num_links_hint_);
+    }
     graph.link_optional_fields.push_back(col);
 
     GFAZ_LOG("Discovered link optional field: "
-             << tag << " (type: " << type << ") at link index " << link_index);
+             << col.tag << " (type: " << type << ") at link index " << link_index);
 
-    it = link_field_meta_.find(tag);
+    it = link_field_meta_.find(tag_key);
   }
 
   char expected_type = it->second.first;
   size_t col_index = it->second.second;
 
   if (type != expected_type) {
-    throw std::runtime_error("Type mismatch for link tag '" + tag +
+    throw std::runtime_error("Type mismatch for link tag '" +
+                             graph.link_optional_fields[col_index].tag +
                              "': expected '" + std::string(1, expected_type) +
                              "', got '" + std::string(1, type) + "'");
   }
@@ -950,7 +922,8 @@ void GfaParser::parse_link_field(std::string_view field, size_t link_index,
   default:
     std::cerr << kParserWarningPrefix
               << "unsupported link optional field type '" << type
-              << "' for tag '" << tag << "'" << std::endl;
+              << "' for tag '" << graph.link_optional_fields[col_index].tag
+              << "'" << std::endl;
     break;
   }
 }
@@ -965,19 +938,15 @@ void GfaParser::parse_j_line(std::string_view line, GfaGraph &graph) {
   std::string_view to_orient_view = next_field(line, pos);
   std::string_view distance_view = next_field(line, pos);
 
-  std::string from_name(from_name_view);
-  std::string to_name(to_name_view);
-
-  auto from_it = graph.node_name_to_id.find(from_name);
-  auto to_it = graph.node_name_to_id.find(to_name);
-  if (from_it == graph.node_name_to_id.end() ||
-      to_it == graph.node_name_to_id.end())
+  uint32_t from_id = resolve_node_id(from_name_view);
+  uint32_t to_id = resolve_node_id(to_name_view);
+  if (from_id == 0 || to_id == 0)
     return;
 
-  graph.jumps.from_ids.push_back(from_it->second);
+  graph.jumps.from_ids.push_back(from_id);
   graph.jumps.from_orients.push_back(
       from_orient_view.empty() ? '+' : from_orient_view[0]);
-  graph.jumps.to_ids.push_back(to_it->second);
+  graph.jumps.to_ids.push_back(to_id);
   graph.jumps.to_orients.push_back(to_orient_view.empty() ? '+'
                                                           : to_orient_view[0]);
   graph.jumps.distances.emplace_back(distance_view);
@@ -1006,19 +975,15 @@ void GfaParser::parse_c_line(std::string_view line, GfaGraph &graph) {
   std::string_view position_view = next_field(line, pos);
   std::string_view overlap_view = next_field(line, pos);
 
-  std::string container_name(container_view);
-  std::string contained_name(contained_view);
-
-  auto container_it = graph.node_name_to_id.find(container_name);
-  auto contained_it = graph.node_name_to_id.find(contained_name);
-  if (container_it == graph.node_name_to_id.end() ||
-      contained_it == graph.node_name_to_id.end())
+  uint32_t container_id = resolve_node_id(container_view);
+  uint32_t contained_id = resolve_node_id(contained_view);
+  if (container_id == 0 || contained_id == 0)
     return;
 
-  graph.containments.container_ids.push_back(container_it->second);
+  graph.containments.container_ids.push_back(container_id);
   graph.containments.container_orients.push_back(
       container_orient_view.empty() ? '+' : container_orient_view[0]);
-  graph.containments.contained_ids.push_back(contained_it->second);
+  graph.containments.contained_ids.push_back(contained_id);
   graph.containments.contained_orients.push_back(
       contained_orient_view.empty() ? '+' : contained_orient_view[0]);
   graph.containments.positions.push_back(parse_uint32(position_view));
@@ -1035,4 +1000,20 @@ void GfaParser::parse_c_line(std::string_view line, GfaGraph &graph) {
     rest.append(field.data(), field.size());
   }
   graph.containments.rest_fields.push_back(std::move(rest));
+}
+
+uint32_t GfaParser::resolve_node_id(std::string_view node_name_view) const {
+  if (node_name_view.empty())
+    return 0;
+
+  if (all_segment_names_numeric_)
+    return parse_uint32(node_name_view);
+
+  auto it = node_name_lookup_.find(node_name_view);
+  return (it == node_name_lookup_.end()) ? 0 : it->second;
+}
+
+uint16_t GfaParser::field_tag_key(std::string_view field) {
+  return (static_cast<uint16_t>(static_cast<unsigned char>(field[0])) << 8) |
+         static_cast<uint16_t>(static_cast<unsigned char>(field[1]));
 }
