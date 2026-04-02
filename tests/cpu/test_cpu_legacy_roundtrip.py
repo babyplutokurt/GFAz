@@ -10,8 +10,12 @@ import argparse
 import os
 import sys
 import tempfile
+from pathlib import Path
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "build"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tests._bootstrap import add_build_to_syspath
+add_build_to_syspath()
 import gfa_compression as gfa_lib
 
 

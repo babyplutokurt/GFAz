@@ -10,7 +10,12 @@ import os
 import sys
 import tempfile
 import time
-sys.path.insert(0, 'build')
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tests._bootstrap import add_build_to_syspath
+add_build_to_syspath()
 
 import gfa_compression as gfac
 
@@ -239,7 +244,7 @@ def test_gpu_roundtrip(gfa_file):
 def main():
     """Main entry point"""
     if len(sys.argv) < 2:
-        print("Usage: python test_gpu_roundtrip.py <gfa_file>")
+        print("Usage: python tests/gpu/test_roundtrip.py <gfa_file>")
         print()
         print("Tests the full GPU round-trip:")
         print("  GfaGraph → GfaGraph_gpu → CompressedData_gpu → GfaGraph_gpu")

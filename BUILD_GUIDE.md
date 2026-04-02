@@ -31,6 +31,23 @@ Related standard CMake options you may set:
   - If found, GPU metadata/path block compression uses nvComp ZSTD.
   - If not found, GPU code falls back to CPU ZSTD-compatible path where implemented.
 
+## Environment Setup
+
+Example Conda setup:
+
+```bash
+conda create -n gfa python=3.11
+conda activate gfa
+conda install -c conda-forge pybind11 numpy
+```
+
+Additional GPU-related packages used in some environments:
+
+```bash
+conda install -c conda-forge nvcomp
+pip install nvidia-libnvcomp-cu12
+```
+
 ## Build Instructions
 
 ```bash

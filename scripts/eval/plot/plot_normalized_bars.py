@@ -6,7 +6,7 @@ Input: multiple per-dataset CSV files, each with columns:
   Compressor,Ratio,Compression_Speed_MBps,Decompression_Speed_MBps
 
 Example:
-  python scripts/plot_eval_norm.py --csv_glob "csv/*.csv" --outdir figs_norm
+  python scripts/eval/plot/plot_normalized_bars.py --csv_glob "csv/*.csv" --outdir figs_norm
 
 Outputs (PDF):
   figs_norm/fig_ratio_norm.pdf
