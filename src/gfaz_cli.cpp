@@ -54,6 +54,8 @@ OPTIONS (compress):
 
 OPTIONS (decompress):
     -j, --threads <N>       Number of threads (default: 0 = auto)
+    -l, --legacy            Use the legacy CPU path:
+                             CompressedData -> GfaGraph -> write_gfa
     -g, --gpu               Use GPU backend (if available)
                              Note: GPU mode ignores --threads
     -h, --help              Show this help message
@@ -185,6 +187,8 @@ USAGE:
 
 OPTIONS:
     -j, --threads <N>       Number of threads (default: 0 = auto)
+    -l, --legacy            Use the legacy CPU path:
+                             CompressedData -> GfaGraph -> write_gfa
     -g, --gpu               Use GPU backend (if available)
                              Note: GPU mode ignores --threads
     -h, --help              Show this help message
@@ -195,6 +199,8 @@ EXAMPLES:
     gfaz decompress input.gfaz output.gfa
 
 In CPU-only builds, --gpu prints a warning and uses CPU backend.
+By default, CPU decompression writes GFA directly from CompressedData with
+lower peak path/walk memory. Use --legacy to force the old in-memory path.
 
 )";
 }
@@ -331,18 +337,23 @@ int do_compress(int argc, char *argv[]) {
 int do_decompress(int argc, char *argv[]) {
   int num_threads = kDefaultNumThreads;
   bool use_gpu = false;
+  bool use_legacy = false;
 
   static struct option long_options[] = {{"threads", required_argument, 0, 'j'},
+                                         {"legacy", no_argument, 0, 'l'},
                                          {"gpu", no_argument, 0, 'g'},
                                          {"help", no_argument, 0, 'h'},
                                          {0, 0, 0, 0}};
 
   int opt;
   optind = 1;
-  while ((opt = getopt_long(argc, argv, "j:gh", long_options, nullptr)) != -1) {
+  while ((opt = getopt_long(argc, argv, "j:lgh", long_options, nullptr)) != -1) {
     switch (opt) {
     case 'j':
       num_threads = std::stoi(optarg);
+      break;
+    case 'l':
+      use_legacy = true;
       break;
     case 'g':
       use_gpu = true;
@@ -400,6 +411,14 @@ int do_decompress(int argc, char *argv[]) {
   std::cout << "Input:  " << input_path << std::endl;
   std::cout << "Output: " << output_path << std::endl;
   std::cout << "Backend: " << (use_gpu ? "GPU" : "CPU") << std::endl;
+#ifdef ENABLE_CUDA
+  if (!use_gpu) {
+#endif
+    std::cout << "Mode:   " << (use_legacy ? "legacy in-memory" : "streaming direct-writer")
+              << std::endl;
+#ifdef ENABLE_CUDA
+  }
+#endif
   if (num_threads == 0) {
     std::cout << "Threads: auto (" << resolve_omp_thread_count(0) << ")"
               << std::endl;
@@ -419,9 +438,13 @@ int do_decompress(int argc, char *argv[]) {
     } else {
 #endif
       CompressedData data = deserialize_compressed_data(input_path);
-      GfaGraph graph;
-      decompress_gfa(data, graph, num_threads);
-      write_gfa(graph, output_path);
+      if (use_legacy) {
+        GfaGraph graph;
+        decompress_gfa(data, graph, num_threads);
+        write_gfa(graph, output_path);
+      } else {
+        write_gfa_from_compressed_data(data, output_path, num_threads);
+      }
 #ifdef ENABLE_CUDA
     }
 #endif

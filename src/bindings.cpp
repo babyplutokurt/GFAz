@@ -582,6 +582,10 @@ PYBIND11_MODULE(gfa_compression, m) {
 
   m.def("write_gfa", &write_gfa, "Write GfaGraph to GFA file", py::arg("graph"),
         py::arg("output_path"));
+  m.def("write_gfa_from_compressed_data", &write_gfa_from_compressed_data,
+        "Write GFA directly from CompressedData without materializing full path/walk vectors",
+        py::arg("data"), py::arg("output_path"),
+        py::arg("num_threads") = kDefaultNumThreads);
   m.def("extract_path_line", &extract_path_line_by_name,
         "Extract a single P-line from CompressedData", py::arg("data"),
         py::arg("path_name"),

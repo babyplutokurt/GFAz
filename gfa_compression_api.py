@@ -121,6 +121,22 @@ class GFACompressor:
         gfa_lib.write_gfa(graph, output_path)
         return output_path
 
+    def write_gfa_direct(self, output_path: str = None, num_threads: int = None):
+        """Write GFA directly from CompressedData with lower peak traversal memory."""
+        if not self.is_compressed:
+            print("Error: No compressed data. Call compress() first or load a .gfaz file.")
+            return None
+
+        if output_path is None:
+            if self.gfa_file_path:
+                output_path = self.gfa_file_path + ".decompressed"
+            else:
+                raise ValueError("No output path specified")
+
+        threads = num_threads if num_threads is not None else 0
+        gfa_lib.write_gfa_from_compressed_data(self.compressed_data, output_path, threads)
+        return output_path
+
     def verify(self, decompressed_graph):
         """Verify decompressed graph by re-parsing the original file."""
         if not self.gfa_file_path:
