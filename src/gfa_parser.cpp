@@ -7,10 +7,14 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <fcntl.h>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <string>
+#include <string_view>
 #include <stdexcept>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -24,6 +28,67 @@ namespace {
 
 constexpr const char *kParserErrorPrefix = "GFA parser error: ";
 constexpr const char *kParserWarningPrefix = "GFA parser warning: ";
+
+struct ProcessMemorySnapshot {
+  size_t vm_rss_kb = 0;
+  size_t vm_hwm_kb = 0;
+};
+
+std::string format_memory_size(size_t bytes) {
+  std::ostringstream oss;
+  if (bytes >= 1024 * 1024)
+    oss << std::fixed << std::setprecision(2) << (bytes / (1024.0 * 1024.0))
+        << " MB";
+  else if (bytes >= 1024)
+    oss << std::fixed << std::setprecision(1) << (bytes / 1024.0) << " KB";
+  else
+    oss << bytes << " Bytes";
+  return oss.str();
+}
+
+ProcessMemorySnapshot read_process_memory_snapshot() {
+  ProcessMemorySnapshot snapshot;
+
+  std::ifstream status("/proc/self/status");
+  if (!status)
+    return snapshot;
+
+  std::string line;
+  while (std::getline(status, line)) {
+    auto parse_kb_field = [&](const char *prefix, size_t &out_value) {
+      const std::string_view view(line);
+      const std::string_view key(prefix);
+      if (view.size() < key.size() || view.substr(0, key.size()) != key)
+        return false;
+
+      std::istringstream iss(std::string(view.substr(key.size())));
+      size_t value = 0;
+      std::string unit;
+      if (iss >> value >> unit) {
+        out_value = value;
+        return true;
+      }
+      return false;
+    };
+
+    if (parse_kb_field("VmRSS:", snapshot.vm_rss_kb))
+      continue;
+    parse_kb_field("VmHWM:", snapshot.vm_hwm_kb);
+  }
+
+  return snapshot;
+}
+
+void log_parser_memory_checkpoint(const std::string &label) {
+  if (!gfaz_debug_enabled())
+    return;
+
+  const ProcessMemorySnapshot snapshot = read_process_memory_snapshot();
+  std::cerr << "[GfaParser][Memory] " << label
+            << " | VmRSS=" << format_memory_size(snapshot.vm_rss_kb * 1024)
+            << " | VmHWM=" << format_memory_size(snapshot.vm_hwm_kb * 1024)
+            << std::endl;
+}
 
 inline int64_t parse_int64(std::string_view s) {
   if (s.empty())
@@ -226,6 +291,7 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
       line_start = i + 1;
     }
   }
+  log_parser_memory_checkpoint("after line classification");
 
   num_segments_hint_ = s_offsets.size();
   num_links_hint_ = l_offsets.size();
@@ -256,6 +322,7 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   graph.containments.positions.reserve(c_offsets.size());
   graph.containments.overlaps.reserve(c_offsets.size());
   graph.containments.rest_fields.reserve(c_offsets.size());
+  log_parser_memory_checkpoint("after reserve");
 
   // Phase 1: Parse S-lines (sequential - must populate node_name_to_id first)
   for (const auto &off : s_offsets) {
@@ -301,6 +368,10 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
                 << " optional columns)";
     std::cerr << std::endl;
   }
+  log_parser_memory_checkpoint("after S-lines");
+  s_offsets.clear();
+  s_offsets.shrink_to_fit();
+  log_parser_memory_checkpoint("after clearing S offsets");
 
   // Phase 2: Parse L-lines (sequential)
   for (const auto &off : l_offsets) {
@@ -338,6 +409,10 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
       break;
     }
   }
+  log_parser_memory_checkpoint("after L-lines");
+  l_offsets.clear();
+  l_offsets.shrink_to_fit();
+  log_parser_memory_checkpoint("after clearing L offsets");
 
   // Phase 3: Parse P/W-lines (parallel - each writes to pre-allocated index)
   graph.paths.resize(p_offsets.size());
@@ -366,6 +441,12 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
     std::string_view line(mmap_data + w_offsets[i].offset, w_offsets[i].length);
     parse_w_line(line, graph, i);
   }
+  log_parser_memory_checkpoint("after P/W lines");
+  p_offsets.clear();
+  p_offsets.shrink_to_fit();
+  w_offsets.clear();
+  w_offsets.shrink_to_fit();
+  log_parser_memory_checkpoint("after clearing P/W offsets");
 
   // Phase 4: Parse J/C lines (after S-lines, so node_name_to_id is populated)
   for (const auto &off : j_offsets) {
@@ -377,9 +458,16 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
     std::string_view line(mmap_data + off.offset, off.length);
     parse_c_line(line, graph);
   }
+  log_parser_memory_checkpoint("after J/C lines");
+  j_offsets.clear();
+  j_offsets.shrink_to_fit();
+  c_offsets.clear();
+  c_offsets.shrink_to_fit();
+  log_parser_memory_checkpoint("after clearing J/C offsets");
 
   munmap(const_cast<char *>(mmap_data), file_size);
   close(fd);
+  log_parser_memory_checkpoint("after munmap");
 
   if (gfaz_debug_enabled()) {
     std::cerr << "Parsed " << num_links << " links, " << graph.paths.size()
