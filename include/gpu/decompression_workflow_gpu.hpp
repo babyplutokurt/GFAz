@@ -37,6 +37,8 @@ FlattenedPaths decompress_paths_gpu(const gpu_compression::CompressedData_gpu& d
  */
 GfaGraph_gpu decompress_to_gpu_layout(const gpu_compression::CompressedData_gpu& data);
 
+void set_gpu_decompression_debug(bool enabled);
+
 } // namespace gpu_decompression
 
 #endif // DECOMPRESSION_WORKFLOW_GPU_HPP

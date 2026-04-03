@@ -16,6 +16,10 @@ namespace gpu_decompression {
 static bool g_debug_decompression = false;
 using Clock = std::chrono::high_resolution_clock;
 
+void set_gpu_decompression_debug(bool enabled) {
+  g_debug_decompression = enabled;
+}
+
 static double elapsed_ms(const Clock::time_point &start,
                          const Clock::time_point &end) {
   return std::chrono::duration<double, std::milli>(end - start).count();

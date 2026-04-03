@@ -184,9 +184,13 @@ def test_gpu_roundtrip(gfa_file):
 
     t_decompress_start = None
     t_decompress_end = None
+    t_serialize_start = None
+    t_serialize_end = None
 
     try:
+        t_serialize_start = time.time()
         gfac.serialize_gpu(compressed, tmp_path)
+        t_serialize_end = time.time()
         print("  ✓ Serialized")
 
         print_step(5, "Load temp file and decompress to GfaGraph_gpu...")
@@ -216,7 +220,7 @@ def test_gpu_roundtrip(gfa_file):
     print_step(7, "Results")
     
     if success:
-        print_header("✓ GPU ROUND-TRIP TEST PASSED!")
+        print_header("✅ GPU ROUND-TRIP TEST PASSED!")
         print(f"  GfaGraph → GfaGraph_gpu → CompressedData_gpu → GfaGraph_gpu")
         print(f"  All {gpu_graph_original.num_segments:,} segments verified")
         print(f"  All {gpu_graph_original.num_paths:,} paths verified ({gpu_graph_original.paths.total_nodes():,} nodes)")
@@ -231,11 +235,16 @@ def test_gpu_roundtrip(gfa_file):
         print(f"    - Parse:       {t_parse_end - t_parse_start:.3f}s")
         print(f"    - Convert:     {t_convert_end - t_convert_start:.3f}s")
         print(f"    - Compress:    {t_compress_end - t_compress_start:.3f}s")
+        print(f"    - Serialize:   {t_serialize_end - t_serialize_start:.3f}s")
         print(f"    - Decompress:  {t_decompress_end - t_decompress_start:.3f}s")
+        print(
+            f"    - Total:       "
+            f"{(t_parse_end - t_parse_start) + (t_convert_end - t_convert_start) + (t_compress_end - t_compress_start) + (t_serialize_end - t_serialize_start) + (t_decompress_end - t_decompress_start):.3f}s"
+        )
         print("=" * 70)
         return True
     else:
-        print_header("✗ GPU ROUND-TRIP TEST FAILED!")
+        print_header("❌ GPU ROUND-TRIP TEST FAILED!")
         print("  See error messages above for details.")
         print("=" * 70)
         return False

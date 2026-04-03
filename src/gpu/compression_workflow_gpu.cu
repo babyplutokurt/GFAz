@@ -83,6 +83,10 @@ compress_char_gpu(const std::vector<char> &input,
   return compress_bytes_gpu(payload, label);
 }
 
+void set_gpu_compression_debug(bool enabled) {
+  g_debug_compression = enabled;
+}
+
 // Device-resident compression (avoids D->H->D round-trip)
 static gpu_codec::NvcompCompressedBlock
 compress_int32_device_gpu(const thrust::device_vector<int32_t> &d_input,

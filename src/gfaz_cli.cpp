@@ -1,6 +1,10 @@
 #include <cstdlib>
+#include <chrono>
+#include <filesystem>
 #include <getopt.h>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 #include "add_haplotypes_workflow.hpp"
@@ -23,6 +27,41 @@ constexpr int kDefaultRounds = 8;
 constexpr int kDefaultDeltaRound = 1;
 constexpr int kDefaultFreqThreshold = 2;
 constexpr int kDefaultNumThreads = 0;
+
+using Clock = std::chrono::steady_clock;
+
+std::string format_size(uintmax_t bytes) {
+  std::ostringstream oss;
+  if (bytes >= 1024ULL * 1024ULL * 1024ULL)
+    oss << std::fixed << std::setprecision(2)
+        << (static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0)) << " GB";
+  else if (bytes >= 1024ULL * 1024ULL)
+    oss << std::fixed << std::setprecision(2)
+        << (static_cast<double>(bytes) / (1024.0 * 1024.0)) << " MB";
+  else if (bytes >= 1024ULL)
+    oss << std::fixed << std::setprecision(2)
+        << (static_cast<double>(bytes) / 1024.0) << " KB";
+  else
+    oss << bytes << " B";
+  return oss.str();
+}
+
+uintmax_t file_size_or_zero(const std::string &path) {
+  std::error_code ec;
+  const auto size = std::filesystem::file_size(path, ec);
+  return ec ? 0 : size;
+}
+
+void configure_stats(bool enabled) {
+  if (!enabled)
+    return;
+
+  setenv("GFA_COMPRESSION_DEBUG", "1", 1);
+#ifdef ENABLE_CUDA
+  gpu_compression::set_gpu_compression_debug(true);
+  gpu_decompression::set_gpu_decompression_debug(true);
+#endif
+}
 }
 
 void print_usage() {
@@ -50,6 +89,7 @@ OPTIONS (compress):
     -j, --threads <N>       Number of threads (default: 0 = auto)
     -g, --gpu               Use GPU backend (if available)
                              Note: GPU mode ignores --delta/--threshold/--threads
+    -s, --stats             Show timing/size statistics
     -h, --help              Show this help message
 
 OPTIONS (decompress):
@@ -58,6 +98,7 @@ OPTIONS (decompress):
                              CompressedData -> GfaGraph -> write_gfa
     -g, --gpu               Use GPU backend (if available)
                              Note: GPU mode ignores --threads
+    -s, --stats             Show timing/size statistics
     -h, --help              Show this help message
 
 BEHAVIOR:
@@ -165,6 +206,7 @@ OPTIONS:
     -j, --threads <N>       Number of threads (default: 0 = auto)
     -g, --gpu               Use GPU backend (if available)
                              Note: GPU mode ignores --delta/--threshold/--threads
+    -s, --stats             Show timing/size statistics
     -h, --help              Show this help message
 
 EXAMPLES:
@@ -191,6 +233,7 @@ OPTIONS:
                              CompressedData -> GfaGraph -> write_gfa
     -g, --gpu               Use GPU backend (if available)
                              Note: GPU mode ignores --threads
+    -s, --stats             Show timing/size statistics
     -h, --help              Show this help message
 
 EXAMPLES:
@@ -212,6 +255,7 @@ int do_compress(int argc, char *argv[]) {
   int freq_threshold = kDefaultFreqThreshold;
   int num_threads = kDefaultNumThreads;
   bool use_gpu = false;
+  bool show_stats = false;
 
   static struct option long_options[] = {
       {"rounds", required_argument, 0, 'r'},
@@ -219,12 +263,13 @@ int do_compress(int argc, char *argv[]) {
       {"threshold", required_argument, 0, 't'},
       {"threads", required_argument, 0, 'j'},
       {"gpu", no_argument, 0, 'g'},
+      {"stats", no_argument, 0, 's'},
       {"help", no_argument, 0, 'h'},
       {0, 0, 0, 0}};
 
   int opt;
   optind = 1; // Reset getopt
-  while ((opt = getopt_long(argc, argv, "r:d:t:j:gh", long_options, nullptr)) !=
+  while ((opt = getopt_long(argc, argv, "r:d:t:j:gsh", long_options, nullptr)) !=
          -1) {
     switch (opt) {
     case 'r':
@@ -241,6 +286,9 @@ int do_compress(int argc, char *argv[]) {
       break;
     case 'g':
       use_gpu = true;
+      break;
+    case 's':
+      show_stats = true;
       break;
     case 'h':
       print_compress_help();
@@ -294,6 +342,7 @@ int do_compress(int argc, char *argv[]) {
   std::cout << "Input:  " << input_path << std::endl;
   std::cout << "Output: " << output_path << std::endl;
   std::cout << "Backend: " << (use_gpu ? "GPU" : "CPU") << std::endl;
+  std::cout << "Stats: " << (show_stats ? "on" : "off") << std::endl;
   std::cout << "Rounds: " << rounds << std::endl;
 #ifdef ENABLE_CUDA
   if (!use_gpu) {
@@ -312,6 +361,9 @@ int do_compress(int argc, char *argv[]) {
   std::cout << std::endl;
 
   try {
+    configure_stats(show_stats);
+    const uintmax_t input_size = file_size_or_zero(input_path);
+    const auto start = Clock::now();
 #ifdef ENABLE_CUDA
     if (use_gpu) {
       gpu_compression::CompressedData_gpu compressed_data_gpu =
@@ -325,8 +377,31 @@ int do_compress(int argc, char *argv[]) {
 #ifdef ENABLE_CUDA
     }
 #endif
+    const auto end = Clock::now();
+    const uintmax_t output_size = file_size_or_zero(output_path);
 
     std::cout << "\nCompression complete!" << std::endl;
+    if (show_stats) {
+      const double elapsed_s =
+          std::chrono::duration<double>(end - start).count();
+      std::cout << "Stats:" << std::endl;
+      std::cout << "  Time: " << std::fixed << std::setprecision(3) << elapsed_s
+                << " s" << std::endl;
+      if (input_size > 0) {
+        const double mib = static_cast<double>(input_size) / (1024.0 * 1024.0);
+        const double mibps = (elapsed_s > 0.0) ? (mib / elapsed_s) : 0.0;
+        std::cout << "  Input: " << format_size(input_size) << std::endl;
+        std::cout << "  Output: " << format_size(output_size) << std::endl;
+        if (output_size > 0) {
+          std::cout << "  Ratio: " << std::fixed << std::setprecision(2)
+                    << static_cast<double>(input_size) /
+                           static_cast<double>(output_size)
+                    << "x" << std::endl;
+        }
+        std::cout << "  Throughput: " << std::fixed << std::setprecision(2)
+                  << mibps << " MiB/s" << std::endl;
+      }
+    }
     return 0;
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;
@@ -338,16 +413,18 @@ int do_decompress(int argc, char *argv[]) {
   int num_threads = kDefaultNumThreads;
   bool use_gpu = false;
   bool use_legacy = false;
+  bool show_stats = false;
 
   static struct option long_options[] = {{"threads", required_argument, 0, 'j'},
                                          {"legacy", no_argument, 0, 'l'},
                                          {"gpu", no_argument, 0, 'g'},
+                                         {"stats", no_argument, 0, 's'},
                                          {"help", no_argument, 0, 'h'},
                                          {0, 0, 0, 0}};
 
   int opt;
   optind = 1;
-  while ((opt = getopt_long(argc, argv, "j:lgh", long_options, nullptr)) != -1) {
+  while ((opt = getopt_long(argc, argv, "j:lgsh", long_options, nullptr)) != -1) {
     switch (opt) {
     case 'j':
       num_threads = std::stoi(optarg);
@@ -357,6 +434,9 @@ int do_decompress(int argc, char *argv[]) {
       break;
     case 'g':
       use_gpu = true;
+      break;
+    case 's':
+      show_stats = true;
       break;
     case 'h':
       print_decompress_help();
@@ -411,6 +491,7 @@ int do_decompress(int argc, char *argv[]) {
   std::cout << "Input:  " << input_path << std::endl;
   std::cout << "Output: " << output_path << std::endl;
   std::cout << "Backend: " << (use_gpu ? "GPU" : "CPU") << std::endl;
+  std::cout << "Stats: " << (show_stats ? "on" : "off") << std::endl;
 #ifdef ENABLE_CUDA
   if (!use_gpu) {
 #endif
@@ -428,6 +509,9 @@ int do_decompress(int argc, char *argv[]) {
   std::cout << std::endl;
 
   try {
+    configure_stats(show_stats);
+    const uintmax_t input_size = file_size_or_zero(input_path);
+    const auto start = Clock::now();
 #ifdef ENABLE_CUDA
     if (use_gpu) {
       gpu_compression::CompressedData_gpu data_gpu =
@@ -448,8 +532,25 @@ int do_decompress(int argc, char *argv[]) {
 #ifdef ENABLE_CUDA
     }
 #endif
+    const auto end = Clock::now();
+    const uintmax_t output_size = file_size_or_zero(output_path);
 
     std::cout << "\nDecompression complete!" << std::endl;
+    if (show_stats) {
+      const double elapsed_s =
+          std::chrono::duration<double>(end - start).count();
+      std::cout << "Stats:" << std::endl;
+      std::cout << "  Time: " << std::fixed << std::setprecision(3) << elapsed_s
+                << " s" << std::endl;
+      if (input_size > 0) {
+        const double mib = static_cast<double>(input_size) / (1024.0 * 1024.0);
+        const double mibps = (elapsed_s > 0.0) ? (mib / elapsed_s) : 0.0;
+        std::cout << "  Input: " << format_size(input_size) << std::endl;
+        std::cout << "  Output: " << format_size(output_size) << std::endl;
+        std::cout << "  Throughput: " << std::fixed << std::setprecision(2)
+                  << mibps << " MiB/s" << std::endl;
+      }
+    }
     return 0;
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;

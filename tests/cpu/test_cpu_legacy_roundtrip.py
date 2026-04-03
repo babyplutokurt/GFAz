@@ -10,6 +10,7 @@ import argparse
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -60,16 +61,21 @@ def main():
     print(f"Delta:      {args.delta_rounds}")
     print(f"Threshold:  {args.threshold}")
     print(f"Threads:    {args.threads if args.threads > 0 else 'all available'}")
+    original_file_size = os.path.getsize(args.gfa_file)
 
     print("\n[1] Parse original GFA")
+    t_parse_start = time.perf_counter()
     original_graph = gfa_lib.parse(args.gfa_file)
+    t_parse_end = time.perf_counter()
     print(
         f"  Parsed: {len(original_graph.paths)} paths, "
         f"{len(original_graph.walks.walks)} walks, "
         f"{len(original_graph.node_sequences) - 1} segments"
     )
+    print(f"  Parse time: {t_parse_end - t_parse_start:.3f}s")
 
     print("\n[2] Compress and save to temporary .gfaz")
+    t_compress_start = time.perf_counter()
     compressed = gfa_lib.compress(
         args.gfa_file,
         num_rounds=args.rounds,
@@ -77,6 +83,7 @@ def main():
         delta_round=args.delta_rounds,
         num_threads=args.threads,
     )
+    t_compress_end = time.perf_counter()
 
     tmp_handle = tempfile.NamedTemporaryFile(
         mode="wb", suffix=".gfaz", prefix="gfa_cpu_roundtrip_", delete=False
@@ -85,12 +92,20 @@ def main():
     tmp_handle.close()
 
     try:
+        t_serialize_start = time.perf_counter()
         gfa_lib.serialize(compressed, tmp_gfaz)
+        t_serialize_end = time.perf_counter()
+        compressed_size = os.path.getsize(tmp_gfaz)
+        compression_ratio = (
+            original_file_size / compressed_size if compressed_size > 0 else 0.0
+        )
         print(f"  Saved temporary file: {tmp_gfaz}")
 
         print("\n[3] Load temporary .gfaz and decompress")
+        t_decompress_start = time.perf_counter()
         loaded = gfa_lib.deserialize(tmp_gfaz)
         decompressed_graph = gfa_lib.decompress(loaded, num_threads=args.threads)
+        t_decompress_end = time.perf_counter()
 
         print("\n[4] Verify original vs decompressed GfaGraph")
         ok = gfa_lib.verify_round_trip(original_graph, decompressed_graph)
@@ -102,6 +117,14 @@ def main():
             os.remove(tmp_gfaz)
 
     print("✅ CPU round-trip verification PASSED")
+    print("\nResults")
+    print(f"  Original size:   {original_file_size / (1024 * 1024):.2f} MB")
+    print(f"  Compressed size: {compressed_size / (1024 * 1024):.2f} MB")
+    print(f"  Ratio:           {compression_ratio:.2f}x")
+    print(f"  Parse:           {t_parse_end - t_parse_start:.3f}s")
+    print(f"  Compress:        {t_compress_end - t_compress_start:.3f}s")
+    print(f"  Serialize:       {t_serialize_end - t_serialize_start:.3f}s")
+    print(f"  Decompress:      {t_decompress_end - t_decompress_start:.3f}s")
     return 0
 
 

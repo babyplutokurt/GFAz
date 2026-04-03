@@ -183,6 +183,8 @@ CompressedData_gpu compress_gfa_gpu(const std::string &gfa_file_path,
 CompressedData_gpu compress_gpu_graph(const GfaGraph_gpu &gpu_graph,
                                       int num_rounds);
 
+void set_gpu_compression_debug(bool enabled);
+
 /**
  * Build a rulebook map from the flat rules vector and layer ranges.
  * Useful for round-trip verification with CPU reconstruction.
