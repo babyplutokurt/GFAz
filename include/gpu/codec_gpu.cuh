@@ -166,6 +166,68 @@ void split_and_delta_encode_rules_device_vec(
     thrust::device_vector<int32_t>& d_second);
 
 // ============================================================================
+// Segmented (boundary-aware) device-vector helpers
+// ============================================================================
+
+/**
+ * Compute boundary masks from segment offsets.
+ *
+ * @param d_offsets Exclusive prefix sum of per-segment lengths
+ * @param num_segments Number of segments (paths + walks)
+ * @param total_nodes Total number of nodes in the flat array
+ * @param d_is_first Output: d_is_first[idx] = 1 if idx is the first node of a segment
+ * @param d_is_last  Output: d_is_last[idx] = 1 if idx is the last node of a segment
+ */
+void compute_boundary_masks(
+    const thrust::device_vector<uint64_t>& d_offsets,
+    uint32_t num_segments,
+    size_t total_nodes,
+    thrust::device_vector<uint8_t>& d_is_first,
+    thrust::device_vector<uint8_t>& d_is_last);
+
+/**
+ * Segmented delta encode: per-traversal adjacent difference.
+ * First element of each segment is unchanged (matches CPU semantics).
+ *
+ * @param d_data Input/output: modified in-place
+ * @param d_is_first Boundary mask: 1 at the first element of each segment
+ */
+void segmented_delta_encode_device_vec(
+    thrust::device_vector<int32_t>& d_data,
+    const thrust::device_vector<uint8_t>& d_is_first);
+
+/**
+ * Boundary-aware 2-mer discovery: skips pairs that cross segment boundaries.
+ *
+ * @param d_data Flat path data
+ * @param d_is_last Boundary mask: 1 at the last element of each segment
+ * @return Device vector of unique repeated 2-mers (canonical form)
+ */
+thrust::device_vector<uint64_t> find_repeated_2mers_segmented_device_vec(
+    const thrust::device_vector<int32_t>& d_data,
+    const thrust::device_vector<uint8_t>& d_is_last);
+
+/**
+ * Boundary-aware rule application: skips replacements that cross segment boundaries.
+ * Also computes new per-segment lengths after compaction.
+ *
+ * @param d_data Input/output: encoded path data (shrinks after rule application)
+ * @param d_table_handle GPU hash table mapping 2-mer -> rule ID
+ * @param rules_used Output: marks which rules were actually applied
+ * @param start_id First rule ID in the current round
+ * @param d_offsets Exclusive prefix sum of per-segment lengths
+ * @param num_segments Number of segments
+ * @return New per-segment lengths after compaction
+ */
+thrust::device_vector<uint32_t> apply_2mer_rules_segmented_device_vec(
+    thrust::device_vector<int32_t>& d_data,
+    void* d_table_handle,
+    thrust::device_vector<uint8_t>& rules_used,
+    uint32_t start_id,
+    const thrust::device_vector<uint64_t>& d_offsets,
+    uint32_t num_segments);
+
+// ============================================================================
 // GPU Path Expansion (Decompression)
 // ============================================================================
 
@@ -221,6 +283,22 @@ thrust::device_vector<int32_t> expand_path_device_vec_iterative(
  */
 thrust::device_vector<int32_t> inverse_delta_decode_device_vec(
     const thrust::device_vector<int32_t>& d_delta_encoded);
+
+/**
+ * Segmented inverse delta-decode a device vector (per-segment prefix sum).
+ * Each segment is independently prefix-summed, matching segmented delta encode.
+ *
+ * @param d_delta_encoded Input: delta-encoded values (segmented)
+ * @param d_offsets Exclusive prefix sum of per-segment lengths
+ * @param num_segments Number of segments
+ * @param total_nodes Total number of elements
+ * @return Original values before segmented delta encoding
+ */
+thrust::device_vector<int32_t> segmented_inverse_delta_decode_device_vec(
+    const thrust::device_vector<int32_t>& d_delta_encoded,
+    const thrust::device_vector<uint64_t>& d_offsets,
+    uint32_t num_segments,
+    size_t total_nodes);
 
 // Cleanup
 void free_rule_table_gpu(void* d_table_handle);

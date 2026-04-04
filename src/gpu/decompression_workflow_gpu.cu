@@ -9,6 +9,7 @@
 #include <thrust/copy.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
+#include <thrust/scan.h>
 
 namespace gpu_decompression {
 
@@ -361,14 +362,24 @@ decompress_paths_gpu(const gpu_compression::CompressedData_gpu &data) {
     if (d_second_delta_raw)
       CUDA_CHECK_DECOMP(cudaFree(d_second_delta_raw));
 
-    // Just inverse delta-decode the path
+    // Decompress path_lengths (original, pre-encoding lengths)
+    result.lengths =
+        gpu_codec::nvcomp_zstd_decompress_uint32(data.path_lengths_zstd_nvcomp);
+
+    // Segmented inverse delta-decode using original lengths
+    uint32_t num_segs = static_cast<uint32_t>(result.lengths.size());
+    thrust::device_vector<uint32_t> d_lens(result.lengths.begin(),
+                                            result.lengths.end());
+    thrust::device_vector<uint64_t> d_offs(num_segs);
+    thrust::exclusive_scan(d_lens.begin(), d_lens.end(), d_offs.begin(),
+                           uint64_t(0));
+
     thrust::device_vector<int32_t> d_original =
-        gpu_codec::inverse_delta_decode_device_vec(d_encoded_path);
+        gpu_codec::segmented_inverse_delta_decode_device_vec(
+            d_encoded_path, d_offs, num_segs, d_encoded_path.size());
 
     result.data.resize(d_original.size());
     thrust::copy(d_original.begin(), d_original.end(), result.data.begin());
-    result.lengths =
-        gpu_codec::nvcomp_zstd_decompress_uint32(data.path_lengths_zstd_nvcomp);
     return result;
   }
 
@@ -423,14 +434,21 @@ decompress_paths_gpu(const gpu_compression::CompressedData_gpu &data) {
     num_rules =
         std::min({num_rules, d_rules_first.size(), d_rules_second.size()});
     if (num_rules == 0) {
-      // No valid rules - inverse-delta-decode the path (it was delta-encoded
-      // during compression) and restore path_lengths before returning.
-      thrust::device_vector<int32_t> d_decoded =
-          gpu_codec::inverse_delta_decode_device_vec(d_encoded_path);
-      result.data.resize(d_decoded.size());
-      thrust::copy(d_decoded.begin(), d_decoded.end(), result.data.begin());
+      // No valid rules - segmented inverse-delta-decode the path
       result.lengths = gpu_codec::nvcomp_zstd_decompress_uint32(
           data.path_lengths_zstd_nvcomp);
+      uint32_t ns = static_cast<uint32_t>(result.lengths.size());
+      thrust::device_vector<uint32_t> dl(result.lengths.begin(),
+                                          result.lengths.end());
+      thrust::device_vector<uint64_t> do2(ns);
+      thrust::exclusive_scan(dl.begin(), dl.end(), do2.begin(),
+                             uint64_t(0));
+
+      thrust::device_vector<int32_t> d_decoded =
+          gpu_codec::segmented_inverse_delta_decode_device_vec(
+              d_encoded_path, do2, ns, d_encoded_path.size());
+      result.data.resize(d_decoded.size());
+      thrust::copy(d_decoded.begin(), d_decoded.end(), result.data.begin());
       return result;
     }
   }
@@ -457,18 +475,31 @@ decompress_paths_gpu(const gpu_compression::CompressedData_gpu &data) {
   }
 
   // =========================================================================
-  // Inverse delta-decode the expanded path
+  // Inverse delta-decode the expanded path (per-segment)
   // =========================================================================
+
+  // Decompress original path_lengths first — needed for segment boundaries
+  result.lengths =
+      gpu_codec::nvcomp_zstd_decompress_uint32(data.path_lengths_zstd_nvcomp);
+  uint32_t num_segs_final = static_cast<uint32_t>(result.lengths.size());
+
+  thrust::device_vector<uint32_t> d_lens_final(result.lengths.begin(),
+                                                result.lengths.end());
+  thrust::device_vector<uint64_t> d_offs_final(num_segs_final);
+  thrust::exclusive_scan(d_lens_final.begin(), d_lens_final.end(),
+                         d_offs_final.begin(), uint64_t(0));
 
   auto t_path_delta_start = Clock::now();
   thrust::device_vector<int32_t> d_original =
-      gpu_codec::inverse_delta_decode_device_vec(d_expanded);
+      gpu_codec::segmented_inverse_delta_decode_device_vec(
+          d_expanded, d_offs_final, num_segs_final, d_expanded.size());
   auto t_path_delta_end = Clock::now();
   double path_delta_time_ms = elapsed_ms(t_path_delta_start, t_path_delta_end);
 
   if (g_debug_decompression) {
-    std::cout << "[GPU Decompress] Inverse delta-decode path ("
-              << d_expanded.size() << " elements): " << std::fixed
+    std::cout << "[GPU Decompress] Segmented inverse delta-decode path ("
+              << d_expanded.size() << " elements, " << num_segs_final
+              << " segments): " << std::fixed
               << std::setprecision(2) << path_delta_time_ms << " ms"
               << std::endl;
   }
@@ -490,10 +521,6 @@ decompress_paths_gpu(const gpu_compression::CompressedData_gpu &data) {
               << " MB): " << std::fixed << std::setprecision(2) << copy_time_ms
               << " ms" << std::endl;
   }
-
-  // Decompress path_lengths
-  result.lengths =
-      gpu_codec::nvcomp_zstd_decompress_uint32(data.path_lengths_zstd_nvcomp);
 
   auto decomp_end = Clock::now();
   double decomp_time_ms = elapsed_ms(decomp_start, decomp_end);

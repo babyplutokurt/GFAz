@@ -17,6 +17,7 @@
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 #include <thrust/unique.h>
+#include <thrust/remove.h>
 
 // CUDA error checking macro
 #define CUDA_CHECK(call)                                                       \
@@ -208,7 +209,114 @@ void delta_encode_device_vec(thrust::device_vector<int32_t> &d_data) {
   d_data = std::move(d_output);
 }
 
-// Functor for absolute value transformation
+// ============================================================================
+// Segmented (boundary-aware) operations
+// ============================================================================
+
+// Kernel: set is_first[offset[seg]] = 1 for each segment
+__global__ void set_first_flags_kernel(const uint64_t *offsets,
+                                       uint32_t num_segments,
+                                       uint8_t *is_first,
+                                       size_t total_nodes) {
+  uint32_t seg = blockIdx.x * blockDim.x + threadIdx.x;
+  if (seg >= num_segments) return;
+
+  uint64_t start = offsets[seg];
+  if (start < total_nodes) {
+    is_first[start] = 1;
+  }
+}
+
+// Kernel: set is_last[offset[seg+1]-1] = 1 for each segment
+// For the last segment, the end is total_nodes.
+__global__ void set_last_flags_kernel(const uint64_t *offsets,
+                                      uint32_t num_segments,
+                                      uint8_t *is_last,
+                                      size_t total_nodes) {
+  uint32_t seg = blockIdx.x * blockDim.x + threadIdx.x;
+  if (seg >= num_segments) return;
+
+  uint64_t end;
+  if (seg + 1 < num_segments) {
+    end = offsets[seg + 1];
+  } else {
+    end = static_cast<uint64_t>(total_nodes);
+  }
+
+  // Mark last element of this segment (skip empty segments)
+  if (end > offsets[seg]) {
+    is_last[end - 1] = 1;
+  }
+}
+
+void compute_boundary_masks(
+    const thrust::device_vector<uint64_t> &d_offsets,
+    uint32_t num_segments,
+    size_t total_nodes,
+    thrust::device_vector<uint8_t> &d_is_first,
+    thrust::device_vector<uint8_t> &d_is_last) {
+  d_is_first.assign(total_nodes, 0);
+  d_is_last.assign(total_nodes, 0);
+
+  if (num_segments == 0 || total_nodes == 0) return;
+
+  int threads = 256;
+  int blocks = (num_segments + threads - 1) / threads;
+
+  set_first_flags_kernel<<<blocks, threads>>>(
+      thrust::raw_pointer_cast(d_offsets.data()),
+      num_segments,
+      thrust::raw_pointer_cast(d_is_first.data()),
+      total_nodes);
+  CUDA_CHECK(cudaGetLastError());
+
+  set_last_flags_kernel<<<blocks, threads>>>(
+      thrust::raw_pointer_cast(d_offsets.data()),
+      num_segments,
+      thrust::raw_pointer_cast(d_is_last.data()),
+      total_nodes);
+  CUDA_CHECK(cudaGetLastError());
+}
+
+// Kernel: segmented delta encoding
+// is_first[idx] == 1 → output[idx] = input[idx] (first element of segment)
+// Otherwise → output[idx] = input[idx] - input[idx-1]
+__global__ void segmented_delta_encode_kernel(const int32_t *input,
+                                              int32_t *output,
+                                              size_t total_nodes,
+                                              const uint8_t *is_first) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= total_nodes) return;
+
+  if (idx == 0 || is_first[idx]) {
+    output[idx] = input[idx];
+  } else {
+    output[idx] = input[idx] - input[idx - 1];
+  }
+}
+
+void segmented_delta_encode_device_vec(
+    thrust::device_vector<int32_t> &d_data,
+    const thrust::device_vector<uint8_t> &d_is_first) {
+  if (d_data.empty()) return;
+
+  size_t total_nodes = d_data.size();
+  thrust::device_vector<int32_t> d_output(total_nodes);
+
+  int threads = 256;
+  int blocks_n = (total_nodes + threads - 1) / threads;
+
+  segmented_delta_encode_kernel<<<blocks_n, threads>>>(
+      thrust::raw_pointer_cast(d_data.data()),
+      thrust::raw_pointer_cast(d_output.data()),
+      total_nodes,
+      thrust::raw_pointer_cast(d_is_first.data()));
+  CUDA_CHECK(cudaGetLastError());
+
+  d_data = std::move(d_output);
+}
+
+
 struct AbsOp {
   __device__ __forceinline__ uint32_t operator()(int32_t a) const {
     uint32_t u_a = static_cast<uint32_t>(a);
@@ -459,6 +567,87 @@ find_repeated_2mers_device_vec(const thrust::device_vector<int32_t> &d_data) {
   size_t num_dups = end_it - d_dup_keys.begin();
   if (num_dups == 0)
     return {};
+
+  d_dup_keys.resize(num_dups);
+
+  auto new_end = thrust::unique(d_dup_keys.begin(), d_dup_keys.end());
+  d_dup_keys.resize(new_end - d_dup_keys.begin());
+
+  return d_dup_keys;
+}
+
+// Boundary-aware 2-mer key generation: outputs UINT64_MAX sentinel at boundaries
+__global__ void generate_2mer_keys_segmented_kernel(
+    const int32_t *nodes, size_t total_nodes,
+    uint64_t *keys_out,
+    const uint8_t *is_last) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= total_nodes - 1) return;
+
+  // Skip cross-boundary pairs: if idx is the last element of a segment,
+  // then (nodes[idx], nodes[idx+1]) spans two segments.
+  if (is_last[idx]) {
+    keys_out[idx] = UINT64_MAX;  // Sentinel, filtered out later
+    return;
+  }
+
+  int32_t u = nodes[idx];
+  int32_t v = nodes[idx + 1];
+  keys_out[idx] = canonical_pack_2mer_gpu(u, v);
+}
+
+struct IsNotSentinel {
+  __host__ __device__ bool operator()(uint64_t key) const {
+    return key != UINT64_MAX;
+  }
+};
+
+thrust::device_vector<uint64_t> find_repeated_2mers_segmented_device_vec(
+    const thrust::device_vector<int32_t> &d_data,
+    const thrust::device_vector<uint8_t> &d_is_last) {
+  if (d_data.size() < 2) {
+    return {};
+  }
+
+  size_t total_nodes = d_data.size();
+  size_t M = total_nodes - 1;
+
+  thrust::device_vector<uint64_t> d_keys(M);
+
+  int threads_gen = 256;
+  int blocks_gen = (M + threads_gen - 1) / threads_gen;
+
+  generate_2mer_keys_segmented_kernel<<<blocks_gen, threads_gen>>>(
+      thrust::raw_pointer_cast(d_data.data()), total_nodes,
+      thrust::raw_pointer_cast(d_keys.data()),
+      thrust::raw_pointer_cast(d_is_last.data()));
+  CUDA_CHECK(cudaGetLastError());
+
+  // Remove sentinel values before sorting
+  auto valid_end = thrust::remove(d_keys.begin(), d_keys.end(), UINT64_MAX);
+  size_t valid_count = valid_end - d_keys.begin();
+  if (valid_count == 0) return {};
+  d_keys.resize(valid_count);
+
+  // Sort, mark duplicates, compact, unique — same as non-segmented version
+  thrust::sort(d_keys.begin(), d_keys.end());
+
+  thrust::device_vector<uint8_t> d_dup(valid_count);
+  uint8_t *d_dup_ptr = thrust::raw_pointer_cast(d_dup.data());
+  DuplicateMarker marker(thrust::raw_pointer_cast(d_keys.data()),
+                         (uint32_t)valid_count);
+
+  thrust::for_each(
+      thrust::counting_iterator<int>(0),
+      thrust::counting_iterator<int>((int)valid_count),
+      [marker, d_dup_ptr] __device__(int i) { d_dup_ptr[i] = marker(i); });
+
+  thrust::device_vector<uint64_t> d_dup_keys(valid_count);
+  auto end_it = thrust::copy_if(d_keys.begin(), d_keys.end(), d_dup.begin(),
+                                d_dup_keys.begin(), IsDuplicate());
+
+  size_t num_dups = end_it - d_dup_keys.begin();
+  if (num_dups == 0) return {};
 
   d_dup_keys.resize(num_dups);
 
@@ -948,6 +1137,178 @@ void apply_2mer_rules_device_vec(thrust::device_vector<int32_t> &d_data,
   CUDA_CHECK(cudaGetLastError());
 
   d_data = std::move(d_output);
+}
+
+// Boundary-aware mark replacements: skips pairs that cross segment boundaries
+template <typename ViewType>
+__global__ void mark_replacements_segmented_kernel(
+    const int32_t *nodes, size_t num_nodes,
+    uint8_t *flags, int32_t *new_values,
+    ViewType view,
+    const uint8_t *is_last) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= num_nodes) return;
+
+  // Cannot form a pair at last position or at segment boundaries
+  if (idx >= num_nodes - 1 || is_last[idx]) {
+    new_values[idx] = nodes[idx];
+    flags[idx] = 0;
+    return;
+  }
+
+  int32_t u = nodes[idx];
+  int32_t v = nodes[idx + 1];
+  uint64_t key = canonical_pack_2mer_gpu(u, v);
+
+  auto found = view.find(key);
+  if (found != view.end()) {
+    uint32_t rule_id = found->second;
+
+    if (pack_2mer_gpu(u, v) == key) {
+      new_values[idx] = (int32_t)rule_id;
+    } else {
+      new_values[idx] = -(int32_t)rule_id;
+    }
+    flags[idx] = 1;
+  } else {
+    new_values[idx] = nodes[idx];
+    flags[idx] = 0;
+  }
+}
+
+// Compute new per-segment lengths after scatter compaction
+__global__ void compute_new_lengths_kernel(
+    const int *d_scan,
+    const uint64_t *d_offsets,
+    uint32_t *new_lengths,
+    uint32_t num_segments,
+    size_t old_total_nodes,
+    int new_total_size) {
+  uint32_t seg = blockIdx.x * blockDim.x + threadIdx.x;
+  if (seg >= num_segments) return;
+
+  int start_write_pos = d_scan[d_offsets[seg]];
+  int end_write_pos;
+  if (seg + 1 < num_segments) {
+    end_write_pos = d_scan[d_offsets[seg + 1]];
+  } else {
+    end_write_pos = new_total_size;
+  }
+
+  new_lengths[seg] = static_cast<uint32_t>(end_write_pos - start_write_pos);
+}
+
+thrust::device_vector<uint32_t> apply_2mer_rules_segmented_device_vec(
+    thrust::device_vector<int32_t> &d_data,
+    void *d_table_handle,
+    thrust::device_vector<uint8_t> &rules_used,
+    uint32_t start_id,
+    const thrust::device_vector<uint64_t> &d_offsets,
+    uint32_t num_segments) {
+  // Fallback: return current lengths if nothing to do
+  if (d_data.empty() || !d_table_handle) {
+    thrust::device_vector<uint32_t> result(num_segments, 0);
+    return result;
+  }
+
+  size_t num_nodes = d_data.size();
+  size_t num_rules = rules_used.size();
+  GpuDict *dict = static_cast<GpuDict *>(d_table_handle);
+
+  auto view = dict->map.ref(cuco::find);
+  int32_t *d_nodes = thrust::raw_pointer_cast(d_data.data());
+
+  // Recompute boundary mask for current data size
+  thrust::device_vector<uint8_t> d_is_last(num_nodes, 0);
+  {
+    int bthreads = 256;
+    int bblocks = (num_segments + bthreads - 1) / bthreads;
+    set_last_flags_kernel<<<bblocks, bthreads>>>(
+        thrust::raw_pointer_cast(d_offsets.data()),
+        num_segments,
+        thrust::raw_pointer_cast(d_is_last.data()),
+        num_nodes);
+    CUDA_CHECK(cudaGetLastError());
+  }
+
+  thrust::device_vector<uint8_t> d_flags(num_nodes);
+  thrust::device_vector<int32_t> d_new_values(num_nodes);
+
+  int threads = 256;
+  int blocks = (num_nodes + threads - 1) / threads;
+
+  // 1. Mark replacements (boundary-aware)
+  mark_replacements_segmented_kernel<<<blocks, threads>>>(
+      d_nodes, num_nodes,
+      thrust::raw_pointer_cast(d_flags.data()),
+      thrust::raw_pointer_cast(d_new_values.data()),
+      view,
+      thrust::raw_pointer_cast(d_is_last.data()));
+  CUDA_CHECK(cudaGetLastError());
+
+  // 2. Resolve overlaps (same as non-segmented — operates on flags only)
+  resolve_overlaps_kernel<<<blocks, threads>>>(
+      thrust::raw_pointer_cast(d_flags.data()), num_nodes, 0);
+  CUDA_CHECK(cudaGetLastError());
+
+  resolve_overlaps_kernel<<<blocks, threads>>>(
+      thrust::raw_pointer_cast(d_flags.data()), num_nodes, 1);
+  CUDA_CHECK(cudaGetLastError());
+
+  // 2.5. Mark used rules
+  if (num_rules > 0) {
+    thrust::device_vector<int32_t> d_rule_flags(num_rules, 0);
+
+    mark_used_rules_kernel<<<blocks, threads>>>(
+        thrust::raw_pointer_cast(d_flags.data()),
+        thrust::raw_pointer_cast(d_new_values.data()), num_nodes,
+        thrust::raw_pointer_cast(d_rule_flags.data()), start_id,
+        (uint32_t)num_rules);
+    CUDA_CHECK(cudaGetLastError());
+
+    thrust::transform(d_rule_flags.begin(), d_rule_flags.end(),
+                      rules_used.begin(),
+                      [] __device__(int32_t v) { return v ? 1 : 0; });
+  }
+
+  // 3. Prefix scan for scatter write positions
+  thrust::device_vector<int> d_sizes(num_nodes);
+  thrust::transform(d_flags.begin(), d_flags.end(), d_sizes.begin(), SizeOp());
+
+  thrust::device_vector<int> d_scan(num_nodes);
+  thrust::exclusive_scan(d_sizes.begin(), d_sizes.end(), d_scan.begin());
+
+  int last_scan = d_scan.back();
+  int last_size = d_sizes.back();
+  int new_total_size = last_scan + last_size;
+
+  // 4. Scatter
+  thrust::device_vector<int32_t> d_output(new_total_size);
+  scatter_kernel<<<blocks, threads>>>(
+      d_nodes, thrust::raw_pointer_cast(d_new_values.data()),
+      thrust::raw_pointer_cast(d_flags.data()),
+      thrust::raw_pointer_cast(d_scan.data()),
+      thrust::raw_pointer_cast(d_output.data()), num_nodes);
+  CUDA_CHECK(cudaGetLastError());
+
+  d_data = std::move(d_output);
+
+  // 5. Compute new per-segment lengths from the scan array
+  thrust::device_vector<uint32_t> d_new_lengths(num_segments);
+  {
+    int lthreads = 256;
+    int lblocks = (num_segments + lthreads - 1) / lthreads;
+    compute_new_lengths_kernel<<<lblocks, lthreads>>>(
+        thrust::raw_pointer_cast(d_scan.data()),
+        thrust::raw_pointer_cast(d_offsets.data()),
+        thrust::raw_pointer_cast(d_new_lengths.data()),
+        num_segments,
+        num_nodes,
+        new_total_size);
+    CUDA_CHECK(cudaGetLastError());
+  }
+
+  return d_new_lengths;
 }
 
 // Kernel to remap paths using new IDs based on compaction
@@ -1836,6 +2197,61 @@ thrust::device_vector<int32_t> inverse_delta_decode_device_vec(
   // Inverse delta is just prefix sum (inclusive scan)
   thrust::inclusive_scan(d_delta_encoded.begin(), d_delta_encoded.end(),
                          d_result.begin());
+
+  return d_result;
+}
+
+// Segmented inverse delta decode: per-segment prefix sum.
+// One thread per segment. Each thread reads its segment boundaries from offsets
+// and does a sequential prefix sum within that segment.
+__global__ void segmented_inverse_delta_kernel(const int32_t *input,
+                                               int32_t *output,
+                                               const uint64_t *offsets,
+                                               uint32_t num_segments,
+                                               size_t total_nodes) {
+  uint32_t seg = blockIdx.x * blockDim.x + threadIdx.x;
+  if (seg >= num_segments) return;
+
+  uint64_t start = offsets[seg];
+  uint64_t end;
+  if (seg + 1 < num_segments) {
+    end = offsets[seg + 1];
+  } else {
+    end = static_cast<uint64_t>(total_nodes);
+  }
+
+  if (start >= end) return;  // Empty segment
+
+  // Prefix sum within this segment
+  int32_t acc = input[start];
+  output[start] = acc;
+  for (uint64_t i = start + 1; i < end; ++i) {
+    acc += input[i];
+    output[i] = acc;
+  }
+}
+
+thrust::device_vector<int32_t> segmented_inverse_delta_decode_device_vec(
+    const thrust::device_vector<int32_t> &d_delta_encoded,
+    const thrust::device_vector<uint64_t> &d_offsets,
+    uint32_t num_segments,
+    size_t total_nodes) {
+
+  if (d_delta_encoded.empty()) {
+    return thrust::device_vector<int32_t>();
+  }
+
+  thrust::device_vector<int32_t> d_result(total_nodes);
+
+  int threads = 256;
+  int blocks = (num_segments + threads - 1) / threads;
+  segmented_inverse_delta_kernel<<<blocks, threads>>>(
+      thrust::raw_pointer_cast(d_delta_encoded.data()),
+      thrust::raw_pointer_cast(d_result.data()),
+      thrust::raw_pointer_cast(d_offsets.data()),
+      num_segments,
+      total_nodes);
+  CUDA_CHECK(cudaGetLastError());
 
   return d_result;
 }

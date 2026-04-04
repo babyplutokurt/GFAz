@@ -269,30 +269,48 @@ CompressedData_gpu run_path_compression_gpu(const FlattenedPaths &paths,
     return result;
   }
 
-  // 1. Copy paths to device once
+  // 1. Copy paths data AND lengths to device
   thrust::device_vector<int32_t> d_data(paths.data.begin(), paths.data.end());
+  thrust::device_vector<uint32_t> d_lengths(paths.lengths.begin(),
+                                             paths.lengths.end());
+  uint32_t num_segments = static_cast<uint32_t>(paths.lengths.size());
 
-  // 2. Compute start_id on GPU (max abs value + 1)
+  // 2. Compute offsets (exclusive prefix sum of lengths — uint64_t to avoid overflow)
+  thrust::device_vector<uint64_t> d_offsets(num_segments);
+  thrust::exclusive_scan(d_lengths.begin(), d_lengths.end(), d_offsets.begin(),
+                         uint64_t(0));
+
+  // 3. Compute start_id on GPU (max abs value + 1)
   uint32_t start_id = gpu_codec::find_max_abs_device(d_data) + 1;
 
-  // 3. Delta encode on GPU
-  gpu_codec::delta_encode_device_vec(d_data);
+  // 4. Segmented delta encode (per-traversal, first element unchanged)
+  {
+    thrust::device_vector<uint8_t> d_is_first, d_is_last;
+    gpu_codec::compute_boundary_masks(d_offsets, num_segments,
+                                      d_data.size(), d_is_first, d_is_last);
+    gpu_codec::segmented_delta_encode_device_vec(d_data, d_is_first);
+  }
 
-  // 4. Recompute start_id after delta encoding (delta values may be larger)
+  // 5. Recompute start_id after delta encoding (delta values may be larger)
   uint32_t delta_max = gpu_codec::find_max_abs_device(d_data);
   if (delta_max >= start_id) {
     start_id = delta_max + 1;
   }
 
-  // 5. Accumulator for all rules (device vector)
+  // 6. Accumulator for all rules (device vector)
   thrust::device_vector<uint64_t> d_all_rules;
   uint32_t next_start_id = start_id;
 
-  // 6. Compression rounds
+  // 7. Compression rounds
   for (int round_idx = 0; round_idx < num_rounds; ++round_idx) {
-    // Find repeated 2-mers (stays on device)
+    // Compute boundary mask for current data layout
+    thrust::device_vector<uint8_t> d_is_first, d_is_last;
+    gpu_codec::compute_boundary_masks(d_offsets, num_segments,
+                                      d_data.size(), d_is_first, d_is_last);
+
+    // Find repeated 2-mers (boundary-aware)
     thrust::device_vector<uint64_t> d_round_rules =
-        gpu_codec::find_repeated_2mers_device_vec(d_data);
+        gpu_codec::find_repeated_2mers_segmented_device_vec(d_data, d_is_last);
 
     if (d_round_rules.empty()) {
       break; // No more rules found
@@ -304,19 +322,20 @@ CompressedData_gpu run_path_compression_gpu(const FlattenedPaths &paths,
     void *table_ptr = gpu_codec::create_rule_table_gpu_from_device(
         d_round_rules, next_start_id);
 
-    // Apply rules (all on device)
+    // Apply rules (boundary-aware) — returns new per-segment lengths
     thrust::device_vector<uint8_t> d_rules_used(num_rules_found, 0);
-    gpu_codec::apply_2mer_rules_device_vec(d_data, table_ptr, d_rules_used,
-                                           next_start_id);
+    d_lengths = gpu_codec::apply_2mer_rules_segmented_device_vec(
+        d_data, table_ptr, d_rules_used, next_start_id,
+        d_offsets, num_segments);
 
     // Cleanup table
     gpu_codec::free_rule_table_gpu(table_ptr);
 
-    // Compact rules (all on device)
+    // Compact rules (operates on values only — boundary-agnostic)
     gpu_codec::compact_rules_and_remap_device_vec(d_data, d_rules_used,
                                                   d_round_rules, next_start_id);
 
-    // Sort rules (all on device)
+    // Sort rules (operates on values only — boundary-agnostic)
     gpu_codec::sort_rules_and_remap_device_vec(d_data, d_round_rules,
                                                next_start_id);
 
@@ -332,17 +351,22 @@ CompressedData_gpu run_path_compression_gpu(const FlattenedPaths &paths,
 
     // Update next start ID
     next_start_id += num_used_rules;
+
+    // Recompute offsets from new lengths for next round
+    thrust::exclusive_scan(d_lengths.begin(), d_lengths.end(),
+                           d_offsets.begin(), uint64_t(0));
   }
 
-  // 7. Compress encoded path directly from device (no D->H copy needed)
+  // 8. Compress encoded path directly from device (no D->H copy needed)
   result.encoded_path_zstd_nvcomp =
       compress_int32_device_gpu(d_data, "encoded_path");
 
-  // 8. Compress path_lengths with nvComp (host data, small so copy is OK)
+  // 9. Compress ORIGINAL path_lengths (decompression needs these to split
+  // the expanded data back into per-traversal segments)
   result.path_lengths_zstd_nvcomp =
       compress_uint32_gpu(paths.lengths, "path_lengths");
 
-  // 9. Split rules into first/second, delta-encode on GPU, then compress
+  // 10. Split rules into first/second, delta-encode on GPU, then compress
   // directly from device
   if (!d_all_rules.empty()) {
     thrust::device_vector<int32_t> d_first, d_second;
@@ -358,6 +382,7 @@ CompressedData_gpu run_path_compression_gpu(const FlattenedPaths &paths,
 
   return result;
 }
+
 
 std::map<uint32_t, uint64_t> build_rulebook(const CompressedData_gpu &data) {
   std::map<uint32_t, uint64_t> rulebook;
