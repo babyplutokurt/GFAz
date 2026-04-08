@@ -198,6 +198,9 @@ set(GFA_CUDA_SOURCES
   src/gpu/compression_workflow_gpu.cu
   src/gpu/path_compression_gpu_legacy.cu
   src/gpu/path_compression_gpu_rolling.cu
+  src/gpu/path_rulebook_gpu.cu
+  src/gpu/path_rule_remap_gpu.cu
+  src/gpu/path_expand_gpu.cu
   src/gpu/metadata_codec_gpu.cu
   src/gpu/decompression_workflow_gpu.cu
   src/gpu/path_decompression_gpu_legacy.cu

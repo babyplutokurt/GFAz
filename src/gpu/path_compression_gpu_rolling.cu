@@ -1,5 +1,6 @@
 #include "gpu/compression_workflow_gpu_internal.hpp"
 #include "gpu/codec_gpu.cuh"
+#include "gpu/path_rulebook_gpu.hpp"
 #include "gpu/path_compression_gpu_rolling.hpp"
 
 #include <algorithm>
