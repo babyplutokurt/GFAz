@@ -375,6 +375,27 @@ void remap_chunk_rule_ids_device_vec(
     uint32_t num_rules_before_compact,
     uint32_t num_rules_after_compact);
 
+void expand_and_inverse_decode_chunk_device(
+    const thrust::device_vector<int32_t>& d_encoded_path,
+    const thrust::device_vector<int64_t>& d_output_offsets,
+    const thrust::device_vector<int32_t>& d_expanded_rules,
+    const thrust::device_vector<int64_t>& d_rule_offsets,
+    const thrust::device_vector<int64_t>& d_rule_sizes,
+    thrust::device_vector<int32_t>& d_chunk_workspace,
+    const thrust::device_vector<uint64_t>& d_offs_final,
+    size_t chunk_encoded_begin, size_t chunk_encoded_end,
+    int64_t chunk_expanded_begin, int64_t chunk_expanded_end,
+    uint32_t chunk_segment_begin, uint32_t chunk_segment_end,
+    uint32_t min_rule_id, uint32_t max_rule_id, size_t total_nodes);
+
+void rolling_expand_and_inverse_delta_decode(
+    const thrust::device_vector<int32_t> &d_encoded_path,
+    const thrust::device_vector<int32_t> &d_rules_first,
+    const thrust::device_vector<int32_t> &d_rules_second,
+    uint32_t min_rule_id, size_t num_rules,
+    const thrust::device_vector<uint32_t> &d_lens_final,
+    std::vector<int32_t> &h_result_data);
+
 } // namespace gpu_codec
 
 #endif // CODEC_GPU_CUH

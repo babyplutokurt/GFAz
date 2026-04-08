@@ -16,6 +16,7 @@
 #include <thrust/scan.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
+#include <thrust/binary_search.h>
 #include <thrust/reduce.h>
 #include <thrust/unique.h>
 #include <thrust/remove.h>
@@ -2532,6 +2533,233 @@ void remap_chunk_rule_ids_device_vec(
         );
         CUDA_CHECK(cudaGetLastError());
     }
+}
+
+} // namespace gpu_codec
+#include "gpu/codec_gpu.cuh"
+
+namespace gpu_codec {
+
+__global__ void expand_path_chunk_kernel(
+    const int32_t *__restrict__ d_input,
+    const int64_t *__restrict__ d_output_offsets,
+    const int32_t *__restrict__ d_expanded_rules,
+    const int64_t *__restrict__ d_rule_offsets,
+    const int64_t *__restrict__ d_rule_sizes, int32_t *__restrict__ d_output,
+    size_t chunk_start_idx, size_t chunk_end_idx, int64_t global_expanded_offset,
+    uint32_t min_rule_id, uint32_t max_rule_id) {
+
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x + chunk_start_idx;
+  if (idx >= chunk_end_idx)
+    return;
+
+  int32_t val = d_input[idx];
+  uint32_t abs_val = static_cast<uint32_t>(val >= 0 ? val : -val);
+  int64_t out_offset = d_output_offsets[idx] - global_expanded_offset;
+
+  if (abs_val >= min_rule_id && abs_val < max_rule_id) {
+    uint32_t rule_idx = abs_val - min_rule_id;
+    int64_t rule_offset = d_rule_offsets[rule_idx];
+    int64_t rule_size = d_rule_sizes[rule_idx];
+
+    if (val >= 0) {
+      for (int64_t i = 0; i < rule_size; i++) {
+        d_output[out_offset + i] = d_expanded_rules[rule_offset + i];
+      }
+    } else {
+      for (int64_t i = 0; i < rule_size; i++) {
+        d_output[out_offset + i] =
+            -d_expanded_rules[rule_offset + rule_size - 1 - i];
+      }
+    }
+  } else {
+    d_output[out_offset] = val;
+  }
+}
+
+__global__ void segmented_inverse_delta_chunk_kernel(
+    const int32_t *input, int32_t *output,
+    const uint64_t *offsets,
+    uint32_t chunk_seg_start, uint32_t chunk_seg_end,
+    uint32_t total_segments, size_t total_nodes,
+    uint64_t global_expanded_offset) {
+  uint32_t seg = blockIdx.x * blockDim.x + threadIdx.x + chunk_seg_start;
+  if (seg >= chunk_seg_end) return;
+
+  uint64_t start = offsets[seg];
+  uint64_t end = (seg + 1 < total_segments) ? offsets[seg + 1] : static_cast<uint64_t>(total_nodes);
+
+  if (start >= end) return;  // Empty segment
+
+  uint64_t local_start = start - global_expanded_offset;
+  uint64_t local_end = end - global_expanded_offset;
+
+  int32_t acc = input[local_start];
+  output[local_start] = acc;
+  for (uint64_t i = local_start + 1; i < local_end; ++i) {
+    acc += input[i];
+    output[i] = acc;
+  }
+}
+
+void expand_and_inverse_decode_chunk_device(
+    const thrust::device_vector<int32_t>& d_encoded_path,
+    const thrust::device_vector<int64_t>& d_output_offsets,
+    const thrust::device_vector<int32_t>& d_expanded_rules,
+    const thrust::device_vector<int64_t>& d_rule_offsets,
+    const thrust::device_vector<int64_t>& d_rule_sizes,
+    thrust::device_vector<int32_t>& d_chunk_workspace,
+    const thrust::device_vector<uint64_t>& d_offs_final,
+    size_t chunk_encoded_begin, size_t chunk_encoded_end,
+    int64_t chunk_expanded_begin, int64_t chunk_expanded_end,
+    uint32_t chunk_segment_begin, uint32_t chunk_segment_end,
+    uint32_t min_rule_id, uint32_t max_rule_id, size_t total_nodes) {
+    
+    size_t num_encoded = chunk_encoded_end - chunk_encoded_begin;
+    size_t num_expanded = chunk_expanded_end - chunk_expanded_begin;
+    d_chunk_workspace.resize(num_expanded);
+    
+    if (num_encoded == 0 || num_expanded == 0) return;
+    
+    int threads = 256;
+    int blocks_expand = (num_encoded + threads - 1) / threads;
+    expand_path_chunk_kernel<<<blocks_expand, threads>>>(
+        thrust::raw_pointer_cast(d_encoded_path.data()),
+        thrust::raw_pointer_cast(d_output_offsets.data()),
+        thrust::raw_pointer_cast(d_expanded_rules.data()),
+        thrust::raw_pointer_cast(d_rule_offsets.data()),
+        thrust::raw_pointer_cast(d_rule_sizes.data()),
+        thrust::raw_pointer_cast(d_chunk_workspace.data()),
+        chunk_encoded_begin, chunk_encoded_end, chunk_expanded_begin,
+        min_rule_id, max_rule_id
+    );
+    CUDA_CHECK(cudaGetLastError());
+    
+    size_t num_segments = chunk_segment_end - chunk_segment_begin;
+    int blocks_inv = (num_segments + threads - 1) / threads;
+    segmented_inverse_delta_chunk_kernel<<<blocks_inv, threads>>>(
+        thrust::raw_pointer_cast(d_chunk_workspace.data()),
+        thrust::raw_pointer_cast(d_chunk_workspace.data()), // in-place inverse delta decode
+        thrust::raw_pointer_cast(d_offs_final.data()),
+        chunk_segment_begin, chunk_segment_end,
+        static_cast<uint32_t>(d_offs_final.size()),
+        total_nodes,
+        static_cast<uint64_t>(chunk_expanded_begin)
+    );
+    CUDA_CHECK(cudaGetLastError());
+}
+
+} // namespace gpu_codec
+#include "gpu/codec_gpu.cuh"
+
+namespace gpu_codec {
+
+void rolling_expand_and_inverse_delta_decode(
+    const thrust::device_vector<int32_t> &d_encoded_path,
+    const thrust::device_vector<int32_t> &d_rules_first,
+    const thrust::device_vector<int32_t> &d_rules_second,
+    uint32_t min_rule_id, size_t num_rules,
+    const thrust::device_vector<uint32_t> &d_lens_final,
+    std::vector<int32_t> &h_result_data) {
+
+  const uint32_t max_rule_id = min_rule_id + static_cast<uint32_t>(num_rules);
+  const int threads = 256;
+
+  thrust::device_vector<int64_t> d_rule_sizes(num_rules);
+  {
+    int blocks = (num_rules + threads - 1) / threads;
+    compute_rule_final_sizes_kernel<<<blocks, threads>>>(
+        thrust::raw_pointer_cast(d_rules_first.data()),
+        thrust::raw_pointer_cast(d_rules_second.data()),
+        thrust::raw_pointer_cast(d_rule_sizes.data()), num_rules, min_rule_id);
+    CUDA_CHECK(cudaGetLastError());
+  }
+
+  thrust::device_vector<int64_t> d_rule_offsets(num_rules);
+  thrust::exclusive_scan(d_rule_sizes.begin(), d_rule_sizes.end(),
+                         d_rule_offsets.begin());
+
+  int64_t total_expanded_size = d_rule_offsets.back() + d_rule_sizes.back();
+  thrust::device_vector<int32_t> d_expanded_rules(total_expanded_size);
+  {
+    int blocks = (num_rules + threads - 1) / threads;
+    expand_rules_to_buffer_kernel<<<blocks, threads>>>(
+        thrust::raw_pointer_cast(d_rules_first.data()),
+        thrust::raw_pointer_cast(d_rules_second.data()),
+        thrust::raw_pointer_cast(d_rule_offsets.data()),
+        thrust::raw_pointer_cast(d_expanded_rules.data()), num_rules,
+        min_rule_id);
+    CUDA_CHECK(cudaGetLastError());
+  }
+
+  size_t num_elements = d_encoded_path.size();
+  FinalExpansionSizeOp size_op(thrust::raw_pointer_cast(d_rule_sizes.data()),
+                               min_rule_id, max_rule_id);
+  auto size_iter =
+      thrust::make_transform_iterator(d_encoded_path.begin(), size_op);
+
+  int64_t output_size =
+      thrust::transform_reduce(d_encoded_path.begin(), d_encoded_path.end(),
+                               size_op, (int64_t)0, thrust::plus<int64_t>());
+
+  thrust::device_vector<int64_t> d_output_offsets(num_elements);
+  thrust::exclusive_scan(size_iter, size_iter + num_elements,
+                         d_output_offsets.begin());
+
+  uint32_t num_segs_final = static_cast<uint32_t>(d_lens_final.size());
+  thrust::device_vector<uint64_t> d_offs_final(num_segs_final);
+  thrust::exclusive_scan(d_lens_final.begin(), d_lens_final.end(),
+                         d_offs_final.begin(), uint64_t(0));
+
+  thrust::device_vector<int64_t> d_encoded_offsets(num_segs_final);
+  thrust::lower_bound(d_output_offsets.begin(), d_output_offsets.end(),
+                      d_offs_final.begin(), d_offs_final.end(),
+                      d_encoded_offsets.begin());
+
+  std::vector<int64_t> h_encoded_offsets(num_segs_final);
+  thrust::copy(d_encoded_offsets.begin(), d_encoded_offsets.end(),
+               h_encoded_offsets.begin());
+  std::vector<uint64_t> h_expanded_offsets(num_segs_final);
+  thrust::copy(d_offs_final.begin(), d_offs_final.end(),
+               h_expanded_offsets.begin());
+
+  h_result_data.resize(output_size);
+
+  thrust::device_vector<int32_t> d_chunk_workspace;
+
+  uint32_t current_seg_begin = 0;
+  for (uint32_t i = 0; i < num_segs_final; ++i) {
+    int64_t seg_expanded_start = h_expanded_offsets[current_seg_begin];
+    int64_t next_expanded_start = (i + 1 < num_segs_final) ? h_expanded_offsets[i + 1] : output_size;
+    int64_t size_so_far = next_expanded_start - seg_expanded_start;
+
+    bool split = false;
+    // Chunking condition: 128 paths/walks OR 128 MB elements (32 million paths equivalent)
+    if (i - current_seg_begin >= 128) split = true;
+    if (size_so_far >= 32 * 1024 * 1024 && i > current_seg_begin) split = true;
+    if (i + 1 == num_segs_final) split = true;
+
+    if (split) {
+      uint32_t chunk_seg_end = i + 1;
+      int64_t chunk_encoded_begin = h_encoded_offsets[current_seg_begin];
+      int64_t chunk_encoded_end = (chunk_seg_end < num_segs_final) ? h_encoded_offsets[chunk_seg_end] : d_encoded_path.size();
+      int64_t chunk_expanded_begin = h_expanded_offsets[current_seg_begin];
+      int64_t chunk_expanded_end = next_expanded_start;
+
+      expand_and_inverse_decode_chunk_device(
+          d_encoded_path, d_output_offsets, d_expanded_rules,
+          d_rule_offsets, d_rule_sizes, d_chunk_workspace,
+          d_offs_final, chunk_encoded_begin, chunk_encoded_end,
+          chunk_expanded_begin, chunk_expanded_end,
+          current_seg_begin, chunk_seg_end,
+          min_rule_id, max_rule_id, output_size);
+
+      thrust::copy(d_chunk_workspace.begin(), d_chunk_workspace.end(),
+                   h_result_data.begin() + chunk_expanded_begin);
+
+      current_seg_begin = chunk_seg_end;
+    }
+  }
 }
 
 } // namespace gpu_codec

@@ -454,80 +454,38 @@ decompress_paths_gpu(const gpu_compression::CompressedData_gpu &data) {
   }
 
   if (g_debug_decompression) {
-    std::cout << "[GPU Decompress] Expanding path with " << num_rules
-              << " rules, min_rule_id=" << min_rule_id << std::endl;
+    std::cout << "[GPU Decompress] Expanding path with rolling chunk scheduler "
+              << "(128 paths per chunk), min_rule_id=" << min_rule_id << std::endl;
   }
 
   // =========================================================================
-  // Expand path on GPU
+  // Expand path on GPU + Inverse delta-decode the expanded path (rolling)
   // =========================================================================
 
   auto expand_start = Clock::now();
-  thrust::device_vector<int32_t> d_expanded = gpu_codec::expand_path_device_vec(
-      d_encoded_path, d_rules_first, d_rules_second, min_rule_id, num_rules);
+  
+  result.lengths =
+      gpu_codec::nvcomp_zstd_decompress_uint32(data.path_lengths_zstd_nvcomp);
+  thrust::device_vector<uint32_t> d_lens_final(result.lengths.begin(),
+                                                result.lengths.end());
+                                                
+  gpu_codec::rolling_expand_and_inverse_delta_decode(
+      d_encoded_path, d_rules_first, d_rules_second, min_rule_id, num_rules,
+      d_lens_final, result.data);
+
   auto expand_end = Clock::now();
   double expand_time_ms = elapsed_ms(expand_start, expand_end);
 
   if (g_debug_decompression) {
-    std::cout << "[GPU Decompress] Rule expansion: " << encoded_path_count
-              << " -> " << d_expanded.size() << " elements in " << std::fixed
+    std::cout << "[GPU Decompress] Rolling Rule expansion and copy to host: " << result.data.size() << " elements in " << std::fixed
               << std::setprecision(2) << expand_time_ms << " ms" << std::endl;
-  }
-
-  // =========================================================================
-  // Inverse delta-decode the expanded path (per-segment)
-  // =========================================================================
-
-  // Decompress original path_lengths first — needed for segment boundaries
-  result.lengths =
-      gpu_codec::nvcomp_zstd_decompress_uint32(data.path_lengths_zstd_nvcomp);
-  uint32_t num_segs_final = static_cast<uint32_t>(result.lengths.size());
-
-  thrust::device_vector<uint32_t> d_lens_final(result.lengths.begin(),
-                                                result.lengths.end());
-  thrust::device_vector<uint64_t> d_offs_final(num_segs_final);
-  thrust::exclusive_scan(d_lens_final.begin(), d_lens_final.end(),
-                         d_offs_final.begin(), uint64_t(0));
-
-  auto t_path_delta_start = Clock::now();
-  thrust::device_vector<int32_t> d_original =
-      gpu_codec::segmented_inverse_delta_decode_device_vec(
-          d_expanded, d_offs_final, num_segs_final, d_expanded.size());
-  auto t_path_delta_end = Clock::now();
-  double path_delta_time_ms = elapsed_ms(t_path_delta_start, t_path_delta_end);
-
-  if (g_debug_decompression) {
-    std::cout << "[GPU Decompress] Segmented inverse delta-decode path ("
-              << d_expanded.size() << " elements, " << num_segs_final
-              << " segments): " << std::fixed
-              << std::setprecision(2) << path_delta_time_ms << " ms"
-              << std::endl;
-  }
-
-  // =========================================================================
-  // Copy back to host
-  // =========================================================================
-
-  auto t_copy_start = Clock::now();
-  result.data.resize(d_original.size());
-  thrust::copy(d_original.begin(), d_original.end(), result.data.begin());
-  auto t_copy_end = Clock::now();
-  double copy_time_ms = elapsed_ms(t_copy_start, t_copy_end);
-
-  if (g_debug_decompression) {
-    std::cout << "[GPU Decompress] Copy to host (" << d_original.size()
-              << " elements, "
-              << (d_original.size() * sizeof(int32_t) / 1024.0 / 1024.0)
-              << " MB): " << std::fixed << std::setprecision(2) << copy_time_ms
-              << " ms" << std::endl;
   }
 
   auto decomp_end = Clock::now();
   double decomp_time_ms = elapsed_ms(decomp_start, decomp_end);
 
   if (g_debug_decompression) {
-    double gpu_work_ms = nvcomp_time_ms + rules_delta_time_ms + expand_time_ms +
-                         path_delta_time_ms;
+    double gpu_work_ms = nvcomp_time_ms + rules_delta_time_ms + expand_time_ms;
 
     std::cout << "[GPU Decompress] === TIMING BREAKDOWN ===" << std::endl;
     std::cout << "  GPU Work:" << std::endl;
@@ -536,20 +494,11 @@ decompress_paths_gpu(const gpu_compression::CompressedData_gpu &data) {
     std::cout << "    2. Decode rules (prefix sum):   " << std::fixed
               << std::setprecision(2) << rules_delta_time_ms << " ms"
               << std::endl;
-    std::cout << "    3. Expand to decompressed path: " << std::fixed
+    std::cout << "    3. Rolling Expand/Decode/Copy:  " << std::fixed
               << std::setprecision(2) << expand_time_ms << " ms" << std::endl;
-    std::cout << "    4. Decode path (prefix sum):    " << std::fixed
-              << std::setprecision(2) << path_delta_time_ms << " ms"
-              << std::endl;
     std::cout << "    ─────────────────────────────" << std::endl;
     std::cout << "    GPU Total:                      " << std::fixed
               << std::setprecision(2) << gpu_work_ms << " ms" << std::endl;
-    std::cout << "  Data Transfer (PCIe):" << std::endl;
-    std::cout << "    5. Copy D->H (" << std::fixed << std::setprecision(1)
-              << (d_original.size() * sizeof(int32_t) / 1024.0 / 1024.0)
-              << " MB): " << std::setprecision(2) << copy_time_ms << " ms"
-              << std::endl;
-    std::cout << "  ─────────────────────────────────" << std::endl;
     std::cout << "  TOTAL:                            " << std::fixed
               << std::setprecision(2) << decomp_time_ms << " ms" << std::endl;
     std::cout << "[GPU Decompress] Path: " << encoded_path_count
