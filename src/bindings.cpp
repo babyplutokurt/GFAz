@@ -1053,6 +1053,17 @@ PYBIND11_MODULE(gfa_compression, m) {
       py::arg("data"),
       py::arg("options") = gpu_decompression::GpuDecompressionOptions{});
 
+  m.def(
+      "decompress_to_host_graph_gpu",
+      [](const gpu_compression::CompressedData_gpu &data,
+         gpu_decompression::GpuDecompressionOptions options) {
+        return gpu_decompression::decompress_to_host_graph(data, options);
+      },
+      "Full GPU decompression to host graph: CompressedData_gpu -> GfaGraph.\n"
+      "Supports both legacy whole-device and rolling traversal expansion.",
+      py::arg("data"),
+      py::arg("options") = gpu_decompression::GpuDecompressionOptions{});
+
   m.def("set_gpu_decompression_debug",
         &gpu_decompression::set_gpu_decompression_debug,
         "Enable verbose GPU decompression timing output.", py::arg("enabled"));

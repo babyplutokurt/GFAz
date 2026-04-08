@@ -2,6 +2,7 @@
 #include "gpu/codec_gpu_nvcomp.cuh"
 #include "gpu/decompression_workflow_gpu_internal.hpp"
 #include "gpu/decompression_workflow_gpu.hpp"
+#include "gpu/gfa_graph_gpu.hpp"
 #include "gpu/metadata_codec_gpu.hpp"
 #include "gpu/path_decompression_gpu_legacy.hpp"
 #include "gpu/path_decompression_gpu_rolling.hpp"
@@ -347,6 +348,12 @@ decompress_to_gpu_layout(const gpu_compression::CompressedData_gpu &data,
   }
 
   return result;
+}
+
+GfaGraph decompress_to_host_graph(
+    const gpu_compression::CompressedData_gpu &data,
+    GpuDecompressionOptions options) {
+  return convert_from_gpu_layout(decompress_to_gpu_layout(data, options));
 }
 
 } // namespace gpu_decompression

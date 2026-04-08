@@ -46,6 +46,19 @@ GfaGraph_gpu decompress_to_gpu_layout(
     const gpu_compression::CompressedData_gpu &data,
     GpuDecompressionOptions options = {});
 
+/**
+ * Full GPU decompression to host graph: CompressedData_gpu -> GfaGraph
+ *
+ * Uses the configured GPU path decompression mode (legacy whole-device or
+ * rolling traversal expansion), then reconstructs the host-side graph model.
+ *
+ * @param data CompressedData_gpu with all compressed fields
+ * @return GfaGraph with fully decompressed host-side data
+ */
+GfaGraph decompress_to_host_graph(
+    const gpu_compression::CompressedData_gpu &data,
+    GpuDecompressionOptions options = {});
+
 void set_gpu_decompression_debug(bool enabled);
 
 } // namespace gpu_decompression

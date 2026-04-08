@@ -30,7 +30,7 @@ env/
 *~
 
 #
-*gfa*
+*gfa
 !gfa_analyzer.py
 
 # cache
