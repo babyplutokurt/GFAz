@@ -8,6 +8,11 @@
 
 namespace gpu_decompression {
 
+struct GpuDecompressionOptions {
+  uint32_t traversals_per_chunk = 128;
+  bool use_legacy_full_decompression = false;
+};
+
 /**
  * GPU-accelerated path decompression (rule expansion).
  * 
@@ -20,7 +25,9 @@ namespace gpu_decompression {
  * @param data CompressedData_gpu with compressed paths and rules
  * @return FlattenedPaths with decompressed path data and lengths
  */
-FlattenedPaths decompress_paths_gpu(const gpu_compression::CompressedData_gpu& data);
+FlattenedPaths decompress_paths_gpu(
+    const gpu_compression::CompressedData_gpu &data,
+    GpuDecompressionOptions options = {});
 
 /**
  * Full GPU decompression: CompressedData_gpu -> GfaGraph_gpu
@@ -35,7 +42,9 @@ FlattenedPaths decompress_paths_gpu(const gpu_compression::CompressedData_gpu& d
  * @param data CompressedData_gpu with all compressed fields
  * @return GfaGraph_gpu with fully decompressed data
  */
-GfaGraph_gpu decompress_to_gpu_layout(const gpu_compression::CompressedData_gpu& data);
+GfaGraph_gpu decompress_to_gpu_layout(
+    const gpu_compression::CompressedData_gpu &data,
+    GpuDecompressionOptions options = {});
 
 void set_gpu_decompression_debug(bool enabled);
 

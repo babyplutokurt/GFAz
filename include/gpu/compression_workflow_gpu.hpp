@@ -10,6 +10,12 @@
 
 namespace gpu_compression {
 
+struct GpuCompressionOptions {
+  size_t rolling_chunk_bytes = 0;
+  bool force_rolling_scheduler = false;
+  bool force_full_device_legacy = false;
+};
+
 // Simplified rule range for GPU output (no k or flattened_offset needed)
 struct GPURuleRange {
   uint32_t start_id;
@@ -160,8 +166,9 @@ struct CompressedData_gpu {
  * @return CompressedData_gpu containing encoded path, all rules, and layer
  * ranges
  */
-CompressedData_gpu run_path_compression_gpu(const FlattenedPaths &paths,
-                                            int num_rounds);
+CompressedData_gpu run_path_compression_gpu(
+    const FlattenedPaths &paths, int num_rounds,
+    GpuCompressionOptions options = {});
 
 /**
  * High-level GPU compression entry point (parse + compress).
@@ -169,7 +176,8 @@ CompressedData_gpu run_path_compression_gpu(const FlattenedPaths &paths,
  * path metadata.
  */
 CompressedData_gpu compress_gfa_gpu(const std::string &gfa_file_path,
-                                    int num_rounds);
+                                    int num_rounds,
+                                    GpuCompressionOptions options = {});
 
 /**
  * GPU compression from GfaGraph_gpu (no parsing).
@@ -179,8 +187,9 @@ CompressedData_gpu compress_gfa_gpu(const std::string &gfa_file_path,
  * @param num_rounds Number of compression rounds
  * @return CompressedData_gpu containing all compressed fields
  */
-CompressedData_gpu compress_gpu_graph(const GfaGraph_gpu &gpu_graph,
-                                      int num_rounds);
+CompressedData_gpu compress_gpu_graph(
+    const GfaGraph_gpu &gpu_graph, int num_rounds,
+    GpuCompressionOptions options = {});
 
 void set_gpu_compression_debug(bool enabled);
 

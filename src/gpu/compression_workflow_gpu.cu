@@ -764,10 +764,21 @@ run_path_compression_gpu_rolling(const FlattenedPaths &paths, int num_rounds,
   return result;
 }
 
-CompressedData_gpu run_path_compression_gpu(const FlattenedPaths &paths,
-                                            int num_rounds) {
+CompressedData_gpu run_path_compression_gpu(
+    const FlattenedPaths &paths, int num_rounds,
+    GpuCompressionOptions options) {
   const size_t traversal_bytes = paths.data.size() * sizeof(int32_t);
-  const size_t chunk_bytes = rolling_chunk_bytes();
+  const size_t chunk_bytes =
+      (options.rolling_chunk_bytes > 0) ? options.rolling_chunk_bytes
+                                        : rolling_chunk_bytes();
+
+  if (options.force_full_device_legacy) {
+    return run_path_compression_gpu_full_device(paths, num_rounds);
+  }
+
+  if (options.force_rolling_scheduler) {
+    return run_path_compression_gpu_rolling(paths, num_rounds, chunk_bytes);
+  }
 
   if (traversal_bytes <= chunk_bytes) {
     return run_path_compression_gpu_full_device(paths, num_rounds);
@@ -812,22 +823,24 @@ std::map<uint32_t, uint64_t> build_rulebook(const CompressedData_gpu &data) {
 }
 
 CompressedData_gpu compress_gfa_gpu(const std::string &gfa_file_path,
-                                    int num_rounds) {
+                                    int num_rounds,
+                                    GpuCompressionOptions options) {
   GfaParser parser;
   GfaGraph graph = parser.parse(gfa_file_path);
 
   GfaGraph_gpu gpu_graph = convert_to_gpu_layout(graph);
 
-  return compress_gpu_graph(gpu_graph, num_rounds);
+  return compress_gpu_graph(gpu_graph, num_rounds, options);
 }
 
 CompressedData_gpu compress_gpu_graph(const GfaGraph_gpu &gpu_graph,
-                                      int num_rounds) {
+                                      int num_rounds,
+                                      GpuCompressionOptions options) {
   // Start timer for compression (GfaGraph_gpu -> CompressedData_gpu)
   auto compress_start = Clock::now();
 
   CompressedData_gpu data =
-      run_path_compression_gpu(gpu_graph.paths, num_rounds);
+      run_path_compression_gpu(gpu_graph.paths, num_rounds, options);
 
   // Store path/walk split info
   data.num_paths = gpu_graph.num_paths;

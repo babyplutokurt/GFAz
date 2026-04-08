@@ -780,7 +780,18 @@ PYBIND11_MODULE(gfa_compression, m) {
       py::arg("paths"), py::arg("next_starting_id"),
       py::arg("num_rounds") = kDefaultRounds);
 
-  // GPU-resident compressed formats and path-compression helpers.
+  // GPU-resident compressed formats, options, and path-compression helpers.
+
+  py::class_<gpu_compression::GpuCompressionOptions>(m, "GpuCompressionOptions")
+      .def(py::init<>())
+      .def_readwrite("rolling_chunk_bytes", &gpu_compression::GpuCompressionOptions::rolling_chunk_bytes)
+      .def_readwrite("force_rolling_scheduler", &gpu_compression::GpuCompressionOptions::force_rolling_scheduler)
+      .def_readwrite("force_full_device_legacy", &gpu_compression::GpuCompressionOptions::force_full_device_legacy);
+
+  py::class_<gpu_decompression::GpuDecompressionOptions>(m, "GpuDecompressionOptions")
+      .def(py::init<>())
+      .def_readwrite("traversals_per_chunk", &gpu_decompression::GpuDecompressionOptions::traversals_per_chunk)
+      .def_readwrite("use_legacy_full_decompression", &gpu_decompression::GpuDecompressionOptions::use_legacy_full_decompression);
 
   py::class_<gpu_compression::GPURuleRange>(m, "GPURuleRange")
       .def(py::init<>())
@@ -929,22 +940,28 @@ PYBIND11_MODULE(gfa_compression, m) {
   // Stable high-level GPU compression/decompression APIs at module root.
   m.def(
       "compress_gfa_gpu",
-      [](const std::string &gfa_file_path, int num_rounds) {
-        return gpu_compression::compress_gfa_gpu(gfa_file_path, num_rounds);
+      [](const std::string &gfa_file_path, int num_rounds,
+         gpu_compression::GpuCompressionOptions options) {
+        return gpu_compression::compress_gfa_gpu(gfa_file_path, num_rounds,
+                                                 options);
       },
       "Parse GFA and run GPU path compression with path metadata compression.\n"
       "Rules are stored as delta-encoded + nvComp ZSTD compressed first/second "
       "element arrays.",
-      py::arg("gfa_file_path"), py::arg("num_rounds") = kDefaultRounds);
+      py::arg("gfa_file_path"), py::arg("num_rounds") = kDefaultRounds,
+      py::arg("options") = gpu_compression::GpuCompressionOptions{});
 
   m.def(
       "compress_gpu_graph",
-      [](const GfaGraph_gpu &gpu_graph, int num_rounds) {
-        return gpu_compression::compress_gpu_graph(gpu_graph, num_rounds);
+      [](const GfaGraph_gpu &gpu_graph, int num_rounds,
+         gpu_compression::GpuCompressionOptions options) {
+        return gpu_compression::compress_gpu_graph(gpu_graph, num_rounds,
+                                                   options);
       },
       "GPU compression from pre-converted GfaGraph_gpu.\n"
       "Use this for accurate timing of compression-only (no parsing).",
-      py::arg("gpu_graph"), py::arg("num_rounds") = kDefaultRounds);
+      py::arg("gpu_graph"), py::arg("num_rounds") = kDefaultRounds,
+      py::arg("options") = gpu_compression::GpuCompressionOptions{});
 
   // Experimental convenience helpers built on compressed GPU payloads.
   experimental_gpu.def(
@@ -1027,12 +1044,14 @@ PYBIND11_MODULE(gfa_compression, m) {
 
   m.def(
       "decompress_to_gpu_layout",
-      [](const gpu_compression::CompressedData_gpu &data) {
-        return gpu_decompression::decompress_to_gpu_layout(data);
+      [](const gpu_compression::CompressedData_gpu &data,
+         gpu_decompression::GpuDecompressionOptions options) {
+        return gpu_decompression::decompress_to_gpu_layout(data, options);
       },
       "Full GPU decompression: CompressedData_gpu -> GfaGraph_gpu.\n"
       "Decompresses paths, names, overlaps, and segment sequences.",
-      py::arg("data"));
+      py::arg("data"),
+      py::arg("options") = gpu_decompression::GpuDecompressionOptions{});
 
   m.def(
       "verify_gpu_round_trip",

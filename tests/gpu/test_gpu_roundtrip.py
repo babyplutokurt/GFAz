@@ -19,6 +19,9 @@ add_build_to_syspath()
 
 import gfa_compression as gfac
 
+CHUNK_BYTES = None
+TRAVERSALS_PER_CHUNK = None
+
 
 def print_header(title):
     """Print formatted section header"""
@@ -147,6 +150,14 @@ def test_gpu_roundtrip(gfa_file):
     print(f"    - num_walks: {gpu_graph_original.num_walks:,}")
     print(f"    - num_links: {gpu_graph_original.num_links:,}")
     print(f"    - paths.total_nodes: {gpu_graph_original.paths.total_nodes():,}")
+    print(
+        "    - compression chunk bytes: "
+        f"{CHUNK_BYTES if CHUNK_BYTES is not None else 'default'}"
+    )
+    print(
+        "    - decompression traversals/chunk: "
+        f"{TRAVERSALS_PER_CHUNK if TRAVERSALS_PER_CHUNK is not None else 'default'}"
+    )
     
     # Get original file size
     original_file_size = os.path.getsize(gfa_file)
@@ -156,7 +167,12 @@ def test_gpu_roundtrip(gfa_file):
     # ========================================================================
     print_step(3, "Compressing GfaGraph_gpu → CompressedData_gpu...")
     t_compress_start = time.time()
-    compressed = gfac.compress_gpu_graph(gpu_graph_original, 8)
+    
+    comp_opts = gfac.GpuCompressionOptions()
+    if CHUNK_BYTES is not None:
+        comp_opts.rolling_chunk_bytes = CHUNK_BYTES
+        
+    compressed = gfac.compress_gpu_graph(gpu_graph_original, 8, comp_opts)
     t_compress_end = time.time()
     
     # Calculate compression stats
@@ -197,7 +213,11 @@ def test_gpu_roundtrip(gfa_file):
         loaded_compressed = gfac.deserialize_gpu(tmp_path)
 
         t_decompress_start = time.time()
-        gpu_graph_decompressed = gfac.decompress_to_gpu_layout(loaded_compressed)
+        decomp_opts = gfac.GpuDecompressionOptions()
+        if TRAVERSALS_PER_CHUNK is not None:
+            decomp_opts.traversals_per_chunk = TRAVERSALS_PER_CHUNK
+            
+        gpu_graph_decompressed = gfac.decompress_to_gpu_layout(loaded_compressed, decomp_opts)
         t_decompress_end = time.time()
         print(f"  ✓ Decompressed in {t_decompress_end - t_decompress_start:.3f}s")
         print(f"    - num_segments: {gpu_graph_decompressed.num_segments:,}")
@@ -250,19 +270,40 @@ def test_gpu_roundtrip(gfa_file):
         return False
 
 
+import argparse
+
 def main():
     """Main entry point"""
-    if len(sys.argv) < 2:
-        print("Usage: python tests/gpu/test_roundtrip.py <gfa_file>")
-        print()
-        print("Tests the full GPU round-trip:")
-        print("  GfaGraph → GfaGraph_gpu → CompressedData_gpu → GfaGraph_gpu")
-        print()
-        print("Verifies that decompressed data matches original exactly.")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="GPU Round-trip Test: GfaGraph → GfaGraph_gpu → "
+                    "CompressedData_gpu → GfaGraph_gpu"
+    )
+    parser.add_argument("gfa_file", help="Input GFA file to test")
+    parser.add_argument(
+        "--chunk-GB",
+        dest="chunk_gb",
+        type=float,
+        default=None,
+        help="Compression rolling chunk size in GiB (e.g. 0.5 for 512MiB)",
+    )
+    parser.add_argument(
+        "--traversals-per-chunk",
+        type=int,
+        default=None,
+        help="Decompression rolling traversal batch size (e.g. 1024)",
+    )
     
-    gfa_file = sys.argv[1]
-    success = test_gpu_roundtrip(gfa_file)
+    args = parser.parse_args()
+    
+    global CHUNK_BYTES, TRAVERSALS_PER_CHUNK
+    CHUNK_BYTES = (
+        int(args.chunk_gb * 1024 * 1024 * 1024)
+        if args.chunk_gb is not None
+        else None
+    )
+    TRAVERSALS_PER_CHUNK = args.traversals_per_chunk
+    
+    success = test_gpu_roundtrip(args.gfa_file)
     sys.exit(0 if success else 1)
 
 

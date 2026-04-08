@@ -181,10 +181,18 @@ class GFACompressor:
 
     # --- GPU Methods (require CUDA build) ---
     
-    def compress_gpu(self, num_rounds: int = 8):
+    def compress_gpu(self, num_rounds: int = 8, chunk_bytes: int = None, force_rolling: bool = False, force_legacy: bool = False):
         """GPU-accelerated compression using nvComp."""
         start_time = time.perf_counter()
-        self.compressed_data_gpu = gfa_lib.compress_gfa_gpu(self.gfa_file_path, num_rounds=num_rounds)
+        options = gfa_lib.GpuCompressionOptions()
+        if chunk_bytes is not None:
+            options.rolling_chunk_bytes = chunk_bytes
+        options.force_rolling_scheduler = force_rolling
+        options.force_full_device_legacy = force_legacy
+        
+        self.compressed_data_gpu = gfa_lib.compress_gfa_gpu(
+            self.gfa_file_path, num_rounds=num_rounds, options=options
+        )
         self.compression_time = time.perf_counter() - start_time
         self.is_compressed = True
         
@@ -193,14 +201,20 @@ class GFACompressor:
         print(f"[GPU] Rules: {self.compressed_data_gpu.total_rules():,}")
         return self.compressed_data_gpu
 
-    def decompress_gpu(self):
+    def decompress_gpu(self, traversals_per_chunk: int = 128, force_legacy: bool = False):
         """GPU-accelerated decompression."""
         if self.compressed_data_gpu is None:
             print("Error: No GPU data. Call compress_gpu() first.")
             return None
         
         start_time = time.perf_counter()
-        result = gfa_lib.decompress_to_gpu_layout(self.compressed_data_gpu)
+        options = gfa_lib.GpuDecompressionOptions()
+        options.traversals_per_chunk = traversals_per_chunk
+        options.use_legacy_full_decompression = force_legacy
+
+        result = gfa_lib.decompress_to_gpu_layout(
+            self.compressed_data_gpu, options=options
+        )
         self.decompression_time = time.perf_counter() - start_time
         
         print(f"[GPU] Time: {self.decompression_time:.2f}s")

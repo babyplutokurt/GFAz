@@ -2660,7 +2660,8 @@ void rolling_expand_and_inverse_delta_decode(
     const thrust::device_vector<int32_t> &d_rules_second,
     uint32_t min_rule_id, size_t num_rules,
     const thrust::device_vector<uint32_t> &d_lens_final,
-    std::vector<int32_t> &h_result_data) {
+    std::vector<int32_t> &h_result_data,
+    uint32_t traversals_per_chunk) {
 
   const uint32_t max_rule_id = min_rule_id + static_cast<uint32_t>(num_rules);
   const int threads = 256;
@@ -2734,8 +2735,8 @@ void rolling_expand_and_inverse_delta_decode(
     int64_t size_so_far = next_expanded_start - seg_expanded_start;
 
     bool split = false;
-    // Chunking condition: 128 paths/walks OR 128 MB elements (32 million paths equivalent)
-    if (i - current_seg_begin >= 128) split = true;
+    // Chunking condition: fixed traversal count OR large expanded output size.
+    if (i - current_seg_begin >= traversals_per_chunk) split = true;
     if (size_so_far >= 32 * 1024 * 1024 && i > current_seg_begin) split = true;
     if (i + 1 == num_segs_final) split = true;
 

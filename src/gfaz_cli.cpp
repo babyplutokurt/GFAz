@@ -1,9 +1,11 @@
+#include <cerrno>
 #include <cstdlib>
 #include <chrono>
 #include <filesystem>
 #include <getopt.h>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -29,6 +31,9 @@ constexpr int kDefaultFreqThreshold = 2;
 constexpr int kDefaultNumThreads = 0;
 
 using Clock = std::chrono::steady_clock;
+constexpr int kOptGpuChunkMb = 1000;
+constexpr int kOptGpuLegacy = 1001;
+constexpr int kOptGpuTraversalsPerChunk = 1002;
 
 std::string format_size(uintmax_t bytes) {
   std::ostringstream oss;
@@ -62,6 +67,19 @@ void configure_stats(bool enabled) {
   gpu_decompression::set_gpu_decompression_debug(true);
 #endif
 }
+
+bool parse_ull_arg(const char *name, const char *value,
+                   unsigned long long &parsed) {
+  errno = 0;
+  char *end = nullptr;
+  parsed = std::strtoull(value, &end, 10);
+  if (errno != 0 || end == value || (end && *end != '\0') || parsed == 0) {
+    std::cerr << "Error: Invalid value for " << name << ": " << value
+              << std::endl;
+    return false;
+  }
+  return true;
+}
 }
 
 void print_usage() {
@@ -88,6 +106,8 @@ OPTIONS (compress):
     -t, --threshold <N>     Frequency threshold (default: 2)
     -j, --threads <N>       Number of threads (default: 0 = auto)
     -g, --gpu               Use GPU backend (if available)
+    --gpu-chunk-mb <N>      Rolling GPU chunk size in MiB
+    --gpu-legacy            Use the old whole-graph GPU compression path
                              Note: GPU mode ignores --delta/--threshold/--threads
     -s, --stats             Show timing/size statistics
     -h, --help              Show this help message
@@ -97,6 +117,8 @@ OPTIONS (decompress):
     -l, --legacy            Use the legacy CPU path:
                              CompressedData -> GfaGraph -> write_gfa
     -g, --gpu               Use GPU backend (if available)
+    --gpu-traversals <N>    Traversals expanded per rolling GPU chunk
+    --gpu-legacy            Use the old whole-graph GPU decompression path
                              Note: GPU mode ignores --threads
     -s, --stats             Show timing/size statistics
     -h, --help              Show this help message
@@ -205,6 +227,8 @@ OPTIONS:
     -t, --threshold <N>     Frequency threshold (default: 2)
     -j, --threads <N>       Number of threads (default: 0 = auto)
     -g, --gpu               Use GPU backend (if available)
+    --gpu-chunk-mb <N>      Rolling GPU chunk size in MiB
+    --gpu-legacy            Use the old whole-graph GPU compression path
                              Note: GPU mode ignores --delta/--threshold/--threads
     -s, --stats             Show timing/size statistics
     -h, --help              Show this help message
@@ -214,6 +238,8 @@ EXAMPLES:
     gfaz compress --gpu input.gfa                # -> input.gfa.gfaz_gpu
     gfaz compress -r 4 -d 1 -t 3 input.gfa out.gfaz
     gfaz compress --gpu input.gfa out.gfaz_gpu
+    gfaz compress --gpu --gpu-chunk-mb 512 input.gfa
+    gfaz compress --gpu --gpu-legacy input.gfa
 
 In CPU-only builds, --gpu prints a warning and uses CPU backend.
 
@@ -232,6 +258,8 @@ OPTIONS:
     -l, --legacy            Use the legacy CPU path:
                              CompressedData -> GfaGraph -> write_gfa
     -g, --gpu               Use GPU backend (if available)
+    --gpu-traversals <N>    Traversals expanded per rolling GPU chunk
+    --gpu-legacy            Use the old whole-graph GPU decompression path
                              Note: GPU mode ignores --threads
     -s, --stats             Show timing/size statistics
     -h, --help              Show this help message
@@ -240,6 +268,8 @@ EXAMPLES:
     gfaz decompress input.gfaz                   # -> input.gfa
     gfaz decompress --gpu input.gfaz_gpu         # -> input.gfa
     gfaz decompress input.gfaz output.gfa
+    gfaz decompress --gpu --gpu-traversals 256 input.gfaz_gpu
+    gfaz decompress --gpu --gpu-legacy input.gfaz_gpu
 
 In CPU-only builds, --gpu prints a warning and uses CPU backend.
 By default, CPU decompression writes GFA directly from CompressedData with
@@ -255,7 +285,9 @@ int do_compress(int argc, char *argv[]) {
   int freq_threshold = kDefaultFreqThreshold;
   int num_threads = kDefaultNumThreads;
   bool use_gpu = false;
+  bool use_gpu_legacy = false;
   bool show_stats = false;
+  unsigned long long gpu_chunk_mb = 0;
 
   static struct option long_options[] = {
       {"rounds", required_argument, 0, 'r'},
@@ -263,6 +295,8 @@ int do_compress(int argc, char *argv[]) {
       {"threshold", required_argument, 0, 't'},
       {"threads", required_argument, 0, 'j'},
       {"gpu", no_argument, 0, 'g'},
+      {"gpu-chunk-mb", required_argument, 0, kOptGpuChunkMb},
+      {"gpu-legacy", no_argument, 0, kOptGpuLegacy},
       {"stats", no_argument, 0, 's'},
       {"help", no_argument, 0, 'h'},
       {0, 0, 0, 0}};
@@ -286,6 +320,14 @@ int do_compress(int argc, char *argv[]) {
       break;
     case 'g':
       use_gpu = true;
+      break;
+    case kOptGpuChunkMb:
+      if (!parse_ull_arg("--gpu-chunk-mb", optarg, gpu_chunk_mb)) {
+        return 1;
+      }
+      break;
+    case kOptGpuLegacy:
+      use_gpu_legacy = true;
       break;
     case 's':
       show_stats = true;
@@ -316,6 +358,11 @@ int do_compress(int argc, char *argv[]) {
     output_path = input_path + (use_gpu ? ".gfaz_gpu" : ".gfaz");
   }
 
+  if (!use_gpu && (gpu_chunk_mb > 0 || use_gpu_legacy)) {
+    std::cerr << "Error: --gpu-chunk-mb and --gpu-legacy require --gpu\n";
+    return 1;
+  }
+
 #ifndef ENABLE_CUDA
   if (use_gpu) {
     std::cerr << "Warning: GPU backend requested, but this is a CPU-only build. "
@@ -335,6 +382,10 @@ int do_compress(int argc, char *argv[]) {
       std::cerr << "Note: GPU backend ignores --delta, --threshold, and --threads."
                 << std::endl;
     }
+    if (use_gpu_legacy && gpu_chunk_mb > 0) {
+      std::cerr << "Note: --gpu-chunk-mb is ignored with --gpu-legacy."
+                << std::endl;
+    }
   }
 #endif
 
@@ -345,13 +396,24 @@ int do_compress(int argc, char *argv[]) {
   std::cout << "Stats: " << (show_stats ? "on" : "off") << std::endl;
   std::cout << "Rounds: " << rounds << std::endl;
 #ifdef ENABLE_CUDA
+  if (use_gpu) {
+    std::cout << "Mode:   "
+              << (use_gpu_legacy ? "legacy whole-device"
+                                 : "rolling scheduler")
+              << std::endl;
+    if (!use_gpu_legacy) {
+      std::cout << "GPU Chunk: "
+                << (gpu_chunk_mb > 0 ? std::to_string(gpu_chunk_mb) + " MiB"
+                                     : "default")
+                << std::endl;
+    }
+  } else {
+#else
   if (!use_gpu) {
 #endif
     std::cout << "Delta:  " << delta_round << std::endl;
     std::cout << "Threshold: " << freq_threshold << std::endl;
-#ifdef ENABLE_CUDA
   }
-#endif
   if (num_threads == 0) {
     std::cout << "Threads: auto (" << resolve_omp_thread_count(0) << ")"
               << std::endl;
@@ -366,8 +428,15 @@ int do_compress(int argc, char *argv[]) {
     const auto start = Clock::now();
 #ifdef ENABLE_CUDA
     if (use_gpu) {
+      gpu_compression::GpuCompressionOptions gpu_options;
+      gpu_options.force_full_device_legacy = use_gpu_legacy;
+      gpu_options.force_rolling_scheduler = !use_gpu_legacy;
+      if (gpu_chunk_mb > 0) {
+        gpu_options.rolling_chunk_bytes = static_cast<size_t>(gpu_chunk_mb) *
+                                          1024ull * 1024ull;
+      }
       gpu_compression::CompressedData_gpu compressed_data_gpu =
-          gpu_compression::compress_gfa_gpu(input_path, rounds);
+          gpu_compression::compress_gfa_gpu(input_path, rounds, gpu_options);
       serialize_compressed_data_gpu(compressed_data_gpu, output_path);
     } else {
 #endif
@@ -413,11 +482,17 @@ int do_decompress(int argc, char *argv[]) {
   int num_threads = kDefaultNumThreads;
   bool use_gpu = false;
   bool use_legacy = false;
+  bool use_gpu_legacy = false;
   bool show_stats = false;
+  unsigned long long gpu_traversals_per_chunk = 128;
 
   static struct option long_options[] = {{"threads", required_argument, 0, 'j'},
                                          {"legacy", no_argument, 0, 'l'},
                                          {"gpu", no_argument, 0, 'g'},
+                                         {"gpu-traversals", required_argument, 0,
+                                          kOptGpuTraversalsPerChunk},
+                                         {"gpu-legacy", no_argument, 0,
+                                          kOptGpuLegacy},
                                          {"stats", no_argument, 0, 's'},
                                          {"help", no_argument, 0, 'h'},
                                          {0, 0, 0, 0}};
@@ -434,6 +509,21 @@ int do_decompress(int argc, char *argv[]) {
       break;
     case 'g':
       use_gpu = true;
+      break;
+    case kOptGpuTraversalsPerChunk:
+      if (!parse_ull_arg("--gpu-traversals", optarg,
+                         gpu_traversals_per_chunk)) {
+        return 1;
+      }
+      if (gpu_traversals_per_chunk >
+          std::numeric_limits<uint32_t>::max()) {
+        std::cerr << "Error: --gpu-traversals exceeds uint32 range"
+                  << std::endl;
+        return 1;
+      }
+      break;
+    case kOptGpuLegacy:
+      use_gpu_legacy = true;
       break;
     case 's':
       show_stats = true;
@@ -455,6 +545,17 @@ int do_decompress(int argc, char *argv[]) {
 
   std::string input_path = argv[optind];
   std::string output_path;
+
+  if (!use_gpu && (gpu_traversals_per_chunk != 128 || use_gpu_legacy)) {
+    std::cerr << "Error: --gpu-traversals and --gpu-legacy require --gpu\n";
+    return 1;
+  }
+
+  if (use_gpu && use_legacy) {
+    std::cerr << "Error: --legacy is the CPU legacy mode. Use --gpu-legacy for "
+                 "the old whole-graph GPU decompression path.\n";
+    return 1;
+  }
 
   if (optind + 1 < argc) {
     output_path = argv[optind + 1];
@@ -485,6 +586,10 @@ int do_decompress(int argc, char *argv[]) {
     std::cerr << "Note: GPU backend ignores --threads for decompression."
               << std::endl;
   }
+  if (use_gpu && use_gpu_legacy && gpu_traversals_per_chunk != 128) {
+    std::cerr << "Note: --gpu-traversals is ignored with --gpu-legacy."
+              << std::endl;
+  }
 #endif
 
   std::cout << "=== GFAZ Decompress ===" << std::endl;
@@ -493,13 +598,22 @@ int do_decompress(int argc, char *argv[]) {
   std::cout << "Backend: " << (use_gpu ? "GPU" : "CPU") << std::endl;
   std::cout << "Stats: " << (show_stats ? "on" : "off") << std::endl;
 #ifdef ENABLE_CUDA
+  if (use_gpu) {
+    std::cout << "Mode:   "
+              << (use_gpu_legacy ? "legacy whole-device"
+                                 : "rolling traversal expansion")
+              << std::endl;
+    if (!use_gpu_legacy) {
+      std::cout << "GPU Traversals/Chunk: " << gpu_traversals_per_chunk
+                << std::endl;
+    }
+  } else {
+#else
   if (!use_gpu) {
 #endif
     std::cout << "Mode:   " << (use_legacy ? "legacy in-memory" : "streaming direct-writer")
               << std::endl;
-#ifdef ENABLE_CUDA
   }
-#endif
   if (num_threads == 0) {
     std::cout << "Threads: auto (" << resolve_omp_thread_count(0) << ")"
               << std::endl;
@@ -514,9 +628,14 @@ int do_decompress(int argc, char *argv[]) {
     const auto start = Clock::now();
 #ifdef ENABLE_CUDA
     if (use_gpu) {
+      gpu_decompression::GpuDecompressionOptions gpu_options;
+      gpu_options.traversals_per_chunk =
+          static_cast<uint32_t>(gpu_traversals_per_chunk);
+      gpu_options.use_legacy_full_decompression = use_gpu_legacy;
       gpu_compression::CompressedData_gpu data_gpu =
           deserialize_compressed_data_gpu(input_path);
-      GfaGraph_gpu graph_gpu = gpu_decompression::decompress_to_gpu_layout(data_gpu);
+      GfaGraph_gpu graph_gpu =
+          gpu_decompression::decompress_to_gpu_layout(data_gpu, gpu_options);
       GfaGraph graph = convert_from_gpu_layout(graph_gpu);
       write_gfa(graph, output_path);
     } else {

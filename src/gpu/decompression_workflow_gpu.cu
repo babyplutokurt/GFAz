@@ -281,7 +281,8 @@ struct ScopedCudaStreams3 {
 };
 
 FlattenedPaths
-decompress_paths_gpu(const gpu_compression::CompressedData_gpu &data) {
+decompress_paths_gpu(const gpu_compression::CompressedData_gpu &data,
+                     GpuDecompressionOptions options) {
   auto decomp_start = Clock::now();
 
   FlattenedPaths result;
@@ -423,6 +424,8 @@ decompress_paths_gpu(const gpu_compression::CompressedData_gpu &data) {
   // Get min_rule_id and total rules
   uint32_t min_rule_id = data.min_rule_id();
   size_t num_rules = data.total_rules();
+  const uint32_t traversals_per_chunk =
+      std::max<uint32_t>(1, options.traversals_per_chunk);
 
   // Validate decoded rule array sizes match expected count from layer_ranges
   if (d_rules_first.size() != num_rules || d_rules_second.size() != num_rules) {
@@ -453,32 +456,55 @@ decompress_paths_gpu(const gpu_compression::CompressedData_gpu &data) {
     }
   }
 
-  if (g_debug_decompression) {
-    std::cout << "[GPU Decompress] Expanding path with rolling chunk scheduler "
-              << "(128 paths per chunk), min_rule_id=" << min_rule_id << std::endl;
-  }
-
-  // =========================================================================
-  // Expand path on GPU + Inverse delta-decode the expanded path (rolling)
-  // =========================================================================
-
   auto expand_start = Clock::now();
-  
+
   result.lengths =
       gpu_codec::nvcomp_zstd_decompress_uint32(data.path_lengths_zstd_nvcomp);
   thrust::device_vector<uint32_t> d_lens_final(result.lengths.begin(),
-                                                result.lengths.end());
-                                                
-  gpu_codec::rolling_expand_and_inverse_delta_decode(
-      d_encoded_path, d_rules_first, d_rules_second, min_rule_id, num_rules,
-      d_lens_final, result.data);
+                                               result.lengths.end());
+
+  if (options.use_legacy_full_decompression) {
+    if (g_debug_decompression) {
+      std::cout << "[GPU Decompress] Expanding path with legacy whole-device "
+                   "pipeline, min_rule_id="
+                << min_rule_id << std::endl;
+    }
+
+    uint32_t num_segs_final = static_cast<uint32_t>(result.lengths.size());
+    thrust::device_vector<uint64_t> d_offs_final(num_segs_final);
+    thrust::exclusive_scan(d_lens_final.begin(), d_lens_final.end(),
+                           d_offs_final.begin(), uint64_t(0));
+
+    thrust::device_vector<int32_t> d_expanded = gpu_codec::expand_path_device_vec(
+        d_encoded_path, d_rules_first, d_rules_second, min_rule_id, num_rules);
+    thrust::device_vector<int32_t> d_decoded =
+        gpu_codec::segmented_inverse_delta_decode_device_vec(
+            d_expanded, d_offs_final, num_segs_final, d_expanded.size());
+
+    result.data.resize(d_decoded.size());
+    thrust::copy(d_decoded.begin(), d_decoded.end(), result.data.begin());
+  } else {
+    if (g_debug_decompression) {
+      std::cout << "[GPU Decompress] Expanding path with rolling chunk "
+                   "scheduler ("
+                << traversals_per_chunk
+                << " traversals per chunk), min_rule_id=" << min_rule_id
+                << std::endl;
+    }
+
+    gpu_codec::rolling_expand_and_inverse_delta_decode(
+        d_encoded_path, d_rules_first, d_rules_second, min_rule_id, num_rules,
+        d_lens_final, result.data, traversals_per_chunk);
+  }
 
   auto expand_end = Clock::now();
   double expand_time_ms = elapsed_ms(expand_start, expand_end);
 
   if (g_debug_decompression) {
-    std::cout << "[GPU Decompress] Rolling Rule expansion and copy to host: " << result.data.size() << " elements in " << std::fixed
-              << std::setprecision(2) << expand_time_ms << " ms" << std::endl;
+    std::cout << "[GPU Decompress] Rule expansion and copy to host: "
+              << result.data.size() << " elements in " << std::fixed
+              << std::setprecision(2) << expand_time_ms << " ms"
+              << std::endl;
   }
 
   auto decomp_end = Clock::now();
@@ -510,7 +536,8 @@ decompress_paths_gpu(const gpu_compression::CompressedData_gpu &data) {
 }
 
 GfaGraph_gpu
-decompress_to_gpu_layout(const gpu_compression::CompressedData_gpu &data) {
+decompress_to_gpu_layout(const gpu_compression::CompressedData_gpu &data,
+                         GpuDecompressionOptions options) {
   auto start = Clock::now();
 
   GfaGraph_gpu result;
@@ -522,7 +549,7 @@ decompress_to_gpu_layout(const gpu_compression::CompressedData_gpu &data) {
     std::cout << "[GPU Decompress] === Starting full decompression ==="
               << std::endl;
   }
-  result.paths = decompress_paths_gpu(data);
+  result.paths = decompress_paths_gpu(data, options);
 
   // Store path/walk split info
   result.num_paths = data.num_paths;

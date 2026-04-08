@@ -394,7 +394,8 @@ void rolling_expand_and_inverse_delta_decode(
     const thrust::device_vector<int32_t> &d_rules_second,
     uint32_t min_rule_id, size_t num_rules,
     const thrust::device_vector<uint32_t> &d_lens_final,
-    std::vector<int32_t> &h_result_data);
+    std::vector<int32_t> &h_result_data,
+    uint32_t traversals_per_chunk);
 
 } // namespace gpu_codec
 
