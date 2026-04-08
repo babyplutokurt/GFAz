@@ -50,3 +50,6 @@ extract_benchmark.csv
 
 test_data/
 data/
+
+compile_commands.json
+fix_cc.py   
