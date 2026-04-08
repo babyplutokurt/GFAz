@@ -36,8 +36,21 @@ This means:
 - paths and walks are rebuilt into nested host vectors
 - disk I/O does not overlap GPU work
 
+After the recent GPU decompression refactor, ownership is cleaner but the CLI
+still ends in full host materialization:
+
+- [`src/gpu/decompression_workflow_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/decompression_workflow_gpu.cu)
+  owns top-level metadata decode and legacy-vs-rolling dispatch
+- [`src/gpu/path_decompression_gpu_legacy.cu`](/home/kurty/Release/gfa_compression/src/gpu/path_decompression_gpu_legacy.cu)
+  owns full-device traversal expansion
+- [`src/gpu/path_decompression_gpu_rolling.cu`](/home/kurty/Release/gfa_compression/src/gpu/path_decompression_gpu_rolling.cu)
+  owns rolling traversal decompression scheduling
+- [`src/gpu/path_expand_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/path_expand_gpu.cu)
+  owns rule expansion helpers and
+  `rolling_expand_and_inverse_delta_decode(...)`
+
 The current rolling traversal decompressor in
-[`src/gpu/codec_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/codec_gpu.cu#L2657)
+[`src/gpu/path_expand_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/path_expand_gpu.cu)
 still:
 
 - allocates the full host output vector with `h_result_data.resize(output_size)`
@@ -119,12 +132,14 @@ instead of:
 
 ## Refactor Shape
 
-### 1. Split traversal decompression from graph materialization
+### 1. Split traversal decompression from host-output assembly
 
-Today:
+This part is partly done already:
 
-- [`decompress_paths_gpu(...)`](/home/kurty/Release/gfa_compression/src/gpu/decompression_workflow_gpu.cu#L284)
-  returns a fully materialized `FlattenedPaths`
+- `decompression_workflow_gpu.cu` now only orchestrates metadata decode and
+  dispatch
+- `path_decompression_gpu_rolling.cu` is now the rolling entry point
+- `path_expand_gpu.cu` contains the reusable rolling expansion helper
 
 Target:
 
@@ -137,7 +152,8 @@ Recommended new API shape:
 - `decode_traversal_chunk_to_device(...)`
 - `copy_decoded_chunk_to_pinned_host_async(...)`
 
-These should be internal GPU decompression helpers.
+These should be internal GPU decompression helpers layered under
+`path_decompression_gpu_rolling.cu`, not new top-level workflow logic.
 
 ### 2. Add a traversal chunk schedule
 
@@ -151,10 +167,13 @@ Each scheduled chunk should contain:
 - `expanded_end`
 
 This information is already derived inside
-[`rolling_expand_and_inverse_delta_decode(...)`](/home/kurty/Release/gfa_compression/src/gpu/codec_gpu.cu#L2657).
+[`rolling_expand_and_inverse_delta_decode(...)`](/home/kurty/Release/gfa_compression/src/gpu/path_expand_gpu.cu).
 
-Refactor that function so schedule creation is exposed separately from host
-vector assembly.
+Refactor that function so schedule creation is exposed separately from:
+
+- host output vector sizing
+- per-chunk synchronous `thrust::copy(...)`
+- the compatibility wrapper that still returns full `FlattenedPaths`
 
 ### 3. Use pinned host buffers
 
@@ -218,6 +237,12 @@ Write file in standard order:
 7. `C`
 
 `P` and `W` lines are the only part that should be streaming.
+
+This separation is now easier than before because traversal decompression and
+metadata decode are no longer interleaved in one source file:
+
+- traversal decode path lives under `path_decompression_gpu_{legacy,rolling}.cu`
+- metadata decode remains in `decompression_workflow_gpu.cu`
 
 ## Writer Refactor
 
@@ -304,12 +329,46 @@ struct PinnedTraversalBuffer {
 
 These names are suggestions, not required API.
 
+## Current Module Boundaries
+
+The direct-writer work should be built on the current refactored GPU
+decompression layout, not the older pre-refactor ownership:
+
+- [`src/gpu/decompression_workflow_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/decompression_workflow_gpu.cu)
+  - deserialize/decode metadata blocks
+  - resolve debug and options
+  - dispatch path decompression mode
+- [`src/gpu/path_decompression_gpu_legacy.cu`](/home/kurty/Release/gfa_compression/src/gpu/path_decompression_gpu_legacy.cu)
+  - legacy whole-device path expansion and inverse delta decode
+- [`src/gpu/path_decompression_gpu_rolling.cu`](/home/kurty/Release/gfa_compression/src/gpu/path_decompression_gpu_rolling.cu)
+  - rolling path decompression entry point
+  - current place to add a streaming-oriented rolling API
+- [`src/gpu/path_expand_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/path_expand_gpu.cu)
+  - rule expansion primitives
+  - `expand_and_inverse_decode_chunk_device(...)`
+  - `rolling_expand_and_inverse_delta_decode(...)`
+
+For the direct writer, the main architectural change should happen under the
+rolling path modules, while keeping `decompress_to_gpu_layout(...)` intact for
+tests and Python bindings.
+
 ## Implementation Phases
+
+### Phase 0: Refactor prerequisites
+
+This is now complete:
+
+- rolling decompression is extracted from `decompression_workflow_gpu.cu`
+- legacy decompression is extracted from `decompression_workflow_gpu.cu`
+- rolling expansion helpers are extracted from `codec_gpu.cu`
+
+That means the direct-writer work can target the rolling decompression path
+without further untangling the legacy path first.
 
 ### Phase 1: Isolate rolling decode schedule
 
 Refactor
-[`rolling_expand_and_inverse_delta_decode(...)`](/home/kurty/Release/gfa_compression/src/gpu/codec_gpu.cu#L2657)
+[`rolling_expand_and_inverse_delta_decode(...)`](/home/kurty/Release/gfa_compression/src/gpu/path_expand_gpu.cu)
 into:
 
 - schedule construction
@@ -320,6 +379,7 @@ Goal:
 
 - preserve current behavior
 - make chunk scheduling reusable
+- keep `decompress_paths_gpu_rolling(...)` as a thin compatibility wrapper
 
 ### Phase 2: Add pinned-buffer chunk export
 
@@ -331,6 +391,15 @@ Add a helper that:
 Goal:
 
 - replace synchronous `thrust::copy(...)` of chunk output
+- keep the existing host-vector path available for tests and bindings
+
+Recommended ownership:
+
+- `path_expand_gpu.cu`: device decode into chunk workspace
+- new rolling direct-writer helper near
+  [`src/gpu/path_decompression_gpu_rolling.cu`](/home/kurty/Release/gfa_compression/src/gpu/path_decompression_gpu_rolling.cu):
+  pinned-host export, events, and scheduling
+- avoid pushing writer-thread concerns into `path_expand_gpu.cu`
 
 ### Phase 3: Build direct GPU writer
 
@@ -345,6 +414,13 @@ Goal:
 
 - produce correct output without materializing full graph objects
 
+Recommended call shape:
+
+- deserialize compressed GPU data
+- decode non-traversal metadata once
+- stream rolling traversal chunks to the writer
+- never build full host `FlattenedPaths::data`
+
 ### Phase 4: Wire CLI to direct writer
 
 Change the GPU decompression branch in
@@ -357,6 +433,7 @@ to use:
 Goal:
 
 - make CLI benefit from the new streaming path immediately
+- preserve the current in-memory decompression path behind existing APIs
 
 ### Phase 5: Add timing instrumentation
 
@@ -429,7 +506,14 @@ Success condition:
 
 The required fix is architectural, not a small kernel tweak.
 
-The current rolling GPU decompression path is still:
+After the refactor, the codebase is in a better position to do this cleanly:
+
+- workflow dispatch is isolated
+- rolling decompression is isolated
+- legacy decompression is isolated
+- expansion helpers are isolated
+
+But the current rolling GPU decompression path is still:
 
 - decode all traversal data
 - materialize host structures
