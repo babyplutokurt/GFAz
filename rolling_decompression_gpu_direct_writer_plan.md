@@ -1,5 +1,51 @@
 # Rolling GPU Decompression Direct-Writer Plan
 
+## Status
+
+Current state: groundwork refactors are in place, but the direct-writer path is
+not implemented yet.
+
+Completed:
+
+- extracted rolling traversal chunk schedule construction into
+  `build_rolling_decode_schedule(...)`
+- added explicit schedule types:
+  - `gpu_codec::RollingDecodeChunk`
+  - `gpu_codec::RollingDecodeSchedule`
+- moved rolling decompression toward a prepare/execute/copy structure under
+  `path_decompression_gpu_rolling.{hpp,cu}`
+- added reusable rolling decode state:
+  - `gpu_decompression::RollingPathDecodeContext`
+- added reusable rolling chunk helpers:
+  - `prepare_rolling_path_decode(...)`
+  - `decode_rolling_path_chunk_to_device(...)`
+  - `prepare_rolling_path_host_buffer(...)`
+  - `copy_rolling_path_chunk_to_host_buffer(...)`
+- introduced a caller-owned rolling host chunk buffer:
+  - `gpu_decompression::RollingPathHostBuffer`
+- introduced a pinned rolling host staging buffer:
+  - `gpu_decompression::RollingPathPinnedHostBuffer`
+- added pinned-buffer helper APIs:
+  - `ensure_rolling_path_pinned_host_buffer_capacity(...)`
+  - `release_rolling_path_pinned_host_buffer(...)`
+  - `copy_rolling_path_chunk_to_pinned_host_async(...)`
+  - `wait_for_rolling_path_pinned_host_buffer(...)`
+- added a rolling streaming entry point with a bounded pinned-buffer queue and
+  consumer callback:
+  - `stream_decompress_paths_gpu_rolling(...)`
+- kept the existing `decompress_paths_gpu_rolling(...)` behavior intact by
+  rebuilding it on top of the new context/chunk APIs
+
+Not done yet:
+
+- GPU direct-writer CLI entry point
+- streaming `P`/`W` formatting from flat traversal chunks
+
+Immediate next step:
+
+- connect the rolling streaming pipeline to actual `P`/`W` line formatting and
+  a GPU direct-writer entry point
+
 ## Goal
 
 Refactor GPU decompression so that large traversal payloads are:
@@ -134,12 +180,17 @@ instead of:
 
 ### 1. Split traversal decompression from host-output assembly
 
-This part is partly done already:
+This part is now mostly done for the rolling traversal path:
 
 - `decompression_workflow_gpu.cu` now only orchestrates metadata decode and
   dispatch
 - `path_decompression_gpu_rolling.cu` is now the rolling entry point
 - `path_expand_gpu.cu` contains the reusable rolling expansion helper
+- `path_expand_gpu.cu` now exposes `build_rolling_decode_schedule(...)`
+- `path_decompression_gpu_rolling.cu` now owns:
+  - rolling decode preparation
+  - per-chunk device execution
+  - per-chunk host copy for the compatibility path
 
 Target:
 
@@ -155,6 +206,19 @@ Recommended new API shape:
 These should be internal GPU decompression helpers layered under
 `path_decompression_gpu_rolling.cu`, not new top-level workflow logic.
 
+Current code status:
+
+- `build_rolling_decode_schedule(...)`: done
+- `decode_traversal_chunk_to_device(...)`: effectively done as
+  `decode_rolling_path_chunk_to_device(...)`
+- caller-owned host chunk export: done via
+  `prepare_rolling_path_host_buffer(...)` and
+  `copy_rolling_path_chunk_to_host_buffer(...)`
+- `copy_decoded_chunk_to_pinned_host_async(...)`: done as
+  `copy_rolling_path_chunk_to_pinned_host_async(...)`
+- bounded producer/consumer pipeline: done inside
+  `stream_decompress_paths_gpu_rolling(...)`
+
 ### 2. Add a traversal chunk schedule
 
 Each scheduled chunk should contain:
@@ -166,7 +230,7 @@ Each scheduled chunk should contain:
 - `expanded_begin`
 - `expanded_end`
 
-This information is already derived inside
+This information used to be derived only inside
 [`rolling_expand_and_inverse_delta_decode(...)`](/home/kurty/Release/gfa_compression/src/gpu/path_expand_gpu.cu).
 
 Refactor that function so schedule creation is exposed separately from:
@@ -174,6 +238,13 @@ Refactor that function so schedule creation is exposed separately from:
 - host output vector sizing
 - per-chunk synchronous `thrust::copy(...)`
 - the compatibility wrapper that still returns full `FlattenedPaths`
+
+Status: done.
+
+The chunk schedule is now an explicit reusable object built before the rolling
+loop. The compatibility path still uses synchronous `thrust::copy(...)`, but it
+does so by consuming the precomputed schedule instead of recomputing chunk
+boundaries inline.
 
 ### 3. Use pinned host buffers
 
@@ -191,6 +262,13 @@ Each buffer should contain:
 
 Pinned memory is required to make `cudaMemcpyAsync` useful.
 
+Status: partially done.
+
+The rolling path now supports caller-owned host chunk buffers carrying
+per-chunk node counts and traversal lengths, and it now has pinned staging
+buffer helpers with async copy and CUDA event completion. The compatibility
+path still uses ordinary host memory and synchronous `thrust::copy(...)`.
+
 ### 4. Add producer-consumer pipeline
 
 Producer responsibilities:
@@ -206,6 +284,13 @@ Consumer responsibilities:
 - format `P` and `W` lines from flat chunk data
 - write formatted bytes to output stream
 - return buffer to free queue
+
+Status: done for the rolling decompression module.
+
+The rolling path now has a bounded pinned-buffer queue, a writer-consumer
+thread, CUDA event handoff, and a streaming callback entry point. What remains
+is connecting that callback to actual GFA `P/W` formatting and the CLI writer
+path.
 
 ## Metadata Handling
 
@@ -264,6 +349,11 @@ Inputs should be:
 The direct GPU writer should call these helpers as it consumes traversal
 buffers.
 
+Status: not started.
+
+The current writer still expects whole-graph or CPU direct-writer style inputs.
+No GPU chunk-streaming writer entry point exists yet.
+
 ## Execution Model
 
 Recommended buffer flow:
@@ -297,6 +387,18 @@ The new path should remove these costs from CLI GPU decompression:
 - full `convert_from_gpu_layout(...)`
 - nested path/walk vector reconstruction
 - post-decompression `write_gfa(...)` on a full host graph
+
+Current progress against that list:
+
+- full `FlattenedPaths` materialization: not removed yet
+- full `GfaGraph_gpu` traversal ownership: not removed yet
+- full `convert_from_gpu_layout(...)`: not removed yet
+- nested path/walk vector reconstruction: not removed yet
+- post-decompression `write_gfa(...)` on a full host graph: not removed yet
+
+What has been removed already is duplicated chunk-planning logic inside the
+rolling decompressor. The hot path is now structured so these higher-level
+removals can be done without another large refactor first.
 
 ## Suggested Internal Types
 
@@ -400,6 +502,17 @@ Recommended ownership:
   [`src/gpu/path_decompression_gpu_rolling.cu`](/home/kurty/Release/gfa_compression/src/gpu/path_decompression_gpu_rolling.cu):
   pinned-host export, events, and scheduling
 - avoid pushing writer-thread concerns into `path_expand_gpu.cu`
+
+Progress:
+
+- done: decoded chunks can be exported into caller-owned host buffers without
+  depending on one monolithic output vector API
+- done: pinned staging buffers and async D2H completion events are now
+  available under the rolling decompression module
+- done: a producer/consumer streaming pipeline now exists under the rolling
+  decompression module
+- next: connect the streaming callback to GFA `P/W` formatting and the GPU
+  direct-writer entry point
 
 ### Phase 3: Build direct GPU writer
 

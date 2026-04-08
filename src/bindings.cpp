@@ -1053,6 +1053,10 @@ PYBIND11_MODULE(gfa_compression, m) {
       py::arg("data"),
       py::arg("options") = gpu_decompression::GpuDecompressionOptions{});
 
+  m.def("set_gpu_decompression_debug",
+        &gpu_decompression::set_gpu_decompression_debug,
+        "Enable verbose GPU decompression timing output.", py::arg("enabled"));
+
   m.def(
       "verify_gpu_round_trip",
       [](const GfaGraph_gpu &original,

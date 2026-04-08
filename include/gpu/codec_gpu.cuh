@@ -248,6 +248,39 @@ thrust::device_vector<uint32_t> apply_2mer_rules_segmented_device_vec(
 // GPU Path Expansion (Decompression)
 // ============================================================================
 
+struct RollingDecodeChunk {
+    uint32_t segment_begin = 0;
+    uint32_t segment_end = 0;
+    int64_t encoded_begin = 0;
+    int64_t encoded_end = 0;
+    int64_t expanded_begin = 0;
+    int64_t expanded_end = 0;
+
+    size_t encoded_count() const { return static_cast<size_t>(encoded_end - encoded_begin); }
+    size_t expanded_count() const { return static_cast<size_t>(expanded_end - expanded_begin); }
+    uint32_t segment_count() const { return segment_end - segment_begin; }
+};
+
+struct RollingDecodeSchedule {
+    std::vector<RollingDecodeChunk> chunks;
+    std::vector<int64_t> encoded_offsets;
+    std::vector<uint64_t> expanded_offsets;
+    int64_t output_size = 0;
+};
+
+void compute_rule_final_sizes_device_vec(
+    const thrust::device_vector<int32_t>& d_rules_first,
+    const thrust::device_vector<int32_t>& d_rules_second,
+    thrust::device_vector<int64_t>& d_rule_sizes,
+    uint32_t min_rule_id);
+
+void expand_rules_to_buffer_device_vec(
+    const thrust::device_vector<int32_t>& d_rules_first,
+    const thrust::device_vector<int32_t>& d_rules_second,
+    const thrust::device_vector<int64_t>& d_rule_offsets,
+    thrust::device_vector<int32_t>& d_expanded_rules,
+    uint32_t min_rule_id);
+
 /**
  * Expand rules in a path using single-pass algorithm with pre-expanded rules.
  *
@@ -276,6 +309,13 @@ thrust::device_vector<int32_t> expand_path_device_vec(
     const thrust::device_vector<int32_t>& d_rules_second,
     uint32_t min_rule_id,
     size_t num_rules);
+
+RollingDecodeSchedule build_rolling_decode_schedule(
+    const thrust::device_vector<int64_t>& d_output_offsets,
+    const thrust::device_vector<uint32_t>& d_lens_final,
+    size_t encoded_size,
+    int64_t output_size,
+    uint32_t traversals_per_chunk);
 
 /**
  * @deprecated Use expand_path_device_vec instead.

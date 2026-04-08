@@ -179,6 +179,24 @@ __global__ void compute_rule_final_sizes_kernel(
   d_rule_sizes[rule_idx] = final_size;
 }
 
+void compute_rule_final_sizes_device_vec(
+    const thrust::device_vector<int32_t> &d_rules_first,
+    const thrust::device_vector<int32_t> &d_rules_second,
+    thrust::device_vector<int64_t> &d_rule_sizes, uint32_t min_rule_id) {
+  const size_t num_rules = d_rule_sizes.size();
+  if (num_rules == 0) {
+    return;
+  }
+
+  const int threads = 256;
+  const int blocks = (num_rules + threads - 1) / threads;
+  compute_rule_final_sizes_kernel<<<blocks, threads>>>(
+      thrust::raw_pointer_cast(d_rules_first.data()),
+      thrust::raw_pointer_cast(d_rules_second.data()),
+      thrust::raw_pointer_cast(d_rule_sizes.data()), num_rules, min_rule_id);
+  CUDA_CHECK(cudaGetLastError());
+}
+
 __global__ void expand_rules_to_buffer_kernel(
     const int32_t *__restrict__ d_rules_first,
     const int32_t *__restrict__ d_rules_second,
@@ -218,6 +236,27 @@ __global__ void expand_rules_to_buffer_kernel(
       d_expanded_rules[write_pos++] = val;
     }
   }
+}
+
+void expand_rules_to_buffer_device_vec(
+    const thrust::device_vector<int32_t> &d_rules_first,
+    const thrust::device_vector<int32_t> &d_rules_second,
+    const thrust::device_vector<int64_t> &d_rule_offsets,
+    thrust::device_vector<int32_t> &d_expanded_rules, uint32_t min_rule_id) {
+  const size_t num_rules = d_rule_offsets.size();
+  if (num_rules == 0) {
+    return;
+  }
+
+  const int threads = 256;
+  const int blocks = (num_rules + threads - 1) / threads;
+  expand_rules_to_buffer_kernel<<<blocks, threads>>>(
+      thrust::raw_pointer_cast(d_rules_first.data()),
+      thrust::raw_pointer_cast(d_rules_second.data()),
+      thrust::raw_pointer_cast(d_rule_offsets.data()),
+      thrust::raw_pointer_cast(d_expanded_rules.data()), num_rules,
+      min_rule_id);
+  CUDA_CHECK(cudaGetLastError());
 }
 
 struct FinalExpansionSizeOp {
@@ -454,6 +493,75 @@ void expand_and_inverse_decode_chunk_device(
   CUDA_CHECK(cudaGetLastError());
 }
 
+RollingDecodeSchedule build_rolling_decode_schedule(
+    const thrust::device_vector<int64_t> &d_output_offsets,
+    const thrust::device_vector<uint32_t> &d_lens_final, size_t encoded_size,
+    int64_t output_size, uint32_t traversals_per_chunk) {
+  RollingDecodeSchedule schedule;
+  const uint32_t num_segs_final = static_cast<uint32_t>(d_lens_final.size());
+  if (num_segs_final == 0) {
+    schedule.output_size = output_size;
+    return schedule;
+  }
+
+  thrust::device_vector<uint64_t> d_offs_final(num_segs_final);
+  thrust::exclusive_scan(d_lens_final.begin(), d_lens_final.end(),
+                         d_offs_final.begin(), uint64_t(0));
+
+  thrust::device_vector<int64_t> d_encoded_offsets(num_segs_final);
+  thrust::lower_bound(d_output_offsets.begin(), d_output_offsets.end(),
+                      d_offs_final.begin(), d_offs_final.end(),
+                      d_encoded_offsets.begin());
+
+  schedule.encoded_offsets.resize(num_segs_final);
+  thrust::copy(d_encoded_offsets.begin(), d_encoded_offsets.end(),
+               schedule.encoded_offsets.begin());
+  schedule.expanded_offsets.resize(num_segs_final);
+  thrust::copy(d_offs_final.begin(), d_offs_final.end(),
+               schedule.expanded_offsets.begin());
+  schedule.output_size = output_size;
+
+  uint32_t current_seg_begin = 0;
+  for (uint32_t i = 0; i < num_segs_final; ++i) {
+    const int64_t seg_expanded_start = schedule.expanded_offsets[current_seg_begin];
+    const int64_t next_expanded_start =
+        (i + 1 < num_segs_final) ? static_cast<int64_t>(schedule.expanded_offsets[i + 1])
+                                 : output_size;
+    const int64_t size_so_far = next_expanded_start - seg_expanded_start;
+
+    bool split = false;
+    if (i - current_seg_begin >= traversals_per_chunk) {
+      split = true;
+    }
+    if (size_so_far >= 32 * 1024 * 1024 && i > current_seg_begin) {
+      split = true;
+    }
+    if (i + 1 == num_segs_final) {
+      split = true;
+    }
+
+    if (!split) {
+      continue;
+    }
+
+    const uint32_t chunk_seg_end = i + 1;
+    const int64_t chunk_encoded_begin = schedule.encoded_offsets[current_seg_begin];
+    const int64_t chunk_encoded_end =
+        (chunk_seg_end < num_segs_final)
+            ? schedule.encoded_offsets[chunk_seg_end]
+            : static_cast<int64_t>(encoded_size);
+    const int64_t chunk_expanded_begin =
+        static_cast<int64_t>(schedule.expanded_offsets[current_seg_begin]);
+
+    schedule.chunks.push_back(
+        {current_seg_begin, chunk_seg_end, chunk_encoded_begin,
+         chunk_encoded_end, chunk_expanded_begin, next_expanded_start});
+    current_seg_begin = chunk_seg_end;
+  }
+
+  return schedule;
+}
+
 void rolling_expand_and_inverse_delta_decode(
     const thrust::device_vector<int32_t> &d_encoded_path,
     const thrust::device_vector<int32_t> &d_rules_first,
@@ -506,64 +614,26 @@ void rolling_expand_and_inverse_delta_decode(
   thrust::exclusive_scan(size_iter, size_iter + num_elements,
                          d_output_offsets.begin());
 
-  uint32_t num_segs_final = static_cast<uint32_t>(d_lens_final.size());
-  thrust::device_vector<uint64_t> d_offs_final(num_segs_final);
-  thrust::exclusive_scan(d_lens_final.begin(), d_lens_final.end(),
-                         d_offs_final.begin(), uint64_t(0));
+  const RollingDecodeSchedule schedule = build_rolling_decode_schedule(
+      d_output_offsets, d_lens_final, d_encoded_path.size(), output_size,
+      traversals_per_chunk);
 
-  thrust::device_vector<int64_t> d_encoded_offsets(num_segs_final);
-  thrust::lower_bound(d_output_offsets.begin(), d_output_offsets.end(),
-                      d_offs_final.begin(), d_offs_final.end(),
-                      d_encoded_offsets.begin());
+  thrust::device_vector<uint64_t> d_offs_final(schedule.expanded_offsets.begin(),
+                                               schedule.expanded_offsets.end());
 
-  std::vector<int64_t> h_encoded_offsets(num_segs_final);
-  thrust::copy(d_encoded_offsets.begin(), d_encoded_offsets.end(),
-               h_encoded_offsets.begin());
-  std::vector<uint64_t> h_expanded_offsets(num_segs_final);
-  thrust::copy(d_offs_final.begin(), d_offs_final.end(),
-               h_expanded_offsets.begin());
-
-  h_result_data.resize(output_size);
+  h_result_data.resize(static_cast<size_t>(schedule.output_size));
   thrust::device_vector<int32_t> d_chunk_workspace;
 
-  uint32_t current_seg_begin = 0;
-  for (uint32_t i = 0; i < num_segs_final; ++i) {
-    int64_t seg_expanded_start = h_expanded_offsets[current_seg_begin];
-    int64_t next_expanded_start =
-        (i + 1 < num_segs_final) ? h_expanded_offsets[i + 1] : output_size;
-    int64_t size_so_far = next_expanded_start - seg_expanded_start;
+  for (const auto &chunk : schedule.chunks) {
+    expand_and_inverse_decode_chunk_device(
+        d_encoded_path, d_output_offsets, d_expanded_rules, d_rule_offsets,
+        d_rule_sizes, d_chunk_workspace, d_offs_final, chunk.encoded_begin,
+        chunk.encoded_end, chunk.expanded_begin, chunk.expanded_end,
+        chunk.segment_begin, chunk.segment_end, min_rule_id, max_rule_id,
+        static_cast<size_t>(schedule.output_size));
 
-    bool split = false;
-    if (i - current_seg_begin >= traversals_per_chunk) {
-      split = true;
-    }
-    if (size_so_far >= 32 * 1024 * 1024 && i > current_seg_begin) {
-      split = true;
-    }
-    if (i + 1 == num_segs_final) {
-      split = true;
-    }
-
-    if (split) {
-      uint32_t chunk_seg_end = i + 1;
-      int64_t chunk_encoded_begin = h_encoded_offsets[current_seg_begin];
-      int64_t chunk_encoded_end = (chunk_seg_end < num_segs_final)
-                                      ? h_encoded_offsets[chunk_seg_end]
-                                      : (int64_t)d_encoded_path.size();
-      int64_t chunk_expanded_begin = h_expanded_offsets[current_seg_begin];
-      int64_t chunk_expanded_end = next_expanded_start;
-
-      expand_and_inverse_decode_chunk_device(
-          d_encoded_path, d_output_offsets, d_expanded_rules, d_rule_offsets,
-          d_rule_sizes, d_chunk_workspace, d_offs_final, chunk_encoded_begin,
-          chunk_encoded_end, chunk_expanded_begin, chunk_expanded_end,
-          current_seg_begin, chunk_seg_end, min_rule_id, max_rule_id,
-          output_size);
-
-      thrust::copy(d_chunk_workspace.begin(), d_chunk_workspace.end(),
-                   h_result_data.begin() + chunk_expanded_begin);
-      current_seg_begin = chunk_seg_end;
-    }
+    thrust::copy(d_chunk_workspace.begin(), d_chunk_workspace.end(),
+                 h_result_data.begin() + chunk.expanded_begin);
   }
 }
 

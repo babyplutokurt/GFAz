@@ -208,6 +208,7 @@ set(GFA_CUDA_SOURCES
   src/gpu/decompression_workflow_gpu.cu
   src/gpu/path_decompression_gpu_legacy.cu
   src/gpu/path_decompression_gpu_rolling.cu
+  src/gpu/gfa_writer_gpu.cu
   src/gpu/codec_gpu_nvcomp.cu
   src/gpu/serialization_gpu.cpp
 )

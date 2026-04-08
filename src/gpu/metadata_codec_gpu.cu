@@ -3,6 +3,7 @@
 #include "gpu/metadata_codec_gpu.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
@@ -367,3 +368,297 @@ void compress_graph_metadata_gpu(const GfaGraph_gpu &gpu_graph,
 }
 
 } // namespace gpu_compression
+
+namespace gpu_decompression {
+
+namespace {
+
+// Decode a single varint from a byte stream and return the bytes consumed.
+size_t decode_varint_32(const uint8_t *data, size_t max_len, uint32_t &out) {
+  out = 0;
+  size_t shift = 0;
+  size_t i = 0;
+  while (i < max_len) {
+    uint8_t byte = data[i++];
+    out |= static_cast<uint32_t>(byte & 0x7F) << shift;
+    if ((byte & 0x80) == 0) {
+      break;
+    }
+    shift += 7;
+  }
+  return i;
+}
+
+int32_t zigzag_decode_32(uint32_t n) {
+  return static_cast<int32_t>((n >> 1) ^ -(static_cast<int32_t>(n & 1)));
+}
+
+size_t decode_varint_64(const uint8_t *data, size_t max_len, uint64_t &out) {
+  out = 0;
+  size_t shift = 0;
+  size_t i = 0;
+  while (i < max_len) {
+    uint8_t byte = data[i++];
+    out |= static_cast<uint64_t>(byte & 0x7F) << shift;
+    if ((byte & 0x80) == 0) {
+      break;
+    }
+    shift += 7;
+  }
+  return i;
+}
+
+int64_t zigzag_decode_64(uint64_t n) {
+  return static_cast<int64_t>((n >> 1) ^ -(static_cast<int64_t>(n & 1)));
+}
+
+std::vector<uint32_t>
+decompress_delta_varint_uint32(const gpu_codec::NvcompCompressedBlock &block,
+                               size_t expected_count) {
+  if (block.payload.empty()) {
+    return {};
+  }
+
+  std::vector<uint8_t> varint_bytes = gpu_codec::nvcomp_zstd_decompress(block);
+  std::vector<uint32_t> result;
+  result.reserve(expected_count);
+
+  size_t offset = 0;
+  int32_t prev = 0;
+  while (offset < varint_bytes.size() && result.size() < expected_count) {
+    uint32_t zigzag_val;
+    offset += decode_varint_32(varint_bytes.data() + offset,
+                               varint_bytes.size() - offset, zigzag_val);
+    int32_t delta = zigzag_decode_32(zigzag_val);
+    int32_t current = prev + delta;
+    result.push_back(static_cast<uint32_t>(current));
+    prev = current;
+  }
+
+  return result;
+}
+
+std::vector<char>
+decompress_orientations(const gpu_codec::NvcompCompressedBlock &block,
+                        size_t expected_count) {
+  if (block.payload.empty()) {
+    return {};
+  }
+
+  std::vector<uint8_t> packed = gpu_codec::nvcomp_zstd_decompress(block);
+  return gpu_codec::unpack_orientations_gpu(packed, expected_count);
+}
+
+std::vector<int64_t>
+decompress_varint_int64(const gpu_codec::NvcompCompressedBlock &block,
+                        size_t expected_count) {
+  if (block.payload.empty()) {
+    return {};
+  }
+
+  std::vector<uint8_t> varint_bytes = gpu_codec::nvcomp_zstd_decompress(block);
+  std::vector<int64_t> result;
+  result.reserve(expected_count);
+
+  size_t offset = 0;
+  while (offset < varint_bytes.size() && result.size() < expected_count) {
+    uint64_t zigzag_val;
+    offset += decode_varint_64(varint_bytes.data() + offset,
+                               varint_bytes.size() - offset, zigzag_val);
+    result.push_back(zigzag_decode_64(zigzag_val));
+  }
+
+  return result;
+}
+
+std::vector<float> decompress_float(
+    const gpu_codec::NvcompCompressedBlock &block) {
+  if (block.payload.empty()) {
+    return {};
+  }
+
+  std::vector<uint8_t> bytes = gpu_codec::nvcomp_zstd_decompress(block);
+  size_t count = bytes.size() / sizeof(float);
+  std::vector<float> result(count);
+  std::memcpy(result.data(), bytes.data(), count * sizeof(float));
+  return result;
+}
+
+std::vector<char> decompress_char(
+    const gpu_codec::NvcompCompressedBlock &block) {
+  if (block.payload.empty()) {
+    return {};
+  }
+
+  std::vector<uint8_t> bytes = gpu_codec::nvcomp_zstd_decompress(block);
+  return std::vector<char>(bytes.begin(), bytes.end());
+}
+
+OptionalFieldColumn_gpu decompress_optional_field_column(
+    const gpu_compression::CompressedOptionalFieldColumn_gpu &compressed) {
+  OptionalFieldColumn_gpu result;
+  result.tag = compressed.tag;
+  result.type = compressed.type;
+  result.num_elements = compressed.num_elements;
+
+  switch (compressed.type) {
+  case 'i':
+    result.int_values = decompress_varint_int64(
+        compressed.int_values_zstd_nvcomp, compressed.num_elements);
+    break;
+  case 'f':
+    result.float_values = decompress_float(compressed.float_values_zstd_nvcomp);
+    break;
+  case 'A':
+    result.char_values = decompress_char(compressed.char_values_zstd_nvcomp);
+    break;
+  case 'Z':
+  case 'J':
+  case 'H': {
+    std::string str_data =
+        gpu_codec::nvcomp_zstd_decompress_string(compressed.strings_zstd_nvcomp);
+    result.strings.data = std::vector<char>(str_data.begin(), str_data.end());
+    result.strings.lengths = gpu_codec::nvcomp_zstd_decompress_uint32(
+        compressed.string_lengths_zstd_nvcomp);
+    break;
+  }
+  case 'B': {
+    std::vector<uint8_t> subtypes_bytes =
+        gpu_codec::nvcomp_zstd_decompress(compressed.b_subtypes_zstd_nvcomp);
+    result.b_subtypes =
+        std::vector<char>(subtypes_bytes.begin(), subtypes_bytes.end());
+    result.b_lengths = gpu_codec::nvcomp_zstd_decompress_uint32(
+        compressed.b_lengths_zstd_nvcomp);
+    result.b_data = gpu_codec::nvcomp_zstd_decompress(
+        compressed.b_concat_bytes_zstd_nvcomp);
+    break;
+  }
+  default:
+    break;
+  }
+
+  return result;
+}
+
+FlattenedStrings decompress_flattened_strings(
+    const gpu_codec::NvcompCompressedBlock &data_block,
+    const gpu_codec::NvcompCompressedBlock &lengths_block) {
+  FlattenedStrings result;
+  std::string str_data = gpu_codec::nvcomp_zstd_decompress_string(data_block);
+  result.data = std::vector<char>(str_data.begin(), str_data.end());
+  result.lengths = gpu_codec::nvcomp_zstd_decompress_uint32(lengths_block);
+  return result;
+}
+
+void decompress_optional_columns(
+    const std::vector<gpu_compression::CompressedOptionalFieldColumn_gpu>
+        &compressed_columns,
+    std::vector<OptionalFieldColumn_gpu> &out_columns) {
+  out_columns.reserve(out_columns.size() + compressed_columns.size());
+  for (const auto &compressed_col : compressed_columns) {
+    out_columns.push_back(decompress_optional_field_column(compressed_col));
+  }
+}
+
+} // namespace
+
+void decompress_graph_metadata_gpu(
+    const gpu_compression::CompressedData_gpu &data, GfaGraph_gpu &result) {
+  result.num_paths = data.num_paths;
+  result.num_walks = data.num_walks;
+
+  result.path_names = decompress_flattened_strings(
+      data.names_zstd_nvcomp, data.name_lengths_zstd_nvcomp);
+  result.path_overlaps = decompress_flattened_strings(
+      data.overlaps_zstd_nvcomp, data.overlap_lengths_zstd_nvcomp);
+
+  if (data.num_walks > 0) {
+    result.walk_sample_ids = decompress_flattened_strings(
+        data.walk_sample_ids_zstd_nvcomp,
+        data.walk_sample_id_lengths_zstd_nvcomp);
+    result.walk_hap_indices = gpu_codec::nvcomp_zstd_decompress_uint32(
+        data.walk_hap_indices_zstd_nvcomp);
+    result.walk_seq_ids = decompress_flattened_strings(
+        data.walk_seq_ids_zstd_nvcomp, data.walk_seq_id_lengths_zstd_nvcomp);
+    result.walk_seq_starts = decompress_varint_int64(
+        data.walk_seq_starts_zstd_nvcomp, data.num_walks);
+    result.walk_seq_ends =
+        decompress_varint_int64(data.walk_seq_ends_zstd_nvcomp, data.num_walks);
+  }
+
+  result.node_sequences = decompress_flattened_strings(
+      data.segment_sequences_zstd_nvcomp, data.segment_seq_lengths_zstd_nvcomp);
+  result.header_line = data.header_line;
+  result.node_names = decompress_flattened_strings(
+      data.node_names_zstd_nvcomp, data.node_name_lengths_zstd_nvcomp);
+
+  if (data.num_links > 0) {
+    result.link_from_ids =
+        decompress_delta_varint_uint32(data.link_from_ids_zstd_nvcomp,
+                                       data.num_links);
+    result.link_to_ids = decompress_delta_varint_uint32(
+        data.link_to_ids_zstd_nvcomp, data.num_links);
+    result.link_from_orients = decompress_orientations(
+        data.link_from_orients_zstd_nvcomp, data.num_links);
+    result.link_to_orients = decompress_orientations(
+        data.link_to_orients_zstd_nvcomp, data.num_links);
+    result.link_overlap_nums =
+        gpu_codec::nvcomp_zstd_decompress_uint32(data.link_overlap_nums_zstd_nvcomp);
+    result.link_overlap_ops =
+        decompress_char(data.link_overlap_ops_zstd_nvcomp);
+  }
+
+  if (!data.segment_optional_fields_zstd_nvcomp.empty()) {
+    decompress_optional_columns(data.segment_optional_fields_zstd_nvcomp,
+                                result.segment_optional_fields);
+  }
+
+  if (!data.link_optional_fields_zstd_nvcomp.empty()) {
+    decompress_optional_columns(data.link_optional_fields_zstd_nvcomp,
+                                result.link_optional_fields);
+  }
+
+  if (data.num_jumps_stored > 0) {
+    result.jump_from_ids = decompress_delta_varint_uint32(
+        data.jump_from_ids_zstd_nvcomp, data.num_jumps_stored);
+    result.jump_to_ids = decompress_delta_varint_uint32(
+        data.jump_to_ids_zstd_nvcomp, data.num_jumps_stored);
+    result.jump_from_orients = decompress_orientations(
+        data.jump_from_orients_zstd_nvcomp, data.num_jumps_stored);
+    result.jump_to_orients = decompress_orientations(
+        data.jump_to_orients_zstd_nvcomp, data.num_jumps_stored);
+    result.jump_distances = decompress_flattened_strings(
+        data.jump_distances_zstd_nvcomp, data.jump_distance_lengths_zstd_nvcomp);
+    result.jump_rest_fields = decompress_flattened_strings(
+        data.jump_rest_fields_zstd_nvcomp, data.jump_rest_lengths_zstd_nvcomp);
+  }
+
+  if (data.num_containments_stored > 0) {
+    result.containment_container_ids = decompress_delta_varint_uint32(
+        data.containment_container_ids_zstd_nvcomp,
+        data.num_containments_stored);
+    result.containment_contained_ids = decompress_delta_varint_uint32(
+        data.containment_contained_ids_zstd_nvcomp,
+        data.num_containments_stored);
+    result.containment_container_orients = decompress_orientations(
+        data.containment_container_orients_zstd_nvcomp,
+        data.num_containments_stored);
+    result.containment_contained_orients = decompress_orientations(
+        data.containment_contained_orients_zstd_nvcomp,
+        data.num_containments_stored);
+    result.containment_positions = gpu_codec::nvcomp_zstd_decompress_uint32(
+        data.containment_positions_zstd_nvcomp);
+    result.containment_overlaps = decompress_flattened_strings(
+        data.containment_overlaps_zstd_nvcomp,
+        data.containment_overlap_lengths_zstd_nvcomp);
+    result.containment_rest_fields = decompress_flattened_strings(
+        data.containment_rest_fields_zstd_nvcomp,
+        data.containment_rest_lengths_zstd_nvcomp);
+  }
+
+  result.num_segments =
+      static_cast<uint32_t>(result.node_sequences.lengths.size());
+  result.num_links = static_cast<uint32_t>(data.num_links);
+}
+
+} // namespace gpu_decompression

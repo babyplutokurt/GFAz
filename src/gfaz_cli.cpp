@@ -634,10 +634,7 @@ int do_decompress(int argc, char *argv[]) {
       gpu_options.use_legacy_full_decompression = use_gpu_legacy;
       gpu_compression::CompressedData_gpu data_gpu =
           deserialize_compressed_data_gpu(input_path);
-      GfaGraph_gpu graph_gpu =
-          gpu_decompression::decompress_to_gpu_layout(data_gpu, gpu_options);
-      GfaGraph graph = convert_from_gpu_layout(graph_gpu);
-      write_gfa(graph, output_path);
+      write_gfa_from_compressed_data_gpu(data_gpu, output_path, gpu_options);
     } else {
 #endif
       CompressedData data = deserialize_compressed_data(input_path);
