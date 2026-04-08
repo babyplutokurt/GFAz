@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <thrust/copy.h>
 #include <thrust/device_vector.h>
+#include <thrust/sort.h>
 
 #include "gpu/codec_gpu_nvcomp.cuh"
 
@@ -668,6 +669,16 @@ run_path_compression_gpu_rolling(const FlattenedPaths &paths, int num_rounds,
   thrust::device_vector<uint32_t> d_counts;
   d_counts.reserve(max_nodes);
   thrust::device_vector<uint8_t> d_rules_used_dev;
+  thrust::device_vector<uint64_t> d_round_hist_keys;
+  thrust::device_vector<uint32_t> d_round_hist_counts;
+  d_round_hist_keys.reserve(max_nodes * chunks.size());
+  d_round_hist_counts.reserve(max_nodes * chunks.size());
+  thrust::device_vector<uint64_t> d_merged_keys;
+  thrust::device_vector<uint32_t> d_merged_counts;
+  thrust::device_vector<uint64_t> d_round_rules;
+  thrust::device_vector<uint8_t> d_rules_used_round;
+  thrust::device_vector<uint64_t> d_new_indices;
+  thrust::device_vector<uint32_t> d_reorder_map;
 
   std::vector<uint64_t> all_rules;
   uint32_t next_start_id = start_id;
@@ -675,7 +686,9 @@ run_path_compression_gpu_rolling(const FlattenedPaths &paths, int num_rounds,
   for (int round_idx = 0; round_idx < num_rounds; ++round_idx) {
     chunks = build_traversal_chunks(current_lengths, target_chunk_nodes);
 
-    std::unordered_map<uint64_t, uint64_t> global_counts;
+    d_round_hist_keys.clear();
+    d_round_hist_counts.clear();
+
     for (const auto &chunk : chunks) {
       if (chunk.num_nodes() < 2) {
         continue;
@@ -704,35 +717,25 @@ run_path_compression_gpu_rolling(const FlattenedPaths &paths, int num_rounds,
       gpu_codec::count_2mers_segmented_device_vec(d_chunk_data, d_is_last,
                                                   d_unique_keys, d_counts);
 
-      if (d_unique_keys.empty()) {
-        continue;
-      }
-
-      std::vector<uint64_t> h_keys(d_unique_keys.size());
-      std::vector<uint32_t> h_counts(d_counts.size());
-      thrust::copy(d_unique_keys.begin(), d_unique_keys.end(), h_keys.begin());
-      thrust::copy(d_counts.begin(), d_counts.end(), h_counts.begin());
-
-      for (size_t i = 0; i < h_keys.size(); ++i) {
-        global_counts[h_keys[i]] += h_counts[i];
+      if (!d_unique_keys.empty()) {
+        size_t old_size = d_round_hist_keys.size();
+        d_round_hist_keys.resize(old_size + d_unique_keys.size());
+        d_round_hist_counts.resize(old_size + d_counts.size());
+        thrust::copy(d_unique_keys.begin(), d_unique_keys.end(), d_round_hist_keys.begin() + old_size);
+        thrust::copy(d_counts.begin(), d_counts.end(), d_round_hist_counts.begin() + old_size);
       }
     }
 
-    std::vector<uint64_t> round_rules;
-    round_rules.reserve(global_counts.size());
-    for (const auto &entry : global_counts) {
-      if (entry.second >= 2) {
-        round_rules.push_back(entry.first);
-      }
-    }
+    gpu_codec::merge_counted_2mers_device_vec(d_round_hist_keys, d_round_hist_counts, d_merged_keys, d_merged_counts);
+    gpu_codec::filter_rules_by_count_device_vec(d_merged_keys, d_merged_counts, 2, d_round_rules);
 
-    if (round_rules.empty()) {
+    if (d_round_rules.empty()) {
       break;
     }
 
-    std::sort(round_rules.begin(), round_rules.end());
-    void *table_ptr = gpu_codec::create_rule_table_gpu(round_rules, next_start_id);
-    std::vector<uint8_t> rules_used(round_rules.size(), 0);
+    void *table_ptr = gpu_codec::create_rule_table_gpu_from_device(d_round_rules, next_start_id);
+    d_rules_used_round.resize(d_round_rules.size());
+    thrust::fill(d_rules_used_round.begin(), d_rules_used_round.end(), 0);
 
     std::vector<int32_t> next_data;
     next_data.reserve(current_data.size());
@@ -754,12 +757,14 @@ run_path_compression_gpu_rolling(const FlattenedPaths &paths, int num_rounds,
       thrust::exclusive_scan(d_chunk_lengths.begin(), d_chunk_lengths.end(),
                              d_chunk_offsets.begin(), uint64_t(0));
 
-      d_rules_used_dev.resize(round_rules.size());
+      d_rules_used_dev.resize(d_round_rules.size());
       thrust::fill(d_rules_used_dev.begin(), d_rules_used_dev.end(), 0);
       thrust::device_vector<uint32_t> d_new_lengths =
           gpu_codec::apply_2mer_rules_segmented_device_vec(
               d_chunk_data, table_ptr, d_rules_used_dev, next_start_id,
               d_chunk_offsets, static_cast<uint32_t>(chunk.num_segments()));
+
+      gpu_codec::or_reduce_rules_used_device_vec(d_rules_used_dev, d_rules_used_round);
 
       size_t old_size = next_data.size();
       next_data.resize(old_size + d_chunk_data.size());
@@ -771,13 +776,6 @@ run_path_compression_gpu_rolling(const FlattenedPaths &paths, int num_rounds,
       thrust::copy(d_new_lengths.begin(), d_new_lengths.end(),
                    next_lengths.begin() +
                        static_cast<std::ptrdiff_t>(old_lengths_size));
-
-      std::vector<uint8_t> h_chunk_used(d_rules_used_dev.size());
-      thrust::copy(d_rules_used_dev.begin(), d_rules_used_dev.end(),
-                   h_chunk_used.begin());
-      for (size_t i = 0; i < h_chunk_used.size(); ++i) {
-        rules_used[i] = static_cast<uint8_t>(rules_used[i] | h_chunk_used[i]);
-      }
     }
 
     gpu_codec::free_rule_table_gpu(table_ptr);
@@ -785,18 +783,48 @@ run_path_compression_gpu_rolling(const FlattenedPaths &paths, int num_rounds,
     current_data = std::move(next_data);
     current_lengths = std::move(next_lengths);
 
-    compact_rules_and_remap_host(current_data, rules_used, round_rules,
-                                 next_start_id);
-    if (round_rules.empty()) {
+    uint32_t num_rules_before_compact = static_cast<uint32_t>(d_rules_used_round.size());
+    gpu_codec::build_rule_compaction_map_device_vec(d_rules_used_round, d_new_indices);
+    
+    auto end_it = thrust::copy_if(
+        d_round_rules.begin(), d_round_rules.end(), d_rules_used_round.begin(), d_round_rules.begin(),
+        [] __device__(uint8_t used) { return used != 0; });
+    d_round_rules.resize(end_it - d_round_rules.begin());
+    
+    uint32_t num_rules_after_compact = static_cast<uint32_t>(d_round_rules.size());
+    if (num_rules_after_compact == 0) {
       break;
     }
 
-    sort_rules_and_remap_host(current_data, round_rules, next_start_id);
+    gpu_codec::build_rule_reorder_map_device_vec(d_round_rules, d_reorder_map);
+    thrust::sort(d_round_rules.begin(), d_round_rules.end());
+
+    auto remap_chunks = build_traversal_chunks(current_lengths, target_chunk_nodes);
+    for (const auto &chunk : remap_chunks) {
+      if (chunk.num_nodes() == 0) {
+        continue;
+      }
+      d_chunk_data.resize(chunk.num_nodes());
+      thrust::copy(current_data.begin() + static_cast<std::ptrdiff_t>(chunk.node_begin),
+                   current_data.begin() + static_cast<std::ptrdiff_t>(chunk.node_end),
+                   d_chunk_data.begin());
+
+      gpu_codec::remap_chunk_rule_ids_device_vec(
+          d_chunk_data, d_new_indices, d_reorder_map, next_start_id,
+          num_rules_before_compact, num_rules_after_compact
+      );
+
+      thrust::copy(d_chunk_data.begin(), d_chunk_data.end(),
+                   current_data.begin() + static_cast<std::ptrdiff_t>(chunk.node_begin));
+    }
 
     result.layer_ranges.push_back(
-        {next_start_id, static_cast<uint32_t>(round_rules.size())});
-    all_rules.insert(all_rules.end(), round_rules.begin(), round_rules.end());
-    next_start_id += static_cast<uint32_t>(round_rules.size());
+        {next_start_id, num_rules_after_compact});
+        
+    std::vector<uint64_t> h_round_rules(num_rules_after_compact);
+    thrust::copy(d_round_rules.begin(), d_round_rules.end(), h_round_rules.begin());
+    all_rules.insert(all_rules.end(), h_round_rules.begin(), h_round_rules.end());
+    next_start_id += num_rules_after_compact;
   }
 
   result.encoded_path_zstd_nvcomp =
