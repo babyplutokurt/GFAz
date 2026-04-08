@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 
 #include <cuco/static_map.cuh>
 #include <limits>
@@ -33,6 +34,34 @@
   } while (0)
 
 namespace gpu_codec {
+
+namespace {
+
+bool codec_sched_debug_enabled() {
+  const char *env = std::getenv("GFAZ_GPU_SCHED_DEBUG");
+  return env && *env != '\0' && std::string(env) != "0";
+}
+
+void print_meminfo(const char *label, size_t total_nodes, size_t pair_count) {
+  if (!codec_sched_debug_enabled()) {
+    return;
+  }
+
+  size_t free_bytes = 0;
+  size_t total_bytes = 0;
+  cudaError_t err = cudaMemGetInfo(&free_bytes, &total_bytes);
+  std::cerr << "[GPU Codec] " << label << " nodes=" << total_nodes
+            << " pairs=" << pair_count;
+  if (err == cudaSuccess) {
+    std::cerr << " free_gb=" << (free_bytes / (1024.0 * 1024.0 * 1024.0))
+              << " total_gb=" << (total_bytes / (1024.0 * 1024.0 * 1024.0));
+  } else {
+    std::cerr << " meminfo_error=" << cudaGetErrorString(err);
+  }
+  std::cerr << std::endl;
+}
+
+} // namespace
 
 FlattenedPathsDevice copy_paths_to_device(const FlattenedPaths &paths) {
   FlattenedPathsDevice device_paths;
@@ -637,6 +666,7 @@ void count_2mers_segmented_device_vec(
 
   size_t total_nodes = d_data.size();
   size_t M = total_nodes - 1;
+  print_meminfo("count_2mers_segmented start", total_nodes, M);
 
   thrust::device_vector<uint64_t> d_keys(M);
 
@@ -648,10 +678,16 @@ void count_2mers_segmented_device_vec(
       thrust::raw_pointer_cast(d_keys.data()),
       thrust::raw_pointer_cast(d_is_last.data()));
   CUDA_CHECK(cudaGetLastError());
+  print_meminfo("count_2mers_segmented after_generate", total_nodes, M);
 
   // Remove sentinel values before sorting
+  if (codec_sched_debug_enabled()) {
+    std::cerr << "[GPU Codec] count_2mers_segmented before_remove pairs=" << M
+              << std::endl;
+  }
   auto valid_end = thrust::remove(d_keys.begin(), d_keys.end(), UINT64_MAX);
   size_t valid_count = valid_end - d_keys.begin();
+  print_meminfo("count_2mers_segmented after_remove", total_nodes, valid_count);
   if (valid_count == 0) {
     d_unique_keys.clear();
     d_counts.clear();
@@ -659,17 +695,27 @@ void count_2mers_segmented_device_vec(
   }
   d_keys.resize(valid_count);
 
+  if (codec_sched_debug_enabled()) {
+    std::cerr << "[GPU Codec] count_2mers_segmented before_sort valid_pairs="
+              << valid_count << std::endl;
+  }
   thrust::sort(d_keys.begin(), d_keys.end());
+  print_meminfo("count_2mers_segmented after_sort", total_nodes, valid_count);
 
   d_unique_keys.resize(valid_count);
   d_counts.resize(valid_count);
 
   auto ones_begin = thrust::make_constant_iterator<uint32_t>(1);
+  if (codec_sched_debug_enabled()) {
+    std::cerr << "[GPU Codec] count_2mers_segmented before_reduce valid_pairs="
+              << valid_count << std::endl;
+  }
   auto reduce_end = thrust::reduce_by_key(
       d_keys.begin(), d_keys.end(), ones_begin,
       d_unique_keys.begin(), d_counts.begin());
 
   size_t unique_count = reduce_end.first - d_unique_keys.begin();
+  print_meminfo("count_2mers_segmented after_reduce", total_nodes, unique_count);
   d_unique_keys.resize(unique_count);
   d_counts.resize(unique_count);
 }

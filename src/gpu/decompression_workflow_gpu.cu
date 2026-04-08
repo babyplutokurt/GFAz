@@ -1,6 +1,9 @@
 #include "gpu/codec_gpu.cuh"
 #include "gpu/codec_gpu_nvcomp.cuh"
+#include "gpu/decompression_workflow_gpu_internal.hpp"
 #include "gpu/decompression_workflow_gpu.hpp"
+#include "gpu/path_decompression_gpu_legacy.hpp"
+#include "gpu/path_decompression_gpu_rolling.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -20,6 +23,8 @@ using Clock = std::chrono::high_resolution_clock;
 void set_gpu_decompression_debug(bool enabled) {
   g_debug_decompression = enabled;
 }
+
+bool decompression_debug_enabled() { return g_debug_decompression; }
 
 static double elapsed_ms(const Clock::time_point &start,
                          const Clock::time_point &end) {
@@ -464,37 +469,13 @@ decompress_paths_gpu(const gpu_compression::CompressedData_gpu &data,
                                                result.lengths.end());
 
   if (options.use_legacy_full_decompression) {
-    if (g_debug_decompression) {
-      std::cout << "[GPU Decompress] Expanding path with legacy whole-device "
-                   "pipeline, min_rule_id="
-                << min_rule_id << std::endl;
-    }
-
-    uint32_t num_segs_final = static_cast<uint32_t>(result.lengths.size());
-    thrust::device_vector<uint64_t> d_offs_final(num_segs_final);
-    thrust::exclusive_scan(d_lens_final.begin(), d_lens_final.end(),
-                           d_offs_final.begin(), uint64_t(0));
-
-    thrust::device_vector<int32_t> d_expanded = gpu_codec::expand_path_device_vec(
-        d_encoded_path, d_rules_first, d_rules_second, min_rule_id, num_rules);
-    thrust::device_vector<int32_t> d_decoded =
-        gpu_codec::segmented_inverse_delta_decode_device_vec(
-            d_expanded, d_offs_final, num_segs_final, d_expanded.size());
-
-    result.data.resize(d_decoded.size());
-    thrust::copy(d_decoded.begin(), d_decoded.end(), result.data.begin());
+    decompress_paths_gpu_legacy(d_encoded_path, d_rules_first, d_rules_second,
+                                min_rule_id, num_rules, d_lens_final,
+                                result.data);
   } else {
-    if (g_debug_decompression) {
-      std::cout << "[GPU Decompress] Expanding path with rolling chunk "
-                   "scheduler ("
-                << traversals_per_chunk
-                << " traversals per chunk), min_rule_id=" << min_rule_id
-                << std::endl;
-    }
-
-    gpu_codec::rolling_expand_and_inverse_delta_decode(
+    decompress_paths_gpu_rolling(
         d_encoded_path, d_rules_first, d_rules_second, min_rule_id, num_rules,
-        d_lens_final, result.data, traversals_per_chunk);
+        d_lens_final, traversals_per_chunk, result.data);
   }
 
   auto expand_end = Clock::now();
