@@ -861,13 +861,14 @@ __global__ void resolve_overlaps_kernel(uint8_t *flags, size_t num_nodes,
 
 // Step 3: SizeOp
 struct SizeOp {
-  __device__ int operator()(uint8_t f) const { return (f == 2) ? 0 : 1; }
+  __device__ int64_t operator()(uint8_t f) const { return (f == 2) ? 0 : 1; }
 };
 
 // Step 4: Scatter
 __global__ void scatter_kernel(const int32_t *nodes,      // Original nodes
                                const int32_t *new_values, // Rule IDs
-                               const uint8_t *flags, const int *scan_result,
+                               const uint8_t *flags,
+                               const int64_t *scan_result,
                                int32_t *output, size_t num_nodes) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= num_nodes)
@@ -877,7 +878,7 @@ __global__ void scatter_kernel(const int32_t *nodes,      // Original nodes
   if (f == 2)
     return; // Consumed
 
-  int write_pos = scan_result[idx];
+  int64_t write_pos = scan_result[idx];
 
   // Debug scatter
   // if (write_pos < 10) printf("GPU SCATTER: idx=%lu, f=%d, write_pos=%d,
@@ -885,10 +886,10 @@ __global__ void scatter_kernel(const int32_t *nodes,      // Original nodes
 
   if (f == 1) {
     // Use the rule ID
-    output[write_pos] = new_values[idx];
+    output[static_cast<size_t>(write_pos)] = new_values[idx];
   } else {
     // f == 0: Use original node
-    output[write_pos] = nodes[idx];
+    output[static_cast<size_t>(write_pos)] = nodes[idx];
   }
 }
 
@@ -971,19 +972,19 @@ void apply_2mer_rules_gpu(FlattenedPaths &paths, void *d_table_handle,
   }
 
   // 3. Prefix Sum to find write positions
-  thrust::device_vector<int> d_sizes(num_nodes);
+  thrust::device_vector<int64_t> d_sizes(num_nodes);
   thrust::transform(d_flags.begin(), d_flags.end(), d_sizes.begin(), SizeOp());
 
-  thrust::device_vector<int> d_scan(num_nodes);
+  thrust::device_vector<int64_t> d_scan(num_nodes);
   thrust::exclusive_scan(d_sizes.begin(), d_sizes.end(), d_scan.begin());
 
   // Get total new size
-  int last_scan = d_scan.back();
-  int last_size = d_sizes.back();
-  int new_total_size = last_scan + last_size;
+  int64_t last_scan = d_scan.back();
+  int64_t last_size = d_sizes.back();
+  int64_t new_total_size = last_scan + last_size;
 
   // 4. Scatter
-  thrust::device_vector<int32_t> d_output(new_total_size);
+  thrust::device_vector<int32_t> d_output(static_cast<size_t>(new_total_size));
   scatter_kernel<<<blocks, threads>>>(
       thrust::raw_pointer_cast(d_nodes.data()), // Original nodes (NEW)
       thrust::raw_pointer_cast(d_new_values.data()),
@@ -993,7 +994,7 @@ void apply_2mer_rules_gpu(FlattenedPaths &paths, void *d_table_handle,
   CUDA_CHECK(cudaGetLastError());
 
   // 5. Swap / Update result
-  paths.data.resize(new_total_size);
+  paths.data.resize(static_cast<size_t>(new_total_size));
   thrust::copy(d_output.begin(), d_output.end(), paths.data.begin());
 
   // Treat as one huge path
@@ -1049,17 +1050,17 @@ void apply_2mer_rules_gpu_device(FlattenedPathsDevice &paths,
     thrust::copy(d_rule_flags.begin(), d_rule_flags.end(), rules_used.begin());
   }
 
-  thrust::device_vector<int> d_sizes(num_nodes);
+  thrust::device_vector<int64_t> d_sizes(num_nodes);
   thrust::transform(d_flags.begin(), d_flags.end(), d_sizes.begin(), SizeOp());
 
-  thrust::device_vector<int> d_scan(num_nodes);
+  thrust::device_vector<int64_t> d_scan(num_nodes);
   thrust::exclusive_scan(d_sizes.begin(), d_sizes.end(), d_scan.begin());
 
-  int last_scan = d_scan.back();
-  int last_size = d_sizes.back();
-  int new_total_size = last_scan + last_size;
+  int64_t last_scan = d_scan.back();
+  int64_t last_size = d_sizes.back();
+  int64_t new_total_size = last_scan + last_size;
 
-  thrust::device_vector<int32_t> d_output(new_total_size);
+  thrust::device_vector<int32_t> d_output(static_cast<size_t>(new_total_size));
   scatter_kernel<<<blocks, threads>>>(
       d_nodes, thrust::raw_pointer_cast(d_new_values.data()),
       thrust::raw_pointer_cast(d_flags.data()),
@@ -1118,17 +1119,17 @@ void apply_2mer_rules_device_vec(thrust::device_vector<int32_t> &d_data,
                       [] __device__(int32_t v) { return v ? 1 : 0; });
   }
 
-  thrust::device_vector<int> d_sizes(num_nodes);
+  thrust::device_vector<int64_t> d_sizes(num_nodes);
   thrust::transform(d_flags.begin(), d_flags.end(), d_sizes.begin(), SizeOp());
 
-  thrust::device_vector<int> d_scan(num_nodes);
+  thrust::device_vector<int64_t> d_scan(num_nodes);
   thrust::exclusive_scan(d_sizes.begin(), d_sizes.end(), d_scan.begin());
 
-  int last_scan = d_scan.back();
-  int last_size = d_sizes.back();
-  int new_total_size = last_scan + last_size;
+  int64_t last_scan = d_scan.back();
+  int64_t last_size = d_sizes.back();
+  int64_t new_total_size = last_scan + last_size;
 
-  thrust::device_vector<int32_t> d_output(new_total_size);
+  thrust::device_vector<int32_t> d_output(static_cast<size_t>(new_total_size));
   scatter_kernel<<<blocks, threads>>>(
       d_nodes, thrust::raw_pointer_cast(d_new_values.data()),
       thrust::raw_pointer_cast(d_flags.data()),
@@ -1178,19 +1179,25 @@ __global__ void mark_replacements_segmented_kernel(
 
 // Compute new per-segment lengths after scatter compaction
 __global__ void compute_new_lengths_kernel(
-    const int *d_scan,
+    const int64_t *d_scan,
     const uint64_t *d_offsets,
     uint32_t *new_lengths,
     uint32_t num_segments,
     size_t old_total_nodes,
-    int new_total_size) {
+    int64_t new_total_size) {
   uint32_t seg = blockIdx.x * blockDim.x + threadIdx.x;
   if (seg >= num_segments) return;
 
-  int start_write_pos = d_scan[d_offsets[seg]];
-  int end_write_pos;
-  if (seg + 1 < num_segments) {
-    end_write_pos = d_scan[d_offsets[seg + 1]];
+  uint64_t start_offset = d_offsets[seg];
+  uint64_t end_offset = (seg + 1 < num_segments)
+                            ? d_offsets[seg + 1]
+                            : static_cast<uint64_t>(old_total_nodes);
+
+  int64_t start_write_pos =
+      (start_offset < old_total_nodes) ? d_scan[start_offset] : new_total_size;
+  int64_t end_write_pos;
+  if (end_offset < old_total_nodes) {
+    end_write_pos = d_scan[end_offset];
   } else {
     end_write_pos = new_total_size;
   }
@@ -1272,18 +1279,18 @@ thrust::device_vector<uint32_t> apply_2mer_rules_segmented_device_vec(
   }
 
   // 3. Prefix scan for scatter write positions
-  thrust::device_vector<int> d_sizes(num_nodes);
+  thrust::device_vector<int64_t> d_sizes(num_nodes);
   thrust::transform(d_flags.begin(), d_flags.end(), d_sizes.begin(), SizeOp());
 
-  thrust::device_vector<int> d_scan(num_nodes);
+  thrust::device_vector<int64_t> d_scan(num_nodes);
   thrust::exclusive_scan(d_sizes.begin(), d_sizes.end(), d_scan.begin());
 
-  int last_scan = d_scan.back();
-  int last_size = d_sizes.back();
-  int new_total_size = last_scan + last_size;
+  int64_t last_scan = d_scan.back();
+  int64_t last_size = d_sizes.back();
+  int64_t new_total_size = last_scan + last_size;
 
   // 4. Scatter
-  thrust::device_vector<int32_t> d_output(new_total_size);
+  thrust::device_vector<int32_t> d_output(static_cast<size_t>(new_total_size));
   scatter_kernel<<<blocks, threads>>>(
       d_nodes, thrust::raw_pointer_cast(d_new_values.data()),
       thrust::raw_pointer_cast(d_flags.data()),
@@ -1318,8 +1325,8 @@ thrust::device_vector<uint32_t> apply_2mer_rules_segmented_device_vec(
 // valid range.
 __global__ void remap_paths_kernel(
     int32_t *paths, size_t num_nodes,
-    const int *new_indices, // exclusive scan result: new_indices[i] = count of
-                            // used rules before i
+    const uint64_t *new_indices, // exclusive scan result: new_indices[i] =
+                                 // count of used rules before i
     uint32_t start_id, uint32_t num_rules) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= num_nodes)
@@ -1333,7 +1340,7 @@ __global__ void remap_paths_kernel(
     if (offset < num_rules) {
       // Remap using exclusive scan result
       // new_indices[offset] gives the position in the compacted array
-      int new_offset = new_indices[offset];
+      uint64_t new_offset = new_indices[offset];
       uint32_t new_id = start_id + (uint32_t)new_offset;
 
       paths[idx] = (val >= 0) ? (int32_t)new_id : -(int32_t)new_id;
@@ -1366,10 +1373,12 @@ void compact_rules_and_remap_gpu(FlattenedPaths &paths,
   // 2. Exclusive Scan to get new indices (cast to int to avoid uint8 overflow)
   // Example: flags = [0, 1, 1, 0, 1]
   // scan   = [0, 0, 1, 2, 2] -> New offsets for used rules
-  thrust::device_vector<int> d_flags_int(num_rules);
+  thrust::device_vector<uint64_t> d_flags_int(num_rules);
   thrust::transform(d_flags.begin(), d_flags.end(), d_flags_int.begin(),
-                    [] __host__ __device__(uint8_t v) { return v ? 1 : 0; });
-  thrust::device_vector<int> d_new_indices(num_rules);
+                    [] __host__ __device__(uint8_t v) {
+                      return v ? uint64_t(1) : uint64_t(0);
+                    });
+  thrust::device_vector<uint64_t> d_new_indices(num_rules);
   thrust::exclusive_scan(d_flags_int.begin(), d_flags_int.end(),
                          d_new_indices.begin());
 
@@ -1424,10 +1433,12 @@ void compact_rules_and_remap_gpu_device(FlattenedPathsDevice &paths,
 
   thrust::device_vector<uint8_t> d_flags(rules_used);
 
-  thrust::device_vector<int> d_flags_int(num_rules);
+  thrust::device_vector<uint64_t> d_flags_int(num_rules);
   thrust::transform(d_flags.begin(), d_flags.end(), d_flags_int.begin(),
-                    [] __host__ __device__(uint8_t v) { return v ? 1 : 0; });
-  thrust::device_vector<int> d_new_indices(num_rules);
+                    [] __host__ __device__(uint8_t v) {
+                      return v ? uint64_t(1) : uint64_t(0);
+                    });
+  thrust::device_vector<uint64_t> d_new_indices(num_rules);
   thrust::exclusive_scan(d_flags_int.begin(), d_flags_int.end(),
                          d_new_indices.begin());
 
@@ -1467,11 +1478,13 @@ void compact_rules_and_remap_device_vec(
 
   size_t num_rules = rules_used.size();
 
-  thrust::device_vector<int> d_flags_int(num_rules);
+  thrust::device_vector<uint64_t> d_flags_int(num_rules);
   thrust::transform(rules_used.begin(), rules_used.end(), d_flags_int.begin(),
-                    [] __device__(uint8_t v) { return v ? 1 : 0; });
+                    [] __device__(uint8_t v) {
+                      return v ? uint64_t(1) : uint64_t(0);
+                    });
 
-  thrust::device_vector<int> d_new_indices(num_rules);
+  thrust::device_vector<uint64_t> d_new_indices(num_rules);
   thrust::exclusive_scan(d_flags_int.begin(), d_flags_int.end(),
                          d_new_indices.begin());
 
@@ -1499,7 +1512,7 @@ void compact_rules_and_remap_device_vec(
 // Kernel to remap paths based on rule reordering
 __global__ void
 remap_paths_reorder_kernel(int32_t *paths, size_t num_nodes,
-                           const int *reorder_map, // old_id -> new_id
+                           const uint32_t *reorder_map, // old_id -> new_id
                            uint32_t start_id, uint32_t num_rules) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= num_nodes)
@@ -1512,8 +1525,8 @@ remap_paths_reorder_kernel(int32_t *paths, size_t num_nodes,
     uint32_t offset = (uint32_t)abs_val - start_id;
     if (offset < num_rules) {
       // Map old ID offset to new ID offset
-      int new_offset = reorder_map[offset];
-      uint32_t new_id = start_id + (uint32_t)new_offset;
+      uint32_t new_offset = reorder_map[offset];
+      uint32_t new_id = start_id + new_offset;
 
       paths[idx] = (val >= 0) ? (int32_t)new_id : -(int32_t)new_id;
     }
@@ -1531,7 +1544,7 @@ void sort_rules_and_remap_gpu(FlattenedPaths &paths,
   thrust::device_vector<uint64_t> d_rules(current_rules);
 
   // 2. Generate indices [0, 1, ..., N-1] efficiently on GPU
-  thrust::device_vector<int> d_indices(num_rules);
+  thrust::device_vector<uint32_t> d_indices(num_rules);
   thrust::sequence(d_indices.begin(), d_indices.end());
 
   // 3. Sort rules by key (d_rules becomes sorted, d_indices is permuted)
@@ -1539,9 +1552,9 @@ void sort_rules_and_remap_gpu(FlattenedPaths &paths,
   thrust::sort_by_key(d_rules.begin(), d_rules.end(), d_indices.begin());
 
   // 4. Invert Permutation: we need reorder_map[old_idx] = new_idx
-  thrust::device_vector<int> d_reorder_map(num_rules);
-  thrust::scatter(thrust::counting_iterator<int>(0), // Values: new_idx 0..N-1
-                  thrust::counting_iterator<int>(num_rules),
+  thrust::device_vector<uint32_t> d_reorder_map(num_rules);
+  thrust::scatter(thrust::counting_iterator<uint32_t>(0),
+                  thrust::counting_iterator<uint32_t>(static_cast<uint32_t>(num_rules)),
                   d_indices.begin(),    // Map: positions (old_idx) to write to
                   d_reorder_map.begin() // Output
   );
@@ -1578,14 +1591,14 @@ void sort_rules_and_remap_gpu_device(FlattenedPathsDevice &paths,
 
   thrust::device_vector<uint64_t> d_rules(current_rules);
 
-  thrust::device_vector<int> d_indices(num_rules);
+  thrust::device_vector<uint32_t> d_indices(num_rules);
   thrust::sequence(d_indices.begin(), d_indices.end());
 
   thrust::sort_by_key(d_rules.begin(), d_rules.end(), d_indices.begin());
 
-  thrust::device_vector<int> d_reorder_map(num_rules);
-  thrust::scatter(thrust::counting_iterator<int>(0),
-                  thrust::counting_iterator<int>(num_rules), d_indices.begin(),
+  thrust::device_vector<uint32_t> d_reorder_map(num_rules);
+  thrust::scatter(thrust::counting_iterator<uint32_t>(0),
+                  thrust::counting_iterator<uint32_t>(static_cast<uint32_t>(num_rules)), d_indices.begin(),
                   d_reorder_map.begin());
 
   if (!paths.data.empty()) {
@@ -1610,14 +1623,14 @@ void sort_rules_and_remap_device_vec(thrust::device_vector<int32_t> &d_data,
     return;
   size_t num_rules = rules.size();
 
-  thrust::device_vector<int> d_indices(num_rules);
+  thrust::device_vector<uint32_t> d_indices(num_rules);
   thrust::sequence(d_indices.begin(), d_indices.end());
 
   thrust::sort_by_key(rules.begin(), rules.end(), d_indices.begin());
 
-  thrust::device_vector<int> d_reorder_map(num_rules);
-  thrust::scatter(thrust::counting_iterator<int>(0),
-                  thrust::counting_iterator<int>(num_rules), d_indices.begin(),
+  thrust::device_vector<uint32_t> d_reorder_map(num_rules);
+  thrust::scatter(thrust::counting_iterator<uint32_t>(0),
+                  thrust::counting_iterator<uint32_t>(static_cast<uint32_t>(num_rules)), d_indices.begin(),
                   d_reorder_map.begin());
 
   if (!d_data.empty()) {
@@ -1816,7 +1829,7 @@ struct ExpansionSizeOp_Deprecated {
       : min_rule_id(min_id),
         max_rule_id(min_id + static_cast<uint32_t>(num_rules)) {}
 
-  __host__ __device__ __forceinline__ int operator()(int32_t val) const {
+  __host__ __device__ __forceinline__ int64_t operator()(int32_t val) const {
     uint32_t abs_val = static_cast<uint32_t>(val >= 0 ? val : -val);
     return (abs_val >= min_rule_id && abs_val < max_rule_id) ? 2 : 1;
   }
@@ -1824,7 +1837,7 @@ struct ExpansionSizeOp_Deprecated {
 
 // Kernel to expand one level of rules (deprecated version)
 __global__ void expand_rules_kernel_deprecated(
-    const int32_t *__restrict__ d_input, const int *__restrict__ d_offsets,
+    const int32_t *__restrict__ d_input, const int64_t *__restrict__ d_offsets,
     const int32_t *__restrict__ d_rules_first,
     const int32_t *__restrict__ d_rules_second, int32_t *__restrict__ d_output,
     size_t num_elements, uint32_t min_rule_id, uint32_t max_rule_id) {
@@ -1835,7 +1848,7 @@ __global__ void expand_rules_kernel_deprecated(
 
   int32_t val = d_input[idx];
   uint32_t abs_val = static_cast<uint32_t>(val >= 0 ? val : -val);
-  int out_offset = d_offsets[idx];
+  int64_t out_offset = d_offsets[idx];
 
   if (abs_val >= min_rule_id && abs_val < max_rule_id) {
     uint32_t rule_idx = abs_val - min_rule_id;
@@ -1843,14 +1856,14 @@ __global__ void expand_rules_kernel_deprecated(
     int32_t second = d_rules_second[rule_idx];
 
     if (val >= 0) {
-      d_output[out_offset] = first;
-      d_output[out_offset + 1] = second;
+      d_output[static_cast<size_t>(out_offset)] = first;
+      d_output[static_cast<size_t>(out_offset + 1)] = second;
     } else {
-      d_output[out_offset] = -second;
-      d_output[out_offset + 1] = -first;
+      d_output[static_cast<size_t>(out_offset)] = -second;
+      d_output[static_cast<size_t>(out_offset + 1)] = -first;
     }
   } else {
-    d_output[out_offset] = val;
+    d_output[static_cast<size_t>(out_offset)] = val;
   }
 }
 
@@ -1887,7 +1900,7 @@ thrust::device_vector<int32_t> expand_path_device_vec_iterative(
   thrust::device_vector<int32_t> *d_current = &d_buffer_a;
   thrust::device_vector<int32_t> *d_output = &d_buffer_b;
 
-  thrust::device_vector<int> d_offsets;
+  thrust::device_vector<int64_t> d_offsets;
   d_offsets.reserve(buffer_capacity);
 
   for (int pass = 0; pass < max_passes; ++pass) {
@@ -1902,8 +1915,8 @@ thrust::device_vector<int32_t> expand_path_device_vec_iterative(
     thrust::exclusive_scan(size_iter, size_iter + num_elements,
                            d_offsets.begin());
 
-    int last_offset = d_offsets.back();
-    int last_size = size_op(d_current->back());
+    int64_t last_offset = d_offsets.back();
+    int64_t last_size = size_op(d_current->back());
     size_t new_size = static_cast<size_t>(last_offset + last_size);
 
     if (new_size == num_elements) {
