@@ -16,6 +16,7 @@
 #include <thrust/scan.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
+#include <thrust/reduce.h>
 #include <thrust/unique.h>
 #include <thrust/remove.h>
 
@@ -605,8 +606,32 @@ struct IsNotSentinel {
 thrust::device_vector<uint64_t> find_repeated_2mers_segmented_device_vec(
     const thrust::device_vector<int32_t> &d_data,
     const thrust::device_vector<uint8_t> &d_is_last) {
-  if (d_data.size() < 2) {
+  thrust::device_vector<uint64_t> d_unique_keys;
+  thrust::device_vector<uint32_t> d_counts;
+  count_2mers_segmented_device_vec(d_data, d_is_last, d_unique_keys, d_counts);
+
+  if (d_unique_keys.empty()) {
     return {};
+  }
+
+  thrust::device_vector<uint64_t> d_repeated(d_unique_keys.size());
+  auto repeated_end = thrust::copy_if(
+      d_unique_keys.begin(), d_unique_keys.end(), d_counts.begin(),
+      d_repeated.begin(),
+      [] __device__(uint32_t count) { return count >= 2; });
+  d_repeated.resize(repeated_end - d_repeated.begin());
+  return d_repeated;
+}
+
+void count_2mers_segmented_device_vec(
+    const thrust::device_vector<int32_t> &d_data,
+    const thrust::device_vector<uint8_t> &d_is_last,
+    thrust::device_vector<uint64_t> &d_unique_keys,
+    thrust::device_vector<uint32_t> &d_counts) {
+  if (d_data.size() < 2) {
+    d_unique_keys.clear();
+    d_counts.clear();
+    return;
   }
 
   size_t total_nodes = d_data.size();
@@ -626,35 +651,26 @@ thrust::device_vector<uint64_t> find_repeated_2mers_segmented_device_vec(
   // Remove sentinel values before sorting
   auto valid_end = thrust::remove(d_keys.begin(), d_keys.end(), UINT64_MAX);
   size_t valid_count = valid_end - d_keys.begin();
-  if (valid_count == 0) return {};
+  if (valid_count == 0) {
+    d_unique_keys.clear();
+    d_counts.clear();
+    return;
+  }
   d_keys.resize(valid_count);
 
-  // Sort, mark duplicates, compact, unique — same as non-segmented version
   thrust::sort(d_keys.begin(), d_keys.end());
 
-  thrust::device_vector<uint8_t> d_dup(valid_count);
-  uint8_t *d_dup_ptr = thrust::raw_pointer_cast(d_dup.data());
-  DuplicateMarker marker(thrust::raw_pointer_cast(d_keys.data()),
-                         (uint32_t)valid_count);
+  d_unique_keys.resize(valid_count);
+  d_counts.resize(valid_count);
 
-  thrust::for_each(
-      thrust::counting_iterator<int>(0),
-      thrust::counting_iterator<int>((int)valid_count),
-      [marker, d_dup_ptr] __device__(int i) { d_dup_ptr[i] = marker(i); });
+  auto ones_begin = thrust::make_constant_iterator<uint32_t>(1);
+  auto reduce_end = thrust::reduce_by_key(
+      d_keys.begin(), d_keys.end(), ones_begin,
+      d_unique_keys.begin(), d_counts.begin());
 
-  thrust::device_vector<uint64_t> d_dup_keys(valid_count);
-  auto end_it = thrust::copy_if(d_keys.begin(), d_keys.end(), d_dup.begin(),
-                                d_dup_keys.begin(), IsDuplicate());
-
-  size_t num_dups = end_it - d_dup_keys.begin();
-  if (num_dups == 0) return {};
-
-  d_dup_keys.resize(num_dups);
-
-  auto new_end = thrust::unique(d_dup_keys.begin(), d_dup_keys.end());
-  d_dup_keys.resize(new_end - d_dup_keys.begin());
-
-  return d_dup_keys;
+  size_t unique_count = reduce_end.first - d_unique_keys.begin();
+  d_unique_keys.resize(unique_count);
+  d_counts.resize(unique_count);
 }
 
 // --- GPU Hash Table Implementation (cuCollections) ---

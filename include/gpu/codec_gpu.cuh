@@ -208,6 +208,23 @@ thrust::device_vector<uint64_t> find_repeated_2mers_segmented_device_vec(
     const thrust::device_vector<uint8_t>& d_is_last);
 
 /**
+ * Boundary-aware 2-mer histogram for a flat traversal chunk.
+ *
+ * Generates canonical 2-mers inside each segment, sorts them, and reduces them
+ * to unique key/count pairs. Cross-boundary pairs are skipped.
+ *
+ * @param d_data Flat chunk data
+ * @param d_is_last Boundary mask: 1 at the last element of each segment
+ * @param d_unique_keys Output: unique canonical 2-mer keys
+ * @param d_counts Output: occurrence count per key in this chunk
+ */
+void count_2mers_segmented_device_vec(
+    const thrust::device_vector<int32_t>& d_data,
+    const thrust::device_vector<uint8_t>& d_is_last,
+    thrust::device_vector<uint64_t>& d_unique_keys,
+    thrust::device_vector<uint32_t>& d_counts);
+
+/**
  * Boundary-aware rule application: skips replacements that cross segment boundaries.
  * Also computes new per-segment lengths after compaction.
  *
@@ -329,4 +346,3 @@ std::vector<char> unpack_orientations_gpu(const std::vector<uint8_t>& packed, si
 } // namespace gpu_codec
 
 #endif // CODEC_GPU_CUH
-

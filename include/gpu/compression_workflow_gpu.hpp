@@ -145,16 +145,15 @@ struct CompressedData_gpu {
 };
 
 /**
- * GPU-resident path compression with minimal host-device transfers.
+ * GPU path compression.
  *
- * This function:
- * 1. Copies input paths to GPU once
- * 2. Computes start_id on GPU (max abs value + 1)
- * 3. Performs delta encoding on GPU
- * 4. For each round, finds 2-mers, applies rules, compacts, and sorts - ALL ON
- * GPU
- * 5. Accumulates rules in a GPU device vector (no per-round copies to host)
- * 6. Only at the end, copies results back to host
+ * Small traversals stay on-device for the full grammar pipeline. Large
+ * traversals fall back to a rolling round scheduler that:
+ * 1. Keeps the flattened traversal on host memory
+ * 2. Partitions it into traversal-aligned chunks
+ * 3. Discovers global 2-mer rules by merging per-chunk histograms
+ * 4. Applies the merged rulebook chunk-by-chunk on GPU
+ * 5. Preserves the same round/layer output structure
  *
  * @param paths Input flattened paths (host memory)
  * @param num_rounds Maximum number of compression rounds
