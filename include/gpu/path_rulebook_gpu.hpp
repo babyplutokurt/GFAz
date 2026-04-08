@@ -13,6 +13,14 @@ void merge_counted_2mers_device_vec(
     thrust::device_vector<uint64_t>& d_unique_keys,
     thrust::device_vector<uint32_t>& d_total_counts);
 
+void merge_reduced_counted_2mers_device_vec(
+    const thrust::device_vector<uint64_t>& d_lhs_keys,
+    const thrust::device_vector<uint32_t>& d_lhs_counts,
+    const thrust::device_vector<uint64_t>& d_rhs_keys,
+    const thrust::device_vector<uint32_t>& d_rhs_counts,
+    thrust::device_vector<uint64_t>& d_unique_keys,
+    thrust::device_vector<uint32_t>& d_total_counts);
+
 void filter_rules_by_count_device_vec(
     const thrust::device_vector<uint64_t>& d_unique_keys,
     const thrust::device_vector<uint32_t>& d_total_counts,

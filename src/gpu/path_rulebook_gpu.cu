@@ -3,6 +3,7 @@
 #include <thrust/copy.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
+#include <thrust/merge.h>
 #include <thrust/reduce.h>
 #include <thrust/scatter.h>
 #include <thrust/scan.h>
@@ -31,6 +32,45 @@ void merge_counted_2mers_device_vec(
   auto new_end =
       thrust::reduce_by_key(d_keys.begin(), d_keys.end(), d_counts.begin(),
                             d_unique_keys.begin(), d_total_counts.begin());
+
+  d_unique_keys.resize(new_end.first - d_unique_keys.begin());
+  d_total_counts.resize(new_end.second - d_total_counts.begin());
+}
+
+void merge_reduced_counted_2mers_device_vec(
+    const thrust::device_vector<uint64_t>& d_lhs_keys,
+    const thrust::device_vector<uint32_t>& d_lhs_counts,
+    const thrust::device_vector<uint64_t>& d_rhs_keys,
+    const thrust::device_vector<uint32_t>& d_rhs_counts,
+    thrust::device_vector<uint64_t>& d_unique_keys,
+    thrust::device_vector<uint32_t>& d_total_counts) {
+  if (d_lhs_keys.empty()) {
+    d_unique_keys = d_rhs_keys;
+    d_total_counts = d_rhs_counts;
+    return;
+  }
+  if (d_rhs_keys.empty()) {
+    d_unique_keys = d_lhs_keys;
+    d_total_counts = d_lhs_counts;
+    return;
+  }
+
+  thrust::device_vector<uint64_t> d_merged_keys(d_lhs_keys.size() +
+                                                d_rhs_keys.size());
+  thrust::device_vector<uint32_t> d_merged_counts(d_lhs_counts.size() +
+                                                  d_rhs_counts.size());
+
+  thrust::merge_by_key(d_lhs_keys.begin(), d_lhs_keys.end(), d_rhs_keys.begin(),
+                       d_rhs_keys.end(), d_lhs_counts.begin(),
+                       d_rhs_counts.begin(), d_merged_keys.begin(),
+                       d_merged_counts.begin());
+
+  d_unique_keys.resize(d_merged_keys.size());
+  d_total_counts.resize(d_merged_counts.size());
+  auto new_end = thrust::reduce_by_key(
+      d_merged_keys.begin(), d_merged_keys.end(), d_merged_counts.begin(),
+      d_unique_keys.begin(), d_total_counts.begin(), thrust::equal_to<uint64_t>(),
+      thrust::plus<uint32_t>());
 
   d_unique_keys.resize(new_end.first - d_unique_keys.begin());
   d_total_counts.resize(new_end.second - d_total_counts.begin());

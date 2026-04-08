@@ -19,6 +19,12 @@ namespace gpu_compression {
 
 namespace {
 
+struct HistogramLevel {
+  thrust::device_vector<uint64_t> keys;
+  thrust::device_vector<uint32_t> counts;
+  bool occupied = false;
+};
+
 enum class ChunkOffsetBuildMode {
   kFallback,
   kGpuOnly,
@@ -256,6 +262,74 @@ void delta_encode_chunks_on_gpu(std::vector<int32_t> &data,
   }
 }
 
+void merge_histogram_run_into_levels(
+    thrust::device_vector<uint64_t> &d_run_keys,
+    thrust::device_vector<uint32_t> &d_run_counts,
+    std::vector<HistogramLevel> &levels,
+    thrust::device_vector<uint64_t> &d_merge_keys,
+    thrust::device_vector<uint32_t> &d_merge_counts) {
+  if (d_run_keys.empty()) {
+    return;
+  }
+
+  size_t level_idx = 0;
+  while (true) {
+    if (level_idx == levels.size()) {
+      levels.emplace_back();
+    }
+
+    auto &level = levels[level_idx];
+    if (!level.occupied) {
+      level.keys.swap(d_run_keys);
+      level.counts.swap(d_run_counts);
+      level.occupied = true;
+      return;
+    }
+
+    gpu_codec::merge_reduced_counted_2mers_device_vec(
+        level.keys, level.counts, d_run_keys, d_run_counts, d_merge_keys,
+        d_merge_counts);
+
+    level.keys.clear();
+    level.counts.clear();
+    level.occupied = false;
+    d_run_keys.swap(d_merge_keys);
+    d_run_counts.swap(d_merge_counts);
+    ++level_idx;
+  }
+}
+
+void collapse_histogram_levels(
+    std::vector<HistogramLevel> &levels,
+    thrust::device_vector<uint64_t> &d_merged_keys,
+    thrust::device_vector<uint32_t> &d_merged_counts,
+    thrust::device_vector<uint64_t> &d_merge_keys,
+    thrust::device_vector<uint32_t> &d_merge_counts) {
+  d_merged_keys.clear();
+  d_merged_counts.clear();
+
+  for (auto &level : levels) {
+    if (!level.occupied) {
+      continue;
+    }
+
+    if (d_merged_keys.empty()) {
+      d_merged_keys.swap(level.keys);
+      d_merged_counts.swap(level.counts);
+    } else {
+      gpu_codec::merge_reduced_counted_2mers_device_vec(
+          d_merged_keys, d_merged_counts, level.keys, level.counts,
+          d_merge_keys, d_merge_counts);
+      d_merged_keys.swap(d_merge_keys);
+      d_merged_counts.swap(d_merge_counts);
+    }
+
+    level.keys.clear();
+    level.counts.clear();
+    level.occupied = false;
+  }
+}
+
 } // namespace
 
 CompressedData_gpu run_path_compression_gpu_rolling(const FlattenedPaths &paths,
@@ -309,12 +383,10 @@ CompressedData_gpu run_path_compression_gpu_rolling(const FlattenedPaths &paths,
   thrust::device_vector<uint32_t> d_counts;
   d_counts.reserve(max_nodes);
   thrust::device_vector<uint8_t> d_rules_used_dev;
-  thrust::device_vector<uint64_t> d_round_hist_keys;
-  thrust::device_vector<uint32_t> d_round_hist_counts;
-  d_round_hist_keys.reserve(max_nodes * chunks.size());
-  d_round_hist_counts.reserve(max_nodes * chunks.size());
   thrust::device_vector<uint64_t> d_merged_keys;
   thrust::device_vector<uint32_t> d_merged_counts;
+  thrust::device_vector<uint64_t> d_merge_keys;
+  thrust::device_vector<uint32_t> d_merge_counts;
   thrust::device_vector<uint64_t> d_round_rules;
   thrust::device_vector<uint8_t> d_rules_used_round;
   thrust::device_vector<uint64_t> d_new_indices;
@@ -329,8 +401,8 @@ CompressedData_gpu run_path_compression_gpu_rolling(const FlattenedPaths &paths,
       print_chunk_summary(chunks, target_chunk_nodes, "round 0 rolling plan");
     }
 
-    d_round_hist_keys.clear();
-    d_round_hist_counts.clear();
+    std::vector<HistogramLevel> histogram_levels;
+    histogram_levels.reserve(8);
 
     for (size_t chunk_idx = 0; chunk_idx < chunks.size(); ++chunk_idx) {
       const auto &chunk = chunks[chunk_idx];
@@ -360,20 +432,16 @@ CompressedData_gpu run_path_compression_gpu_rolling(const FlattenedPaths &paths,
       sync_rolling_stage("count_2mers", round_idx, chunk_idx);
 
       if (!d_unique_keys.empty()) {
-        size_t old_size = d_round_hist_keys.size();
-        d_round_hist_keys.resize(old_size + d_unique_keys.size());
-        d_round_hist_counts.resize(old_size + d_counts.size());
-        thrust::copy(d_unique_keys.begin(), d_unique_keys.end(),
-                     d_round_hist_keys.begin() + old_size);
-        thrust::copy(d_counts.begin(), d_counts.end(),
-                     d_round_hist_counts.begin() + old_size);
+        merge_histogram_run_into_levels(d_unique_keys, d_counts,
+                                        histogram_levels, d_merge_keys,
+                                        d_merge_counts);
+        sync_rolling_stage("merge_chunk_hist", round_idx, chunk_idx);
       }
     }
 
-    gpu_codec::merge_counted_2mers_device_vec(
-        d_round_hist_keys, d_round_hist_counts, d_merged_keys,
-        d_merged_counts);
-    sync_rolling_stage("merge_counted_2mers", round_idx);
+    collapse_histogram_levels(histogram_levels, d_merged_keys,
+                              d_merged_counts, d_merge_keys, d_merge_counts);
+    sync_rolling_stage("collapse_chunk_hist_tree", round_idx);
     gpu_codec::filter_rules_by_count_device_vec(d_merged_keys, d_merged_counts,
                                                 2, d_round_rules);
     sync_rolling_stage("filter_rules_by_count", round_idx);
