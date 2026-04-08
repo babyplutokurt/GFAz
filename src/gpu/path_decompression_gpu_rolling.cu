@@ -473,6 +473,12 @@ void stream_decompress_paths_gpu_rolling(
                  "cudaStreamWaitEvent(rolling copy waits for decode)");
       copy_rolling_path_chunk_to_pinned_host_async(
           context, chunk_index, host_buffers[buffer_index], copy_stream.stream);
+      // The rolling streaming path currently reuses a single device workspace
+      // for all chunks. Do not launch the next decode until the D2H copy from
+      // that workspace has completed, or the next chunk will overwrite the
+      // source buffer before the async transfer finishes.
+      check_cuda(cudaStreamSynchronize(copy_stream.stream),
+                 "cudaStreamSynchronize(rolling copy before workspace reuse)");
 
       {
         std::lock_guard<std::mutex> lock(mutex);
