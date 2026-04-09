@@ -27,86 +27,81 @@ import gfa_compression as gfac
 
 def calculate_compressed_size(compressed):
     total = 0
-
-    total += len(compressed.encoded_path_zstd_nvcomp.payload)
-    total += len(compressed.path_lengths_zstd_nvcomp.payload)
-    total += len(compressed.rules_first_zstd_nvcomp.payload)
-    total += len(compressed.rules_second_zstd_nvcomp.payload)
-
-    total += len(compressed.names_zstd_nvcomp.payload)
-    total += len(compressed.name_lengths_zstd_nvcomp.payload)
-    total += len(compressed.overlaps_zstd_nvcomp.payload)
-    total += len(compressed.overlap_lengths_zstd_nvcomp.payload)
-
-    total += len(compressed.segment_sequences_zstd_nvcomp.payload)
-    total += len(compressed.segment_seq_lengths_zstd_nvcomp.payload)
-
-    total += len(compressed.link_from_ids_zstd_nvcomp.payload)
-    total += len(compressed.link_to_ids_zstd_nvcomp.payload)
-    total += len(compressed.link_from_orients_zstd_nvcomp.payload)
-    total += len(compressed.link_to_orients_zstd_nvcomp.payload)
-    total += len(compressed.link_overlap_nums_zstd_nvcomp.payload)
-    total += len(compressed.link_overlap_ops_zstd_nvcomp.payload)
-
-    for col in compressed.segment_optional_fields_zstd_nvcomp:
-        if col.int_values_zstd_nvcomp.payload:
-            total += len(col.int_values_zstd_nvcomp.payload)
-        if col.float_values_zstd_nvcomp.payload:
-            total += len(col.float_values_zstd_nvcomp.payload)
-        if col.char_values_zstd_nvcomp.payload:
-            total += len(col.char_values_zstd_nvcomp.payload)
-        if col.strings_zstd_nvcomp.payload:
-            total += len(col.strings_zstd_nvcomp.payload)
-        if col.string_lengths_zstd_nvcomp.payload:
-            total += len(col.string_lengths_zstd_nvcomp.payload)
-
-    if compressed.num_walks > 0:
-        for attr in [
-            "walk_sample_ids_zstd_nvcomp",
-            "walk_hap_indices_zstd_nvcomp",
-            "walk_seq_ids_zstd_nvcomp",
-            "walk_seq_starts_zstd_nvcomp",
-            "walk_seq_ends_zstd_nvcomp",
-        ]:
-            block = getattr(compressed, attr, None)
-            if block and block.payload:
-                total += len(block.payload)
-
-    if compressed.num_jumps_stored > 0:
-        for attr in [
-            "jump_from_ids_zstd_nvcomp",
-            "jump_to_ids_zstd_nvcomp",
-            "jump_from_orients_zstd_nvcomp",
-            "jump_to_orients_zstd_nvcomp",
-            "jump_distances_zstd_nvcomp",
-            "jump_distance_lengths_zstd_nvcomp",
-            "jump_rest_fields_zstd_nvcomp",
-            "jump_rest_lengths_zstd_nvcomp",
-        ]:
-            block = getattr(compressed, attr, None)
-            if block and block.payload:
-                total += len(block.payload)
-
-    if compressed.num_containments_stored > 0:
-        for attr in [
-            "containment_container_ids_zstd_nvcomp",
-            "containment_contained_ids_zstd_nvcomp",
-            "containment_container_orients_zstd_nvcomp",
-            "containment_contained_orients_zstd_nvcomp",
-            "containment_positions_zstd_nvcomp",
-            "containment_overlaps_zstd_nvcomp",
-            "containment_overlap_lengths_zstd_nvcomp",
-            "containment_rest_fields_zstd_nvcomp",
-            "containment_rest_lengths_zstd_nvcomp",
-        ]:
-            block = getattr(compressed, attr, None)
-            if block and block.payload:
-                total += len(block.payload)
-
-    for attr in ["node_names_zstd_nvcomp", "node_name_lengths_zstd_nvcomp"]:
+    for attr in [
+        "paths_zstd",
+        "walks_zstd",
+        "rules_first_zstd",
+        "rules_second_zstd",
+        "names_zstd",
+        "name_lengths_zstd",
+        "overlaps_zstd",
+        "overlap_lengths_zstd",
+        "segment_sequences_zstd",
+        "segment_seq_lengths_zstd",
+        "link_from_ids_zstd",
+        "link_to_ids_zstd",
+        "link_from_orients_zstd",
+        "link_to_orients_zstd",
+        "link_overlap_nums_zstd",
+        "link_overlap_ops_zstd",
+        "walk_sample_ids_zstd",
+        "walk_sample_id_lengths_zstd",
+        "walk_hap_indices_zstd",
+        "walk_seq_ids_zstd",
+        "walk_seq_id_lengths_zstd",
+        "walk_seq_starts_zstd",
+        "walk_seq_ends_zstd",
+        "jump_from_ids_zstd",
+        "jump_to_ids_zstd",
+        "jump_from_orients_zstd",
+        "jump_to_orients_zstd",
+        "jump_distances_zstd",
+        "jump_distance_lengths_zstd",
+        "jump_rest_fields_zstd",
+        "jump_rest_lengths_zstd",
+        "containment_container_ids_zstd",
+        "containment_contained_ids_zstd",
+        "containment_container_orients_zstd",
+        "containment_contained_orients_zstd",
+        "containment_positions_zstd",
+        "containment_overlaps_zstd",
+        "containment_overlap_lengths_zstd",
+        "containment_rest_fields_zstd",
+        "containment_rest_lengths_zstd",
+    ]:
         block = getattr(compressed, attr, None)
         if block and block.payload:
             total += len(block.payload)
+
+    for col in compressed.segment_optional_fields_zstd:
+        for attr in [
+            "int_values_zstd",
+            "float_values_zstd",
+            "char_values_zstd",
+            "strings_zstd",
+            "string_lengths_zstd",
+            "b_subtypes_zstd",
+            "b_lengths_zstd",
+            "b_concat_bytes_zstd",
+        ]:
+            block = getattr(col, attr, None)
+            if block and block.payload:
+                total += len(block.payload)
+
+    for col in compressed.link_optional_fields_zstd:
+        for attr in [
+            "int_values_zstd",
+            "float_values_zstd",
+            "char_values_zstd",
+            "strings_zstd",
+            "string_lengths_zstd",
+            "b_subtypes_zstd",
+            "b_lengths_zstd",
+            "b_concat_bytes_zstd",
+        ]:
+            block = getattr(col, attr, None)
+            if block and block.payload:
+                total += len(block.payload)
 
     if hasattr(compressed, "header_line") and compressed.header_line:
         total += len(compressed.header_line)

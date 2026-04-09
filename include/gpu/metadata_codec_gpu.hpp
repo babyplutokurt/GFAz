@@ -7,14 +7,14 @@
 namespace gpu_compression {
 
 void compress_graph_metadata_gpu(const GfaGraph_gpu &gpu_graph,
-                                 CompressedData_gpu &data);
+                                 CompressedData &data);
 
 } // namespace gpu_compression
 
 namespace gpu_decompression {
 
-void decompress_graph_metadata_gpu(
-    const gpu_compression::CompressedData_gpu &data, GfaGraph_gpu &result);
+void decompress_graph_metadata_gpu(const CompressedData &data,
+                                   GfaGraph_gpu &result);
 
 } // namespace gpu_decompression
 

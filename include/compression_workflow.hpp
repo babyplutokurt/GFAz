@@ -5,11 +5,11 @@
 #include "threading_utils.hpp"
 
 struct LayerRuleRange {
-  int k;                    // k-mer size (always 2 for 2-mer grammar)
-  uint32_t start_id;        // First rule ID in this layer
-  uint32_t end_id;          // One past last rule ID
-  size_t flattened_offset;  // Offset in flattened rule array
-  size_t element_count;     // Number of elements (rule_count * k)
+  int k;                   // k-mer size (always 2 for 2-mer grammar)
+  uint32_t start_id;       // First rule ID in this layer
+  uint32_t end_id;         // One past last rule ID
+  size_t flattened_offset; // Offset in flattened rule array
+  size_t element_count;    // Number of elements (rule_count * k)
 };
 
 struct ZstdCompressedBlock {
@@ -39,8 +39,8 @@ struct CompressedData {
 
   // Grammar rules (2-mer)
   std::vector<LayerRuleRange> layer_rule_ranges;
-  ZstdCompressedBlock rules_first_zstd;   // First elements of each 2-mer
-  ZstdCompressedBlock rules_second_zstd;  // Second elements of each 2-mer
+  ZstdCompressedBlock rules_first_zstd;  // First elements of each 2-mer
+  ZstdCompressedBlock rules_second_zstd; // Second elements of each 2-mer
   int delta_round = 0;
 
   uint32_t min_rule_id() const {
@@ -55,8 +55,9 @@ struct CompressedData {
   }
 
   // Paths (P-lines)
-  std::vector<uint32_t> sequence_lengths;          // Compressed lengths (after grammar)
-  std::vector<uint32_t> original_path_lengths;     // Original lengths (before grammar)
+  std::vector<uint32_t> sequence_lengths; // Compressed lengths (after grammar)
+  std::vector<uint32_t>
+      original_path_lengths; // Original lengths (before grammar)
   ZstdCompressedBlock paths_zstd;
   ZstdCompressedBlock names_zstd;
   ZstdCompressedBlock name_lengths_zstd;
@@ -102,8 +103,9 @@ struct CompressedData {
   ZstdCompressedBlock containment_rest_lengths_zstd;
 
   // Walks (W-lines)
-  std::vector<uint32_t> walk_lengths;              // Compressed lengths (after grammar)
-  std::vector<uint32_t> original_walk_lengths;     // Original lengths (before grammar)
+  std::vector<uint32_t> walk_lengths; // Compressed lengths (after grammar)
+  std::vector<uint32_t>
+      original_walk_lengths; // Original lengths (before grammar)
   ZstdCompressedBlock walks_zstd;
   ZstdCompressedBlock walk_sample_ids_zstd;
   ZstdCompressedBlock walk_sample_id_lengths_zstd;

@@ -21,7 +21,6 @@
 #include "gpu/compression_workflow_gpu.hpp"
 #include "gpu/decompression_workflow_gpu.hpp"
 #include "gpu/gfa_graph_gpu.hpp"
-#include "gpu/serialization_gpu.hpp"
 #endif
 
 namespace {
@@ -435,9 +434,9 @@ int do_compress(int argc, char *argv[]) {
         gpu_options.rolling_chunk_bytes = static_cast<size_t>(gpu_chunk_mb) *
                                           1024ull * 1024ull;
       }
-      gpu_compression::CompressedData_gpu compressed_data_gpu =
+      CompressedData compressed_data_gpu =
           gpu_compression::compress_gfa_gpu(input_path, rounds, gpu_options);
-      serialize_compressed_data_gpu(compressed_data_gpu, output_path);
+      serialize_compressed_data(compressed_data_gpu, output_path);
     } else {
 #endif
       CompressedData compressed_data = compress_gfa(
@@ -632,8 +631,7 @@ int do_decompress(int argc, char *argv[]) {
       gpu_options.traversals_per_chunk =
           static_cast<uint32_t>(gpu_traversals_per_chunk);
       gpu_options.use_legacy_full_decompression = use_gpu_legacy;
-      gpu_compression::CompressedData_gpu data_gpu =
-          deserialize_compressed_data_gpu(input_path);
+      CompressedData data_gpu = deserialize_compressed_data(input_path);
       write_gfa_from_compressed_data_gpu(data_gpu, output_path, gpu_options);
     } else {
 #endif

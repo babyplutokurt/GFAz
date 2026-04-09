@@ -5,8 +5,9 @@
 
 namespace gpu_compression {
 
-CompressedData_gpu run_path_compression_gpu_full_device(
-    const FlattenedPaths &paths, int num_rounds);
+CompressedData run_path_compression_gpu_full_device(const FlattenedPaths &paths,
+                                                    uint32_t num_paths,
+                                                    int num_rounds);
 
 } // namespace gpu_compression
 
