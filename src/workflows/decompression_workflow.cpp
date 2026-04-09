@@ -3,11 +3,10 @@
 #include "utils/debug_log.hpp"
 #include "utils/runtime_utils.hpp"
 #include "utils/threading_utils.hpp"
+#include "workflows/decompression_debug.hpp"
 
 #include <chrono>
-#include <iomanip>
 #include <iostream>
-#include <sstream>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -20,7 +19,7 @@ constexpr const char *kDecompressionWarningPrefix =
 
 using Clock = std::chrono::high_resolution_clock;
 using gfz::runtime_utils::elapsed_ms;
-using gfz::runtime_utils::gbps_from_mb;
+using namespace gfz::decompression_debug;
 
 // Reconstruct 2D sequences from flattened array + lengths
 void reconstruct_sequences(const std::vector<int32_t> &flat,
@@ -257,7 +256,8 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
                     int num_threads) {
   ScopedOMPThreads omp_scope(num_threads);
 
-  auto decomp_total_start = std::chrono::high_resolution_clock::now();
+  auto decomp_total_start = Clock::now();
+  std::vector<TimedDebugStage> debug_stages;
 
   graph = GfaGraph();
   graph.header_line = data.header_line;
@@ -265,7 +265,7 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   // =========================================================================
   // Step 1: ZSTD decompress (rules + paths)
   // =========================================================================
-  auto t0 = std::chrono::high_resolution_clock::now();
+  auto t0 = Clock::now();
   std::vector<int32_t> rules_first, rules_second;
 
 #ifdef _OPENMP
@@ -284,16 +284,13 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   std::vector<int32_t> paths_flat =
       Codec::zstd_decompress_int32_vector(data.paths_zstd);
 
-  auto t1 = std::chrono::high_resolution_clock::now();
-  double time_zstd_ms = elapsed_ms(t0, t1);
-  double zstd_out_mb =
-      (rules_first.size() + rules_second.size() + paths_flat.size()) *
-      sizeof(int32_t) / (1024.0 * 1024.0);
+  auto t1 = Clock::now();
+  debug_stages.push_back({"decode rule/path blocks", elapsed_ms(t0, t1)});
 
   // =========================================================================
   // Step 2: Decode rules (prefix sum / delta decode)
   // =========================================================================
-  t0 = std::chrono::high_resolution_clock::now();
+  t0 = Clock::now();
 #ifdef _OPENMP
 #pragma omp parallel sections
   {
@@ -306,10 +303,8 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   Codec::delta_decode_int32(rules_first);
   Codec::delta_decode_int32(rules_second);
 #endif
-  t1 = std::chrono::high_resolution_clock::now();
-  double time_decode_rules_ms = elapsed_ms(t0, t1);
-  double rules_size_mb = (rules_first.size() + rules_second.size()) *
-                         sizeof(int32_t) / (1024.0 * 1024.0);
+  t1 = Clock::now();
+  debug_stages.push_back({"delta decode rules", elapsed_ms(t0, t1)});
 
   uint32_t min_rule_id = data.min_rule_id();
   size_t num_rules = rules_first.size();
@@ -322,34 +317,27 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   // =========================================================================
   // Step 3: Expand paths (rule expansion)
   // =========================================================================
-  t0 = std::chrono::high_resolution_clock::now();
+  t0 = Clock::now();
   expand_sequences(graph.paths, rules_first, rules_second, min_rule_id,
                    num_rules, data.original_path_lengths);
-  t1 = std::chrono::high_resolution_clock::now();
-  double time_expand_ms = elapsed_ms(t0, t1);
-
-  // Compute expanded path size
-  size_t expanded_elements = 0;
-  for (const auto &p : graph.paths)
-    expanded_elements += p.size();
-  double expanded_mb = expanded_elements * sizeof(int32_t) / (1024.0 * 1024.0);
+  t1 = Clock::now();
+  debug_stages.push_back({"expand paths", elapsed_ms(t0, t1)});
 
   // =========================================================================
   // Step 4: Decode paths (prefix sum / inverse delta)
   // =========================================================================
-  t0 = std::chrono::high_resolution_clock::now();
+  t0 = Clock::now();
   for (int i = 0; i < data.delta_round; ++i)
     Codec::inverse_delta_transform(graph.paths);
-  t1 = std::chrono::high_resolution_clock::now();
-  double time_decode_paths_ms = elapsed_ms(t0, t1);
-
-  auto t_path_done = std::chrono::high_resolution_clock::now();
-  double time_path_total_ms = elapsed_ms(decomp_total_start, t_path_done);
+  t1 = Clock::now();
+  debug_stages.push_back({"inverse delta paths", elapsed_ms(t0, t1)});
+  log_cpu_decompression_memory_checkpoint("CPU Decompress",
+                                          "after path reconstruction");
 
   // =========================================================================
   // Rest: metadata, walks, segments, links, etc.
   // =========================================================================
-  t0 = std::chrono::high_resolution_clock::now();
+  t0 = Clock::now();
 
   // Path metadata
 #ifdef _OPENMP
@@ -368,14 +356,25 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   decompress_string_column(data.overlaps_zstd, data.overlap_lengths_zstd,
                            graph.path_overlaps);
 #endif
+  t1 = Clock::now();
+  debug_stages.push_back({"decode path metadata", elapsed_ms(t0, t1)});
 
   // Decompress walks
   if (!data.walks_zstd.payload.empty() && !data.walk_lengths.empty()) {
+    t0 = Clock::now();
     decompress_expand_sequences(data.walks_zstd, data.walk_lengths,
                                 data.original_walk_lengths, rules_first,
                                 rules_second, min_rule_id, num_rules,
                                 data.delta_round, graph.walks.walks);
+    t1 = Clock::now();
+    debug_stages.push_back({"expand walks", elapsed_ms(t0, t1)});
+
+    t0 = Clock::now();
     decompress_walk_metadata(data, graph);
+    t1 = Clock::now();
+    debug_stages.push_back({"decode walk metadata", elapsed_ms(t0, t1)});
+    log_cpu_decompression_memory_checkpoint("CPU Decompress",
+                                            "after walk reconstruction");
   }
 
   // Release rules after expansion
@@ -387,6 +386,7 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   // Decompress segments and links
   std::string seg_seqs;
   std::vector<uint32_t> seg_lens;
+  t0 = Clock::now();
 
 #ifdef _OPENMP
 #pragma omp parallel sections
@@ -437,11 +437,14 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   graph.links.overlap_ops =
       Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
 #endif
+  t1 = Clock::now();
+  debug_stages.push_back({"decode segment/link fields", elapsed_ms(t0, t1)});
 
   // Reconstruct segments (index 0 is placeholder for 1-based IDs).
   // CPU .gfaz intentionally restores dense numeric names instead of original
   // segment names, because the serialized CPU representation stores segments
   // by implicit 1-based ID order only.
+  t0 = Clock::now();
   graph.node_id_to_name.push_back("");
   graph.node_sequences.push_back("");
 
@@ -461,16 +464,22 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
     graph.node_sequences.push_back(seq);
     graph.node_name_to_id[name] = id;
   }
+  t1 = Clock::now();
+  debug_stages.push_back({"reconstruct segment table", elapsed_ms(t0, t1)});
 
   // Decompress optional fields
+  t0 = Clock::now();
   for (const auto &c : data.segment_optional_fields_zstd)
     graph.segment_optional_fields.push_back(decompress_optional_column(c));
 
   for (const auto &c : data.link_optional_fields_zstd)
     graph.link_optional_fields.push_back(decompress_optional_column(c));
+  t1 = Clock::now();
+  debug_stages.push_back({"decode optional fields", elapsed_ms(t0, t1)});
 
   // Decompress J-lines (jumps)
   if (data.num_jumps > 0) {
+    t0 = Clock::now();
     graph.jumps.from_ids = Codec::decompress_delta_varint_uint32(
         data.jump_from_ids_zstd, data.num_jumps);
     graph.jumps.to_ids = Codec::decompress_delta_varint_uint32(
@@ -490,10 +499,13 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
     std::vector<uint32_t> rest_lens =
         Codec::zstd_decompress_uint32_vector(data.jump_rest_lengths_zstd);
     reconstruct_strings(rest, rest_lens, graph.jumps.rest_fields);
+    t1 = Clock::now();
+    debug_stages.push_back({"decode jump fields", elapsed_ms(t0, t1)});
   }
 
   // Decompress C-lines (containments)
   if (data.num_containments > 0) {
+    t0 = Clock::now();
     graph.containments.container_ids = Codec::decompress_delta_varint_uint32(
         data.containment_container_ids_zstd, data.num_containments);
     graph.containments.contained_ids = Codec::decompress_delta_varint_uint32(
@@ -516,68 +528,19 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
     std::vector<uint32_t> rest_lens = Codec::zstd_decompress_uint32_vector(
         data.containment_rest_lengths_zstd);
     reconstruct_strings(rest, rest_lens, graph.containments.rest_fields);
+    t1 = Clock::now();
+    debug_stages.push_back({"decode containment fields", elapsed_ms(t0, t1)});
   }
-  t1 = std::chrono::high_resolution_clock::now();
-  double time_rest_ms = elapsed_ms(t0, t1);
+  log_cpu_decompression_memory_checkpoint("CPU Decompress",
+                                          "after full graph reconstruction");
 
-  auto decomp_total_end = std::chrono::high_resolution_clock::now();
+  auto decomp_total_end = Clock::now();
   double decomp_total_ms = elapsed_ms(decomp_total_start, decomp_total_end);
 
   if (gfaz_debug_enabled()) {
-    // Timing breakdown
-    std::cerr << "\n[CPU Decompress] === PATH TIMING BREAKDOWN ==="
-              << std::endl;
-    std::cerr << "    1. ZSTD decompress (" << std::fixed
-              << std::setprecision(1) << zstd_out_mb
-              << " MB):   " << std::setprecision(2) << time_zstd_ms << " ms  ("
-              << std::setprecision(2) << gbps_from_mb(zstd_out_mb, time_zstd_ms)
-              << " GB/s)" << std::endl;
-    std::cerr << "    2. Decode rules (prefix sum, " << std::fixed
-              << std::setprecision(1) << rules_size_mb
-              << " MB): " << std::setprecision(2) << time_decode_rules_ms
-              << " ms  (" << std::setprecision(2)
-              << gbps_from_mb(rules_size_mb, time_decode_rules_ms) << " GB/s)"
-              << std::endl;
-    std::cerr << "    3. Expand paths (" << std::fixed << std::setprecision(1)
-              << expanded_mb << " MB):    " << std::setprecision(2)
-              << time_expand_ms << " ms  (" << std::setprecision(2)
-              << gbps_from_mb(expanded_mb, time_expand_ms) << " GB/s)"
-              << std::endl;
-    std::cerr << "    4. Decode paths (prefix sum, " << std::fixed
-              << std::setprecision(1) << expanded_mb
-              << " MB): " << std::setprecision(2) << time_decode_paths_ms
-              << " ms  (" << std::setprecision(2)
-              << gbps_from_mb(expanded_mb, time_decode_paths_ms) << " GB/s)"
-              << std::endl;
-    std::cerr << "    ─────────────────────────────" << std::endl;
-    std::cerr << "    Path total:                      " << std::fixed
-              << std::setprecision(2) << time_path_total_ms << " ms  ("
-              << std::setprecision(2)
-              << gbps_from_mb(expanded_mb, time_path_total_ms) << " GB/s)"
-              << std::endl;
-    std::cerr << "  Other (metadata, walks, segments, links): " << std::fixed
-              << std::setprecision(2) << time_rest_ms << " ms" << std::endl;
-    std::cerr << "  ─────────────────────────────────" << std::endl;
-    std::cerr << "  TOTAL (decompress_gfa):            " << std::fixed
-              << std::setprecision(2) << decomp_total_ms << " ms" << std::endl;
-
-    // Summary
-    std::cerr << "\n=== Decompression Summary ===" << std::endl;
-    std::cerr << "  Segments:     " << std::setw(10)
-              << (graph.node_sequences.size() - 1) << std::endl;
-    std::cerr << "  Links:        " << std::setw(10)
-              << graph.links.from_ids.size() << std::endl;
-    std::cerr << "  Paths:        " << std::setw(10) << graph.paths.size()
-              << std::endl;
-    std::cerr << "  Walks:        " << std::setw(10) << graph.walks.walks.size()
-              << std::endl;
-    if (graph.jumps.size() > 0)
-      std::cerr << "  Jumps:        " << std::setw(10) << graph.jumps.size()
-                << std::endl;
-    if (graph.containments.size() > 0)
-      std::cerr << "  Containments: " << std::setw(10)
-                << graph.containments.size() << std::endl;
-    std::cerr << "  Rules:        " << std::setw(10) << num_rules
-              << " (delta=" << data.delta_round << ")" << std::endl;
+    print_cpu_decompression_summary("CPU Decompress", graph, num_rules,
+                                    data.delta_round);
+    print_cpu_decompression_timing({"CPU Decompress", "legacy in-memory path",
+                                    debug_stages, decomp_total_ms});
   }
 }

@@ -17,6 +17,7 @@
 #include "io/gfa_writer.hpp"
 #include "codec/serialization.hpp"
 #include "utils/debug_log.hpp"
+#include "utils/runtime_utils.hpp"
 
 #ifdef ENABLE_CUDA
 #include "gpu/compression_workflow_gpu.hpp"
@@ -677,28 +678,70 @@ int do_decompress(int argc, char *argv[]) {
     configure_debug(debug);
     const uintmax_t input_size = file_size_or_zero(input_path);
     const auto start = Clock::now();
+    double deserialize_ms = 0.0;
+    double workflow_ms = 0.0;
 #ifdef ENABLE_CUDA
     if (use_gpu) {
+      const auto deserialize_start = Clock::now();
       gpu_decompression::GpuDecompressionOptions gpu_options;
       gpu_options.traversals_per_chunk =
           static_cast<uint32_t>(gpu_traversals_per_chunk);
       gpu_options.use_legacy_full_decompression = use_gpu_legacy;
       CompressedData data_gpu = deserialize_compressed_data(input_path);
+      const auto deserialize_end = Clock::now();
+      deserialize_ms = std::chrono::duration<double, std::milli>(
+                           deserialize_end - deserialize_start)
+                           .count();
+      const auto workflow_start = Clock::now();
       write_gfa_from_compressed_data_gpu(data_gpu, output_path, gpu_options);
+      const auto workflow_end = Clock::now();
+      workflow_ms = std::chrono::duration<double, std::milli>(workflow_end -
+                                                              workflow_start)
+                        .count();
     } else {
 #endif
+      const auto deserialize_start = Clock::now();
       CompressedData data = deserialize_compressed_data(input_path);
+      const auto deserialize_end = Clock::now();
+      deserialize_ms = std::chrono::duration<double, std::milli>(
+                           deserialize_end - deserialize_start)
+                           .count();
       if (use_legacy) {
+        const auto workflow_start = Clock::now();
         GfaGraph graph;
         decompress_gfa(data, graph, num_threads);
         write_gfa(graph, output_path);
+        const auto workflow_end = Clock::now();
+        workflow_ms = std::chrono::duration<double, std::milli>(workflow_end -
+                                                                workflow_start)
+                          .count();
       } else {
+        const auto workflow_start = Clock::now();
         write_gfa_from_compressed_data(data, output_path, num_threads);
+        const auto workflow_end = Clock::now();
+        workflow_ms = std::chrono::duration<double, std::milli>(workflow_end -
+                                                                workflow_start)
+                          .count();
       }
 #ifdef ENABLE_CUDA
     }
 #endif
     const auto end = Clock::now();
+    if (gfaz_debug_enabled()) {
+      const double total_ms =
+          std::chrono::duration<double, std::milli>(end - start).count();
+      const auto snapshot = gfz::runtime_utils::read_process_memory_snapshot();
+      std::cerr << "\n[CLI Decompress] deserialize: " << std::fixed
+                << std::setprecision(2) << deserialize_ms << " ms"
+                << std::endl;
+      std::cerr << "[CLI Decompress] workflow:    " << std::fixed
+                << std::setprecision(2) << workflow_ms << " ms" << std::endl;
+      std::cerr << "[CLI Decompress] total:       " << std::fixed
+                << std::setprecision(2) << total_ms << " ms" << std::endl;
+      std::cerr << "[CLI Decompress][Memory] complete | "
+                << gfz::runtime_utils::format_memory_snapshot(snapshot)
+                << std::endl;
+    }
     const uintmax_t output_size = file_size_or_zero(output_path);
 
     std::cout << "\nDecompression complete!" << std::endl;

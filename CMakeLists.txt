@@ -130,6 +130,7 @@ set(GFA_CORE_SOURCES
   src/workflows/compression_workflow.cpp
   src/workflows/compression_debug.cpp
   src/workflows/decompression_workflow.cpp
+  src/workflows/decompression_debug.cpp
   src/utils/runtime_utils.cpp
   src/codec/codec.cpp
   src/codec/serialization.cpp
