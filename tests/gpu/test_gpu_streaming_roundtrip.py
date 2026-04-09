@@ -4,7 +4,7 @@ GPU rolling streaming round-trip test:
 1) Parse GFA to original GfaGraph
 2) Convert original graph to GfaGraph_gpu
 3) GPU compress using the rolling scheduler
-4) Serialize to a temporary .gfaz_gpu file
+4) Serialize to a temporary .gfaz file
 5) Decompress through the CLI rolling direct-writer path to a temporary GFA
 6) Parse the streamed GFA output
 7) Verify original vs reparsed streamed output
@@ -188,7 +188,7 @@ def main():
     )
     print(f"  Convert time: {t_convert_end - t_convert_start:.3f}s")
 
-    print("\n[3] Compress with GPU rolling scheduler and save to temporary .gfaz_gpu")
+    print("\n[3] Compress with GPU rolling scheduler and save to temporary .gfaz")
     t_compress_start = time.perf_counter()
     comp_opts = gfac.GpuCompressionOptions()
     comp_opts.force_rolling_scheduler = True
@@ -198,7 +198,7 @@ def main():
     t_compress_end = time.perf_counter()
 
     tmp_gfaz = tempfile.NamedTemporaryFile(
-        mode="wb", suffix=".gfaz_gpu", prefix="gfa_gpu_stream_", delete=False
+        mode="wb", suffix=".gfaz", prefix="gfa_gpu_stream_", delete=False
     )
     tmp_out = tempfile.NamedTemporaryFile(
         mode="w", suffix=".gfa", prefix="gfa_gpu_stream_", delete=False

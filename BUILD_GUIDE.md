@@ -92,18 +92,15 @@ cmake -DENABLE_CUDA=ON -DCUDA_PATH=/usr/local/cuda-12.8 ..
 ### GPU backend (`ENABLE_CUDA=ON`)
 
 - GPU-friendly graph layout conversion (`GfaGraph <-> GfaGraph_gpu`)
-- GPU compression/decompression workflows and GPU serialization (`.gfaz_gpu`)
+- GPU compression/decompression workflows over the shared `.gfaz` format
 
 ## File Format Versions
 
-Current binary formats in code:
+Current binary format in code:
 
-- CPU format
+- Shared CPU/GPU format
   - Magic: `GFAZ`
   - Version: `5`
-- GPU format
-  - Magic: `GPUG`
-  - Version: `1`
 
 ## Python API Capabilities by Build Mode
 
@@ -143,7 +140,7 @@ print(gfac.has_gpu_backend())
 ### Compress
 
 ```bash
-gfaz compress [OPTIONS] <input.gfa> [output.gfaz|output.gfaz_gpu]
+gfaz compress [OPTIONS] <input.gfa> [output.gfaz]
 ```
 
 Options:
@@ -157,7 +154,7 @@ Options:
 ### Decompress
 
 ```bash
-gfaz decompress [OPTIONS] <input.gfaz|input.gfaz_gpu> [output.gfa]
+gfaz decompress [OPTIONS] <input.gfaz> [output.gfa]
 ```
 
 Options:
@@ -180,8 +177,8 @@ Options:
   - decompress: `--threads`
 - Default output names:
   - CPU compress: `<input>.gfaz`
-  - GPU compress: `<input>.gfaz_gpu`
-  - Decompress without output strips `.gfaz` or `.gfaz_gpu` when present.
+  - GPU compress: `<input>.gfaz`
+  - Decompress without output strips `.gfaz` when present.
 
 ### Examples
 
@@ -192,13 +189,12 @@ gfaz decompress input.gfa.gfaz
 
 # GPU compress/decompress (CUDA build)
 gfaz compress --gpu input.gfa
-gfaz decompress --gpu input.gfa.gfaz_gpu
+gfaz decompress --gpu input.gfa.gfaz
 ```
 
 ## Known Limitations
 
-- CPU and GPU binary formats are separate; they are not interchangeable.
-- `gfaz decompress` does not auto-detect backend by file magic; choose the correct mode (`--gpu` for `.gfaz_gpu`).
+- CPU and GPU backends share the same `.gfaz` container; choose `--gpu` only to select the GPU decompression implementation.
 - GPU backend currently uses a different tuning surface than CPU backend; some CLI knobs are intentionally ignored in GPU mode.
 
 ## Troubleshooting

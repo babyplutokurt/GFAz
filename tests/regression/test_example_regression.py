@@ -180,7 +180,7 @@ def test_gpu_roundtrip(args, original_graph):
     raise
 
   handle = tempfile.NamedTemporaryFile(
-      mode="wb", suffix=".gfaz_gpu", prefix="reg_gpu_", delete=False
+      mode="wb", suffix=".gfaz", prefix="reg_gpu_", delete=False
   )
   tmp_path = Path(handle.name)
   handle.close()
@@ -248,6 +248,72 @@ def test_backend_parity(args, original_graph):
   print_result("backend_parity_cpu_vs_gpu", elapsed)
 
 
+def test_cross_backend_container_compatibility(args, original_graph):
+  if args.skip_gpu or not has_gpu_bindings(gfa_lib):
+    print("SKIP cross_backend_container_compatibility (GPU bindings unavailable or --skip-gpu set)")
+    return
+
+  start = time.perf_counter()
+
+  cpu_compressed = gfa_lib.compress(
+      args.gfa_file,
+      num_rounds=args.rounds,
+      freq_threshold=args.threshold,
+      delta_round=args.delta_rounds,
+      num_threads=args.threads,
+  )
+
+  try:
+    gpu_graph = gfa_lib.convert_to_gpu_layout(original_graph)
+    gpu_compressed = gfa_lib.compress_gpu_graph(gpu_graph, args.rounds)
+  except Exception as exc:
+    if is_gpu_runtime_unavailable(exc):
+      print(f"SKIP cross_backend_container_compatibility ({exc})")
+      return
+    raise
+
+  cpu_handle = tempfile.NamedTemporaryFile(
+      mode="wb", suffix=".gfaz", prefix="reg_cross_cpu_", delete=False
+  )
+  gpu_handle = tempfile.NamedTemporaryFile(
+      mode="wb", suffix=".gfaz", prefix="reg_cross_gpu_", delete=False
+  )
+  cpu_path = Path(cpu_handle.name)
+  gpu_path = Path(gpu_handle.name)
+  cpu_handle.close()
+  gpu_handle.close()
+
+  try:
+    gfa_lib.serialize(cpu_compressed, str(cpu_path))
+    gfa_lib.serialize_gpu(gpu_compressed, str(gpu_path))
+
+    cpu_loaded_via_gpu_api = gfa_lib.deserialize_gpu(str(cpu_path))
+    gpu_loaded_via_cpu_api = gfa_lib.deserialize(str(gpu_path))
+
+    cpu_file_gpu_graph = gfa_lib.decompress_to_gpu_layout(cpu_loaded_via_gpu_api)
+    cpu_file_host_graph = gfa_lib.convert_from_gpu_layout(cpu_file_gpu_graph)
+    if not gfa_lib.verify_round_trip(original_graph, cpu_file_host_graph):
+      raise AssertionError("GPU failed to read CPU-produced .gfaz correctly")
+
+    gpu_file_cpu_graph = gfa_lib.decompress(gpu_loaded_via_cpu_api,
+                                            num_threads=args.threads)
+    if not gfa_lib.verify_round_trip(original_graph, gpu_file_cpu_graph):
+      raise AssertionError("CPU failed to read GPU-produced .gfaz correctly")
+  except Exception as exc:
+    if is_gpu_runtime_unavailable(exc):
+      print(f"SKIP cross_backend_container_compatibility ({exc})")
+      return
+    raise
+  finally:
+    if cpu_path.exists():
+      cpu_path.unlink()
+    if gpu_path.exists():
+      gpu_path.unlink()
+
+  elapsed = time.perf_counter() - start
+  print_result("cross_backend_container_compatibility", elapsed)
+
+
 def test_cli_cpu_stats(args, original_graph, cli_path: Path):
   start = time.perf_counter()
   out_handle = tempfile.NamedTemporaryFile(
@@ -302,7 +368,7 @@ def test_cli_gpu_stats(args, original_graph, cli_path: Path):
 
   start = time.perf_counter()
   out_handle = tempfile.NamedTemporaryFile(
-      mode="wb", suffix=".gfaz_gpu", prefix="reg_cli_gpu_", delete=False
+      mode="wb", suffix=".gfaz", prefix="reg_cli_gpu_", delete=False
   )
   gfaz_path = Path(out_handle.name)
   out_handle.close()
@@ -380,6 +446,7 @@ def main():
   test_cpu_streaming(args, original_graph)
   test_gpu_roundtrip(args, original_graph)
   test_backend_parity(args, original_graph)
+  test_cross_backend_container_compatibility(args, original_graph)
   test_cli_cpu_stats(args, original_graph, cli_path)
   test_cli_gpu_stats(args, original_graph, cli_path)
   total = time.perf_counter() - started

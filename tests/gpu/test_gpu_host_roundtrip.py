@@ -4,7 +4,7 @@ GPU rolling host round-trip test:
 1) Parse GFA to original GfaGraph
 2) Convert original graph to GfaGraph_gpu
 3) GPU compress using the rolling scheduler
-4) Serialize and reload temporary .gfaz_gpu
+4) Serialize and reload temporary .gfaz
 5) GPU decompress using rolling traversal expansion to host-side GfaGraph
 6) Verify original vs reconstructed host GfaGraph
 """
@@ -89,7 +89,7 @@ def main():
     )
     print(f"  Convert time: {t_convert_end - t_convert_start:.3f}s")
 
-    print("\n[3] Compress with GPU rolling scheduler and save to temporary .gfaz_gpu")
+    print("\n[3] Compress with GPU rolling scheduler and save to temporary .gfaz")
     t_compress_start = time.perf_counter()
     comp_opts = gfac.GpuCompressionOptions()
     comp_opts.force_rolling_scheduler = True
@@ -99,7 +99,7 @@ def main():
     t_compress_end = time.perf_counter()
 
     tmp_handle = tempfile.NamedTemporaryFile(
-        mode="wb", suffix=".gfaz_gpu", prefix="gfa_gpu_host_", delete=False
+        mode="wb", suffix=".gfaz", prefix="gfa_gpu_host_", delete=False
     )
     tmp_gfaz = tmp_handle.name
     tmp_handle.close()
@@ -114,7 +114,7 @@ def main():
         )
         print(f"  Saved temporary file: {tmp_gfaz}")
 
-        print("\n[4] Load temporary .gfaz_gpu and reconstruct host GfaGraph")
+        print("\n[4] Load temporary .gfaz and reconstruct host GfaGraph")
         loaded = gfac.deserialize_gpu(tmp_gfaz)
         decomp_opts = gfac.GpuDecompressionOptions()
         decomp_opts.traversals_per_chunk = args.traversals_per_chunk

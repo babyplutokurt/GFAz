@@ -99,6 +99,19 @@ void compress_flattened_strings_gpu(const FlattenedStrings &flat,
   lengths_block = compress_uint32_gpu(flat.lengths, lengths_label);
 }
 
+void compress_segment_sequences_gpu(const FlattenedStrings &flat,
+                                    ZstdCompressedBlock &data_block,
+                                    ZstdCompressedBlock &lengths_block) {
+  data_block = compress_string_gpu(flattened_to_string(flat),
+                                   "segment_sequences");
+
+  std::vector<uint32_t> lengths = flat.lengths;
+  if (!lengths.empty() && lengths.front() == 0) {
+    lengths.erase(lengths.begin());
+  }
+  lengths_block = compress_uint32_gpu(lengths, "segment_seq_lengths");
+}
+
 CompressedOptionalFieldColumn
 compress_optional_column_gpu(const OptionalFieldColumn_gpu &col,
                              const char *prefix) {
@@ -228,10 +241,9 @@ void compress_graph_metadata_gpu(const GfaGraph_gpu &gpu_graph,
         compress_varint_int64_gpu(gpu_graph.walk_seq_ends, "walk_seq_ends");
   }
 
-  compress_flattened_strings_gpu(gpu_graph.node_sequences,
+  compress_segment_sequences_gpu(gpu_graph.node_sequences,
                                  data.segment_sequences_zstd,
-                                 data.segment_seq_lengths_zstd,
-                                 "segment_sequences", "segment_seq_lengths");
+                                 data.segment_seq_lengths_zstd);
 
   data.header_line = gpu_graph.header_line;
 
@@ -396,6 +408,10 @@ FlattenedStrings build_numeric_node_names(size_t num_segments) {
   return result;
 }
 
+void prepend_placeholder_length(FlattenedStrings &strings) {
+  strings.lengths.insert(strings.lengths.begin(), 0);
+}
+
 } // namespace
 
 void decompress_graph_metadata_gpu(const CompressedData &data,
@@ -423,9 +439,11 @@ void decompress_graph_metadata_gpu(const CompressedData &data,
 
   result.node_sequences = decompress_flattened_strings(
       data.segment_sequences_zstd, data.segment_seq_lengths_zstd);
+  prepend_placeholder_length(result.node_sequences);
   result.header_line = data.header_line;
   result.node_names =
-      build_numeric_node_names(result.node_sequences.lengths.size());
+      build_numeric_node_names(result.node_sequences.lengths.size() - 1);
+  prepend_placeholder_length(result.node_names);
 
   if (data.num_links > 0) {
     result.link_from_ids = Codec::decompress_delta_varint_uint32(

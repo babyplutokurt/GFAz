@@ -8,7 +8,7 @@ A high-performance C++/CUDA library and command-line tool for compressing and de
 - **Dual Backends**: Run on CPU (with OpenMP parallelism) or GPU (CUDA).
 - **Python Extension**: Fully featured Python API (`gfa_compression`).
 - **Command-Line Interface**: Easy to use `gfaz` CLI for quick compression/decompression.
-- **Efficient Binary Formats**: Dedicated, magic-number-versioned binary file formats for CPU (`.gfaz`) and GPU (`.gfaz_gpu`).
+- **Efficient Binary Format**: A shared, magic-number-versioned `.gfaz` format for both CPU and GPU backends.
 
 ## Performance
 
@@ -73,7 +73,7 @@ Once built, the CLI tool `gfaz` can be found in `build/bin/gfaz`.
 # CPU mode (creates example.gfa.gfaz)
 gfaz compress example.gfa
 
-# GPU mode (creates example.gfa.gfaz_gpu)
+# GPU mode (creates example.gfa.gfaz)
 gfaz compress --gpu example.gfa
 ```
 
@@ -84,7 +84,7 @@ gfaz compress --gpu example.gfa
 gfaz decompress example.gfa.gfaz
 
 # GPU mode
-gfaz decompress --gpu example.gfa.gfaz_gpu
+gfaz decompress --gpu example.gfa.gfaz
 ```
 
 ## Python API Usage
@@ -112,7 +112,7 @@ gfac.write_gfa(decompressed_graph, "example_output.gfa")
 if has_gpu:
     gpu_graph = gfac.convert_to_gpu_layout(graph)
     gpu_compressed = gfac.compress_gpu_graph(gpu_graph)
-    gfac.serialize_gpu(gpu_compressed, "example_output.gfaz_gpu")
+    gfac.serialize_gpu(gpu_compressed, "example_output.gfaz")
 ```
 
 ## Documentation

@@ -4,7 +4,7 @@ GPU legacy round-trip test:
 1) Parse GFA to original GfaGraph
 2) Convert original graph to GfaGraph_gpu
 3) GPU compress using the legacy full-device path
-4) Serialize and reload temporary .gfaz_gpu
+4) Serialize and reload temporary .gfaz
 5) GPU decompress using the legacy full-device path
 6) Verify original vs decompressed GfaGraph_gpu
 """
@@ -161,7 +161,7 @@ def main():
     )
     print(f"  Convert time: {t_convert_end - t_convert_start:.3f}s")
 
-    print("\n[3] Compress with GPU legacy path and save to temporary .gfaz_gpu")
+    print("\n[3] Compress with GPU legacy path and save to temporary .gfaz")
     t_compress_start = time.perf_counter()
     comp_opts = gfac.GpuCompressionOptions()
     comp_opts.force_full_device_legacy = True
@@ -169,7 +169,7 @@ def main():
     t_compress_end = time.perf_counter()
 
     tmp_handle = tempfile.NamedTemporaryFile(
-        mode="wb", suffix=".gfaz_gpu", prefix="gfa_gpu_legacy_", delete=False
+        mode="wb", suffix=".gfaz", prefix="gfa_gpu_legacy_", delete=False
     )
     tmp_gfaz = tmp_handle.name
     tmp_handle.close()
@@ -184,7 +184,7 @@ def main():
         )
         print(f"  Saved temporary file: {tmp_gfaz}")
 
-        print("\n[4] Load temporary .gfaz_gpu and legacy-decompress")
+        print("\n[4] Load temporary .gfaz and legacy-decompress")
         loaded = gfac.deserialize_gpu(tmp_gfaz)
         decomp_opts = gfac.GpuDecompressionOptions()
         decomp_opts.use_legacy_full_decompression = True
