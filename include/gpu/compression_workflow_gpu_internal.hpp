@@ -1,7 +1,7 @@
 #ifndef COMPRESSION_WORKFLOW_GPU_INTERNAL_HPP
 #define COMPRESSION_WORKFLOW_GPU_INTERNAL_HPP
 
-#include "codec.hpp"
+#include "codec/codec.hpp"
 #include "gpu/compression_workflow_gpu.hpp"
 #include "gpu/path_chunk_planner.hpp"
 

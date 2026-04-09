@@ -121,17 +121,18 @@ endif()
 
 # Shared source lists
 set(GFA_CORE_SOURCES
-  src/gfa_parser.cpp
-  src/rule_generator.cpp
-  src/path_encoder.cpp
-  src/rule_processor.cpp
-  src/add_haplotypes_workflow.cpp
-  src/extraction_workflow.cpp
-  src/compression_workflow.cpp
-  src/decompression_workflow.cpp
-  src/codec.cpp
-  src/serialization.cpp
-  src/gfa_writer.cpp
+  src/io/gfa_parser.cpp
+  src/grammar/rule_generator.cpp
+  src/grammar/path_encoder.cpp
+  src/grammar/rule_processor.cpp
+  src/workflows/add_haplotypes_workflow.cpp
+  src/workflows/extraction_workflow.cpp
+  src/workflows/compression_workflow.cpp
+  src/workflows/decompression_workflow.cpp
+  src/codec/codec.cpp
+  src/codec/serialization.cpp
+  src/io/gfa_writer.cpp
+  src/workflows/compression_utils.cpp
   src/gpu/gfa_graph_gpu.cpp
   src/gpu/path_chunk_planner.cpp
 )
@@ -203,7 +204,7 @@ target_include_directories(gfa_compression_core PUBLIC include)
 
 if(BUILD_PYTHON_BINDINGS)
   # Python extension module
-  add_library(gfa_compression MODULE src/bindings.cpp)
+  add_library(gfa_compression MODULE src/python/bindings.cpp)
   set_target_properties(gfa_compression PROPERTIES PREFIX "")
   target_link_libraries(gfa_compression PRIVATE pybind11::module gfa_compression_core)
   configure_gfa_target(gfa_compression)
@@ -211,7 +212,7 @@ endif()
 
 if(BUILD_CLI)
   # CLI executable
-  add_executable(gfaz src/gfaz_cli.cpp)
+  add_executable(gfaz src/cli/gfaz_cli.cpp)
   set_target_properties(gfaz PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/bin"
   )

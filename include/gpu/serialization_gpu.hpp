@@ -1,7 +1,7 @@
 #ifndef SERIALIZATION_GPU_HPP
 #define SERIALIZATION_GPU_HPP
 
-#include "serialization.hpp"
+#include "codec/serialization.hpp"
 
 inline void serialize_compressed_data_gpu(const CompressedData &data,
                                           const std::string &output_path) {

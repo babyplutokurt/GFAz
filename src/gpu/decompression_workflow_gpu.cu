@@ -1,4 +1,4 @@
-#include "codec.hpp"
+#include "codec/codec.hpp"
 #include "gpu/codec_gpu.cuh"
 #include "gpu/decompression_workflow_gpu.hpp"
 #include "gpu/gfa_graph_gpu.hpp"
