@@ -446,7 +446,7 @@ Measure and report separately:
 - rule table build time
 - chunk rule-application time
 - chunk remap time, if present
-- final nvComp compression time
+- final host-side Zstd compression time
 
 Compare against:
 

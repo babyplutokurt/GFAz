@@ -7,7 +7,7 @@ This project has two build modes:
 - CPU-only (default)
 - CPU + GPU (`ENABLE_CUDA=ON`)
 
-Both modes build the Python module (`gfa_compression`) and the CLI (`gfaz`).
+Both modes build the Python module (`gfa_compression`) and the CLI (`gfaz`). In both cases, the compressed on-disk format is the same versioned `.gfaz` container. The GPU build adds GPU implementations for compression and decompression; it does not introduce a second file format.
 
 ## Build Flags (Current)
 
@@ -16,7 +16,6 @@ Both modes build the Python module (`gfa_compression`) and the CLI (`gfaz`).
 | `ENABLE_CUDA` | `OFF` | Enables CUDA backend, GPU workflows, and GPU Python APIs. |
 | `ENABLE_PROFILING` | `OFF` | Links `gfaz` with gperftools profiler. |
 | `CUDA_PATH` | empty | Optional CUDA toolkit root used to locate `nvcc`. |
-| `NVCOMP_ROOT` | auto | Optional nvComp root. If missing, CMake tries Python package auto-detect. |
 
 Related standard CMake options you may set:
 
@@ -27,9 +26,6 @@ Related standard CMake options you may set:
 
 - OpenMP: optional. If found, CPU k-mer collection is parallelized.
 - CUDA Toolkit: required only when `ENABLE_CUDA=ON`.
-- nvComp: optional in CUDA builds.
-  - If found, GPU metadata/path block compression uses nvComp ZSTD.
-  - If not found, GPU code falls back to CPU ZSTD-compatible path where implemented.
 
 ## Environment Setup
 
@@ -44,8 +40,7 @@ conda install -c conda-forge pybind11 numpy
 Additional GPU-related packages used in some environments:
 
 ```bash
-conda install -c conda-forge nvcomp
-pip install nvidia-libnvcomp-cu12
+conda install -c conda-forge cudatoolkit
 ```
 
 ## Build Instructions
@@ -57,9 +52,8 @@ git submodule update --init --recursive
 ### CPU-only (default)
 
 ```bash
-cd build
-cmake ..
-cmake --build . -j$(nproc)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
 ```
 
 CMake should report:
@@ -69,21 +63,14 @@ CMake should report:
 ### CPU + GPU
 
 ```bash
-cd build
-cmake -DENABLE_CUDA=ON ..
-cmake --build . -j$(nproc)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_CUDA=ON
+cmake --build build -j"$(nproc)"
 ```
 
 If CUDA is not in default location, provide `CUDA_PATH`:
 
 ```bash
-cmake -DENABLE_CUDA=ON -DCUDA_PATH=/usr/local/cuda-12.8 ..
-```
-
-If nvComp is not auto-detected, set `NVCOMP_ROOT`:
-
-```bash
-cmake -DENABLE_CUDA=ON -DNVCOMP_ROOT=/path/to/nvcomp ..
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_CUDA=ON -DCUDA_PATH=/usr/local/cuda-12.8
 ```
 
 ## Outputs
@@ -97,27 +84,22 @@ cmake -DENABLE_CUDA=ON -DNVCOMP_ROOT=/path/to/nvcomp ..
 
 - Parse GFA text into `GfaGraph`
 - CPU grammar compression/decompression workflow
-- CPU serialization/deserialization (`.gfaz`)
+- Shared `.gfaz` serialization/deserialization
 - Baseline path for all builds
 
 ### GPU backend (`ENABLE_CUDA=ON`)
 
 - GPU-friendly graph layout conversion (`GfaGraph <-> GfaGraph_gpu`)
-- GPU compression/decompression workflows and GPU serialization (`.gfaz_gpu`)
-- Optional nvComp acceleration for GPU compressed blocks
+- GPU compression/decompression workflows over the shared `.gfaz` format
+- Reuses the same serialized `CompressedData` schema and Zstd-based entropy layer as CPU
 
 ## File Format Versions
 
-Current binary formats in code:
+Current binary format in code:
 
-- CPU format
+- Shared CPU/GPU format
   - Magic: `GFAZ`
   - Version: `5`
-- GPU format
-  - Magic: `GPUG`
-  - Version: `1`
-
-CPU and GPU binary formats are distinct; use matching serialize/deserialize paths.
 
 ## Python API Capabilities by Build Mode
 
@@ -136,7 +118,7 @@ CPU and GPU binary formats are distinct; use matching serialize/deserialize path
 - `compress_gpu_graph()`
 - `decompress_to_gpu_layout()`
 - `verify_gpu_round_trip()`
-- `serialize_gpu()`, `deserialize_gpu()`
+- `serialize_gpu()`, `deserialize_gpu()` (compatibility aliases over the shared serializer)
 - `convert_to_gpu_layout()`, `convert_from_gpu_layout()`
 
 ### Experimental GPU helpers (CUDA builds only)
@@ -157,7 +139,7 @@ print(gfac.has_gpu_backend())
 ### Compress
 
 ```bash
-gfaz compress [OPTIONS] <input.gfa> [output.gfaz|output.gfaz_gpu]
+gfaz compress [OPTIONS] <input.gfa> [output.gfaz]
 ```
 
 Options:
@@ -171,7 +153,7 @@ Options:
 ### Decompress
 
 ```bash
-gfaz decompress [OPTIONS] <input.gfaz|input.gfaz_gpu> [output.gfa]
+gfaz decompress [OPTIONS] <input.gfaz> [output.gfa]
 ```
 
 Options:
@@ -182,6 +164,8 @@ Options:
 ### CLI behavior notes
 
 - CPU-only build + `--gpu`: prints warning and falls back to CPU backend.
+- CPU-produced `.gfaz` can be decompressed with `--gpu`.
+- GPU-produced `.gfaz` can be decompressed without `--gpu`.
 - CPU `threads=0` uses auto policy:
   - `GFAZ_NUM_THREADS` if set
   - else `OMP_NUM_THREADS` if set
@@ -194,8 +178,8 @@ Options:
   - decompress: `--threads`
 - Default output names:
   - CPU compress: `<input>.gfaz`
-  - GPU compress: `<input>.gfaz_gpu`
-  - Decompress without output strips `.gfaz` or `.gfaz_gpu` when present.
+  - GPU compress: `<input>.gfaz`
+  - Decompress without output strips `.gfaz` when present.
 
 ### Examples
 
@@ -206,14 +190,14 @@ gfaz decompress input.gfa.gfaz
 
 # GPU compress/decompress (CUDA build)
 gfaz compress --gpu input.gfa
-gfaz decompress --gpu input.gfa.gfaz_gpu
+gfaz decompress --gpu input.gfa.gfaz
 ```
 
 ## Known Limitations
 
-- CPU and GPU binary formats are separate; they are not interchangeable.
-- `gfaz decompress` does not auto-detect backend by file magic; choose the correct mode (`--gpu` for `.gfaz_gpu`).
+- CPU and GPU backends share the same `.gfaz` container; `--gpu` selects the GPU implementation, not a different format.
 - GPU backend currently uses a different tuning surface than CPU backend; some CLI knobs are intentionally ignored in GPU mode.
+- Decompression reconstructs segment names canonically as dense 1-based numeric IDs rather than preserving original segment-name strings.
 
 ## Troubleshooting
 

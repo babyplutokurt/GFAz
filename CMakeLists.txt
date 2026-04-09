@@ -16,7 +16,7 @@ option(BUILD_PYTHON_BINDINGS "Build Pybind11 Python bindings" ON)
 option(BUILD_CLI "Build the gfaz CLI executable" ON)
 set(CUDA_PATH "" CACHE PATH "Root directory of the CUDA Toolkit (e.g., /usr/local/cuda)")
 
-# Python is only required for bindings, or for CUDA nvComp auto-detect.
+# Python is only required for bindings.
 if(BUILD_PYTHON_BINDINGS)
   find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
   message(STATUS "Python3 found: ${Python3_EXECUTABLE}")
@@ -24,17 +24,9 @@ if(BUILD_PYTHON_BINDINGS)
 
   # Tell pybind11 to use the Python we found
   set(PYBIND11_FINDPYTHON ON)
-elseif(ENABLE_CUDA)
-  find_package(Python3 COMPONENTS Interpreter QUIET)
-  if(Python3_Interpreter_FOUND)
-    message(STATUS "Python3 interpreter found for nvComp auto-detect: ${Python3_EXECUTABLE}")
-  else()
-    message(STATUS "Python3 interpreter not found; skipping nvComp Python-package auto-detect")
-  endif()
 endif()
 
 # Optional CUDA configuration
-set(NVCOMP_FOUND FALSE)
 if(ENABLE_CUDA)
   if(CMAKE_VERSION VERSION_LESS 3.23.1)
     message(FATAL_ERROR "ENABLE_CUDA=ON requires CMake 3.23.1 or newer because extern/cuCollections enforces that minimum.")
@@ -77,58 +69,6 @@ if(ENABLE_CUDA)
   set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
   set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
   add_subdirectory(extern/cuCollections)
-
-  # nvComp (optional): auto-detect root from Python package unless provided
-  if(NOT DEFINED NVCOMP_ROOT AND Python3_Interpreter_FOUND)
-    execute_process(
-      COMMAND ${Python3_EXECUTABLE} -c "import nvidia.libnvcomp; import os; print(os.path.dirname(nvidia.libnvcomp.__file__))"
-      OUTPUT_VARIABLE NVCOMP_ROOT_AUTO
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET
-    )
-    if(NVCOMP_ROOT_AUTO)
-      set(NVCOMP_ROOT "${NVCOMP_ROOT_AUTO}")
-    endif()
-  endif()
-
-  find_path(
-    NVCOMP_INCLUDE_DIR
-    NAMES nvcomp.h nvcomp/nvcomp.h
-    HINTS "${NVCOMP_ROOT}" $ENV{CONDA_PREFIX}
-    PATH_SUFFIXES include
-  )
-
-  find_library(
-    NVCOMP_LIB
-    NAMES nvcomp
-    HINTS "${NVCOMP_ROOT}" $ENV{CONDA_PREFIX}
-    PATH_SUFFIXES lib lib64
-  )
-
-  if(NVCOMP_INCLUDE_DIR AND NVCOMP_LIB)
-    message(STATUS "nvComp found:")
-    message(STATUS "  Include: ${NVCOMP_INCLUDE_DIR}")
-    message(STATUS "  Library: ${NVCOMP_LIB}")
-
-    add_library(nvcomp SHARED IMPORTED)
-    set_target_properties(
-      nvcomp
-      PROPERTIES
-        IMPORTED_LOCATION "${NVCOMP_LIB}"
-        INTERFACE_INCLUDE_DIRECTORIES "${NVCOMP_INCLUDE_DIR}"
-    )
-
-    set(NVCOMP_FOUND TRUE)
-  else()
-    message(WARNING "nvComp not found (headers or library missing).")
-    if(NVCOMP_LIB)
-      message(STATUS "  Library found at: ${NVCOMP_LIB}")
-      message(STATUS "  But headers (nvcomp.h) were NOT found.")
-    endif()
-    message(STATUS "GPU ZSTD compression will fall back to CPU ZSTD.")
-    message(STATUS "Install via Pip (includes headers): pip install nvidia-libnvcomp-cu12")
-    message(STATUS "Or ensure your Conda package includes development headers.")
-  endif()
 else()
   message(STATUS "CUDA disabled - building CPU-only version")
   message(STATUS "To enable GPU support, use: cmake -DENABLE_CUDA=ON ..")
@@ -209,7 +149,6 @@ set(GFA_CUDA_SOURCES
   src/gpu/path_decompression_gpu_legacy.cu
   src/gpu/path_decompression_gpu_rolling.cu
   src/gpu/gfa_writer_gpu.cu
-  src/gpu/codec_gpu_nvcomp.cu
   src/gpu/serialization_gpu.cpp
 )
 
@@ -236,11 +175,6 @@ function(configure_gfa_target target_name)
   if(ENABLE_CUDA)
     target_compile_definitions(${target_name} PRIVATE ENABLE_CUDA)
     target_link_libraries(${target_name} PRIVATE CUDA::cudart cuco::cuco)
-
-    if(NVCOMP_FOUND)
-      target_compile_definitions(${target_name} PRIVATE ENABLE_NVCOMP)
-      target_link_libraries(${target_name} PRIVATE nvcomp)
-    endif()
 
     target_compile_options(${target_name} PRIVATE
       $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>

@@ -1,17 +1,16 @@
 #ifndef SERIALIZATION_GPU_HPP
 #define SERIALIZATION_GPU_HPP
 
-#include "gpu/compression_workflow_gpu.hpp"
-#include <string>
+#include "serialization.hpp"
 
-constexpr uint32_t GFAZ_GPU_MAGIC = 0x47505547; // "GPUG" in little-endian
-constexpr uint32_t GFAZ_GPU_VERSION = 1;
+inline void serialize_compressed_data_gpu(const CompressedData &data,
+                                          const std::string &output_path) {
+  serialize_compressed_data(data, output_path);
+}
 
-void serialize_compressed_data_gpu(
-    const gpu_compression::CompressedData_gpu &data,
-    const std::string &output_path);
-
-gpu_compression::CompressedData_gpu
-deserialize_compressed_data_gpu(const std::string &input_path);
+inline CompressedData deserialize_compressed_data_gpu(
+    const std::string &input_path) {
+  return deserialize_compressed_data(input_path);
+}
 
 #endif

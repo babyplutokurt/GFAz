@@ -182,7 +182,7 @@ class GFACompressor:
     # --- GPU Methods (require CUDA build) ---
     
     def compress_gpu(self, num_rounds: int = 8, chunk_bytes: int = None, force_rolling: bool = False, force_legacy: bool = False):
-        """GPU-accelerated compression using nvComp."""
+        """GPU-accelerated compression."""
         start_time = time.perf_counter()
         options = gfa_lib.GpuCompressionOptions()
         if chunk_bytes is not None:

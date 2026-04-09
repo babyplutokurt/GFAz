@@ -21,7 +21,6 @@
 #include "gpu/compression_workflow_gpu.hpp"
 #include "gpu/decompression_workflow_gpu.hpp"
 #include "gpu/gfa_graph_gpu.hpp"
-#include "gpu/serialization_gpu.hpp"
 #endif
 
 namespace {
@@ -87,8 +86,8 @@ void print_usage() {
 gfaz - GFA Compression Tool (2-mer with reordering)
 
 USAGE:
-    gfaz compress [OPTIONS] <input.gfa> [output.gfaz|output.gfaz_gpu]
-    gfaz decompress [OPTIONS] <input.gfaz|input.gfaz_gpu> [output.gfa]
+    gfaz compress [OPTIONS] <input.gfa> [output.gfaz]
+    gfaz decompress [OPTIONS] <input.gfaz> [output.gfa]
     gfaz extract-path [OPTIONS] <input.gfaz> <path_name>
     gfaz extract-walk [OPTIONS] <input.gfaz> <walk_name>
     gfaz add-haplotypes [OPTIONS] <input.gfaz> <paths_or_walks.gfa> [output.gfaz]
@@ -125,19 +124,19 @@ OPTIONS (decompress):
 
 BEHAVIOR:
     - Without output path:
-      CPU compress -> <input>.gfaz
-      GPU compress -> <input>.gfaz_gpu
-      Decompress removes .gfaz_gpu or .gfaz suffix when present
+      CPU/GPU compress -> <input>.gfaz
+      Decompress removes .gfaz suffix when present
     - In CPU-only builds, --gpu falls back to CPU with a warning.
+    - CPU and GPU backends read and write the same .gfaz format.
 
 EXAMPLES:
     gfaz compress input.gfa                      # -> input.gfa.gfaz
-    gfaz compress --gpu input.gfa                # -> input.gfa.gfaz_gpu
+    gfaz compress --gpu input.gfa                # -> input.gfa.gfaz
     gfaz compress input.gfa output.gfaz          # -> output.gfaz
     gfaz compress -r 8 -d 1 input.gfa            # With options
     
     gfaz decompress input.gfaz                   # -> input.gfa (removes .gfaz)
-    gfaz decompress --gpu input.gfaz_gpu         # -> input.gfa (removes .gfaz_gpu)
+    gfaz decompress --gpu input.gfaz             # -> input.gfa
     gfaz decompress input.gfaz output.gfa        # -> output.gfa
 
 )";
@@ -158,7 +157,7 @@ OUTPUT:
     Writes the reconstructed P-lines to stdout, in the same order as requested.
 
 NOTE:
-    The current CPU .gfaz format does not store original segment names, so
+    The current .gfaz format reconstructs segment names canonically, so
     segment references are emitted as numeric IDs.
 
 )";
@@ -184,7 +183,7 @@ NOTE:
     Walk lookup uses the full W-line identifier tuple:
     (sample_id, hap_index, seq_id, seq_start, seq_end).
     Use '*' for seq_start / seq_end values from the original W-line.
-    The current CPU .gfaz format does not store original segment names, so
+    The current .gfaz format reconstructs segment names canonically, so
     segment references are emitted as numeric IDs.
 
 )";
@@ -192,7 +191,7 @@ NOTE:
 
 void print_add_haplotypes_help() {
   std::cout << R"(
-gfaz add-haplotypes - Append path-only or walk-only haplotypes to a CPU GFAZ file
+gfaz add-haplotypes - Append path-only or walk-only haplotypes to a GFAZ file
 
 USAGE:
     gfaz add-haplotypes [OPTIONS] <input.gfaz> <paths_or_walks.gfa> [output.gfaz]
@@ -205,7 +204,7 @@ BEHAVIOR:
     - The append file must contain only H/P lines or only H/W lines.
     - The existing rulebook is reused; no new grammar rules are generated.
     - Appended path/walk names must be unique.
-    - Because the CPU .gfaz format does not store original segment names,
+    - Because the .gfaz format reconstructs segment names canonically,
       appended paths/walks must use numeric segment IDs.
     - If no output path is provided, writes <input>.updated.gfaz.
     - If delta encoding causes appended IDs to collide with the stored rule
@@ -219,7 +218,7 @@ void print_compress_help() {
 gfaz compress - Compress a GFA file to GFAZ format
 
 USAGE:
-    gfaz compress [OPTIONS] <input.gfa> [output.gfaz|output.gfaz_gpu]
+    gfaz compress [OPTIONS] <input.gfa> [output.gfaz]
 
 OPTIONS:
     -r, --rounds <N>        Number of compression rounds (default: 8)
@@ -235,9 +234,9 @@ OPTIONS:
 
 EXAMPLES:
     gfaz compress input.gfa                      # -> input.gfa.gfaz
-    gfaz compress --gpu input.gfa                # -> input.gfa.gfaz_gpu
+    gfaz compress --gpu input.gfa                # -> input.gfa.gfaz
     gfaz compress -r 4 -d 1 -t 3 input.gfa out.gfaz
-    gfaz compress --gpu input.gfa out.gfaz_gpu
+    gfaz compress --gpu input.gfa out.gfaz
     gfaz compress --gpu --gpu-chunk-mb 512 input.gfa
     gfaz compress --gpu --gpu-legacy input.gfa
 
@@ -251,7 +250,7 @@ void print_decompress_help() {
 gfaz decompress - Decompress a GFAZ file to GFA format
 
 USAGE:
-    gfaz decompress [OPTIONS] <input.gfaz|input.gfaz_gpu> [output.gfa]
+    gfaz decompress [OPTIONS] <input.gfaz> [output.gfa]
 
 OPTIONS:
     -j, --threads <N>       Number of threads (default: 0 = auto)
@@ -266,10 +265,10 @@ OPTIONS:
 
 EXAMPLES:
     gfaz decompress input.gfaz                   # -> input.gfa
-    gfaz decompress --gpu input.gfaz_gpu         # -> input.gfa
+    gfaz decompress --gpu input.gfaz             # -> input.gfa
     gfaz decompress input.gfaz output.gfa
-    gfaz decompress --gpu --gpu-traversals 256 input.gfaz_gpu
-    gfaz decompress --gpu --gpu-legacy input.gfaz_gpu
+    gfaz decompress --gpu --gpu-traversals 256 input.gfaz
+    gfaz decompress --gpu --gpu-legacy input.gfaz
 
 In CPU-only builds, --gpu prints a warning and uses CPU backend.
 By default, CPU decompression writes GFA directly from CompressedData with
@@ -355,7 +354,7 @@ int do_compress(int argc, char *argv[]) {
   if (output_provided) {
     output_path = argv[optind + 1];
   } else {
-    output_path = input_path + (use_gpu ? ".gfaz_gpu" : ".gfaz");
+    output_path = input_path + ".gfaz";
   }
 
   if (!use_gpu && (gpu_chunk_mb > 0 || use_gpu_legacy)) {
@@ -435,9 +434,9 @@ int do_compress(int argc, char *argv[]) {
         gpu_options.rolling_chunk_bytes = static_cast<size_t>(gpu_chunk_mb) *
                                           1024ull * 1024ull;
       }
-      gpu_compression::CompressedData_gpu compressed_data_gpu =
+      CompressedData compressed_data_gpu =
           gpu_compression::compress_gfa_gpu(input_path, rounds, gpu_options);
-      serialize_compressed_data_gpu(compressed_data_gpu, output_path);
+      serialize_compressed_data(compressed_data_gpu, output_path);
     } else {
 #endif
       CompressedData compressed_data = compress_gfa(
@@ -560,12 +559,9 @@ int do_decompress(int argc, char *argv[]) {
   if (optind + 1 < argc) {
     output_path = argv[optind + 1];
   } else {
-    // Remove .gfaz_gpu or .gfaz suffix if present
-    if (input_path.size() > 9 &&
-        input_path.substr(input_path.size() - 9) == ".gfaz_gpu") {
-      output_path = input_path.substr(0, input_path.size() - 9);
-    } else if (input_path.size() > 5 &&
-               input_path.substr(input_path.size() - 5) == ".gfaz") {
+    // Remove .gfaz suffix if present
+    if (input_path.size() > 5 &&
+        input_path.substr(input_path.size() - 5) == ".gfaz") {
       output_path = input_path.substr(0, input_path.size() - 5);
     } else {
       output_path = input_path + ".decompressed";
@@ -632,8 +628,7 @@ int do_decompress(int argc, char *argv[]) {
       gpu_options.traversals_per_chunk =
           static_cast<uint32_t>(gpu_traversals_per_chunk);
       gpu_options.use_legacy_full_decompression = use_gpu_legacy;
-      gpu_compression::CompressedData_gpu data_gpu =
-          deserialize_compressed_data_gpu(input_path);
+      CompressedData data_gpu = deserialize_compressed_data(input_path);
       write_gfa_from_compressed_data_gpu(data_gpu, output_path, gpu_options);
     } else {
 #endif
