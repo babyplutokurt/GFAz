@@ -57,12 +57,8 @@ static void run_grammar_compression(std::vector<std::vector<NodeId>> &paths,
     CompressionRules2Mer rules = gen.generate_rules_2mer_combined(
         paths, walks, next_id, freq_threshold, num_threads);
     auto t1 = std::chrono::high_resolution_clock::now();
-    time_generate_rules_ms += elapsed_ms(t0, t1);
-    if (gfaz_debug_enabled()) {
-      std::ostringstream label;
-      label << "round " << (round + 1) << " after generate_rules";
-      log_memory_checkpoint(label.str());
-    }
+    const double round_generate_ms = elapsed_ms(t0, t1);
+    time_generate_rules_ms += round_generate_ms;
 
     if (rules.rule_id_to_kmer.empty())
       break;
@@ -75,12 +71,8 @@ static void run_grammar_compression(std::vector<std::vector<NodeId>> &paths,
     encoder.encode_paths_2mer(paths, rules, rules_used);
     encoder.encode_paths_2mer(walks, rules, rules_used);
     t1 = std::chrono::high_resolution_clock::now();
-    time_encode_paths_ms += elapsed_ms(t0, t1);
-    if (gfaz_debug_enabled()) {
-      std::ostringstream label;
-      label << "round " << (round + 1) << " after encode_paths";
-      log_memory_checkpoint(label.str());
-    }
+    const double round_encode_ms = elapsed_ms(t0, t1);
+    time_encode_paths_ms += round_encode_ms;
 
     t0 = std::chrono::high_resolution_clock::now();
 
@@ -103,14 +95,20 @@ static void run_grammar_compression(std::vector<std::vector<NodeId>> &paths,
 
     uint32_t total_used = prefix.back();
 
-    GFAZ_LOG("  Round " << (round + 1) << ": 2-mers found = " << num_rules
-                        << ", 2-mers used = " << total_used);
-
     if (total_used == 0) {
       rules.rule_id_to_kmer.clear();
       rules.rule_id_to_kmer.shrink_to_fit();
       t1 = std::chrono::high_resolution_clock::now();
-      time_compact_sort_remap_ms += elapsed_ms(t0, t1);
+      const double round_remap_ms = elapsed_ms(t0, t1);
+      time_compact_sort_remap_ms += round_remap_ms;
+      if (gfaz_debug_enabled()) {
+        std::cerr << "  round " << (round + 1) << ": generate="
+                  << std::fixed << std::setprecision(2) << round_generate_ms
+                  << " ms, encode=" << round_encode_ms
+                  << " ms, remap=" << round_remap_ms
+                  << " ms, rules=" << total_used << "/" << num_rules
+                  << std::endl;
+      }
       break;
     }
 
@@ -168,11 +166,21 @@ static void run_grammar_compression(std::vector<std::vector<NodeId>> &paths,
     next_id = new_id;
 
     t1 = std::chrono::high_resolution_clock::now();
-    time_compact_sort_remap_ms += elapsed_ms(t0, t1);
+    const double round_remap_ms = elapsed_ms(t0, t1);
+    time_compact_sort_remap_ms += round_remap_ms;
     if (gfaz_debug_enabled()) {
-      std::ostringstream label;
-      label << "round " << (round + 1) << " after compact_sort_remap";
-      log_memory_checkpoint(label.str());
+      const auto snapshot = read_process_memory_snapshot();
+      std::cerr << "  round " << (round + 1)
+                << " | RssAnon="
+                << format_size(snapshot.rss_anon_kb * 1024)
+                << " | VmRSS=" << format_size(snapshot.vm_rss_kb * 1024)
+                << " | VmHWM=" << format_size(snapshot.vm_hwm_kb * 1024)
+                << " | generate=" << std::fixed << std::setprecision(2)
+                << round_generate_ms
+                << " ms, encode=" << round_encode_ms
+                << " ms, remap=" << round_remap_ms
+                << " ms, rules=" << total_used << "/" << num_rules
+                << std::endl;
     }
   }
 
@@ -187,30 +195,19 @@ static void run_grammar_compression(std::vector<std::vector<NodeId>> &paths,
               << std::setprecision(1) << data_size_mb << " MB, "
               << total_elements << " elements) ===" << std::endl;
     std::cerr << "    1. generate_rules_2mer:          " << std::fixed
-              << std::setprecision(2) << time_generate_rules_ms << " ms  ("
-              << std::setprecision(2)
-              << gbps_from_mb(data_size_mb, time_generate_rules_ms) << " GB/s)"
+              << std::setprecision(2) << time_generate_rules_ms << " ms"
               << std::endl;
     std::cerr << "    2. encode_paths_2mer:            " << std::fixed
-              << std::setprecision(2) << time_encode_paths_ms << " ms  ("
-              << std::setprecision(2)
-              << gbps_from_mb(data_size_mb, time_encode_paths_ms) << " GB/s)"
+              << std::setprecision(2) << time_encode_paths_ms << " ms"
               << std::endl;
     std::cerr << "    3. compact_sort_remap:           " << std::fixed
-              << std::setprecision(2) << time_compact_sort_remap_ms << " ms  ("
-              << std::setprecision(2)
-              << gbps_from_mb(data_size_mb, time_compact_sort_remap_ms)
-              << " GB/s)" << std::endl;
+              << std::setprecision(2) << time_compact_sort_remap_ms << " ms"
+              << std::endl;
     std::cerr << "    ─────────────────────────────" << std::endl;
     std::cerr << "    Rounds subtotal:                 " << std::fixed
-              << std::setprecision(2) << round_total_ms << " ms  ("
-              << std::setprecision(2)
-              << gbps_from_mb(data_size_mb, round_total_ms) << " GB/s)"
-              << std::endl;
+              << std::setprecision(2) << round_total_ms << " ms" << std::endl;
     std::cerr << "    TOTAL (grammar compression):     " << std::fixed
-              << std::setprecision(2) << total_ms << " ms  ("
-              << std::setprecision(2) << gbps_from_mb(data_size_mb, total_ms)
-              << " GB/s)" << std::endl;
+              << std::setprecision(2) << total_ms << " ms" << std::endl;
   }
 }
 
@@ -220,7 +217,7 @@ static void run_grammar_compression(std::vector<std::vector<NodeId>> &paths,
 
 CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
                             size_t freq_threshold, int delta_round,
-                            int num_threads) {
+                            int num_threads, bool show_stats) {
   ScopedOMPThreads omp_scope(num_threads);
   CompressedData out;
 
@@ -238,7 +235,6 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   graph.node_name_to_id.rehash(0);
   graph.node_id_to_name.clear();
   graph.node_id_to_name.shrink_to_fit();
-  log_memory_checkpoint("after dropping segment name maps");
 
   // Store original lengths before any transformation (for exact allocation on
   // decompression)
@@ -257,7 +253,6 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   auto compress_total_start = std::chrono::high_resolution_clock::now();
 
   // Delta encoding with max value tracking to prevent ID collision
-  GFAZ_LOG("Delta encoding rounds: " << delta_round);
   auto t_delta_start = std::chrono::high_resolution_clock::now();
   uint32_t max_abs = 0;
   for (int i = 0; i < delta_round; ++i) {
@@ -267,7 +262,6 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   }
   auto t_delta_end = std::chrono::high_resolution_clock::now();
   double time_delta_ms = elapsed_ms(t_delta_start, t_delta_end);
-  log_memory_checkpoint("after delta transform");
 
   if (max_abs >= next_id) {
     if (max_abs == UINT32_MAX)
@@ -278,7 +272,6 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   }
 
   // Grammar compression
-  GFAZ_LOG("Grammar compression rounds: " << num_rounds);
   uint32_t layer_start = next_id;
   std::vector<Packed2mer> rulebook;
 
@@ -307,26 +300,27 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
     size_t encoded_total = encoded_path_len + encoded_walk_len;
 
     if (gfaz_debug_enabled()) {
-      std::cerr << "Path/Walk compression:" << std::endl;
-      std::cerr << "  Paths: " << original_path_len << " -> "
-                << encoded_path_len << " (" << std::fixed
-                << std::setprecision(2)
-                << (original_path_len > 0
-                        ? 100.0 * encoded_path_len / original_path_len
-                        : 0)
-                << "%)" << std::endl;
-      if (original_walk_len > 0) {
-        std::cerr << "  Walks: " << original_walk_len << " -> "
-                  << encoded_walk_len << " (" << std::fixed
-                  << std::setprecision(2)
-                  << 100.0 * encoded_walk_len / original_walk_len << "%)"
-                  << std::endl;
+      std::cerr << "[CPU Compress] traversal reduction:" << std::endl;
+      std::cerr << "  paths: " << original_path_len << " -> "
+                << encoded_path_len;
+      if (original_path_len > 0) {
+        std::cerr << " (" << std::fixed << std::setprecision(2)
+                  << 100.0 * encoded_path_len / original_path_len << "%)";
       }
-      std::cerr << "  Total: " << original_total << " -> " << encoded_total
-                << " (" << std::fixed << std::setprecision(2)
-                << (original_total > 0 ? 100.0 * encoded_total / original_total
-                                       : 0)
-                << "%)" << std::endl;
+      std::cerr << std::endl;
+      std::cerr << "  walks: " << original_walk_len << " -> "
+                << encoded_walk_len;
+      if (original_walk_len > 0) {
+        std::cerr << " (" << std::fixed << std::setprecision(2)
+                  << 100.0 * encoded_walk_len / original_walk_len << "%)";
+      }
+      std::cerr << std::endl;
+      std::cerr << "  total: " << original_total << " -> " << encoded_total;
+      if (original_total > 0) {
+        std::cerr << " (" << std::fixed << std::setprecision(2)
+                  << 100.0 * encoded_total / original_total << "%)";
+      }
+      std::cerr << std::endl;
     }
   }
 
@@ -343,15 +337,6 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   auto t_process_rules_end = std::chrono::high_resolution_clock::now();
   double time_process_rules_ms =
       elapsed_ms(t_process_rules_start, t_process_rules_end);
-  log_memory_checkpoint("after process_rules");
-
-  if (gfaz_debug_enabled()) {
-    std::cerr << "Raw rule vectors before ZSTD:" << std::endl;
-    std::cerr << "  first:  " << first.size() << " elements, "
-              << format_size(first.size() * sizeof(int32_t)) << std::endl;
-    std::cerr << "  second: " << second.size() << " elements, "
-              << format_size(second.size() * sizeof(int32_t)) << std::endl;
-  }
 
   // ZSTD compress rules
   auto t_zstd_rules_start = std::chrono::high_resolution_clock::now();
@@ -371,11 +356,17 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   }
   auto t_zstd_rules_end = std::chrono::high_resolution_clock::now();
   double time_zstd_rules_ms = elapsed_ms(t_zstd_rules_start, t_zstd_rules_end);
-  log_memory_checkpoint("after rule zstd");
 
   // Compress paths
   auto t_zstd_start = std::chrono::high_resolution_clock::now();
+  double time_paths_ms = 0;
+  double time_walks_ms = 0;
+  double time_segments_links_ms = 0;
+  double time_optional_fields_ms = 0;
+  double time_jumps_ms = 0;
+  double time_containments_ms = 0;
   {
+    const auto t_paths_start = std::chrono::high_resolution_clock::now();
     std::vector<int32_t> flat;
     std::string names, overlaps;
     std::vector<uint32_t> name_lens, overlap_lens;
@@ -408,6 +399,8 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
     out.overlaps_zstd = Codec::zstd_compress_string(overlaps);
     out.overlap_lengths_zstd = Codec::zstd_compress_uint32_vector(overlap_lens);
 #endif
+    const auto t_paths_end = std::chrono::high_resolution_clock::now();
+    time_paths_ms = elapsed_ms(t_paths_start, t_paths_end);
   }
   graph.paths.clear();
   graph.paths.shrink_to_fit();
@@ -415,9 +408,9 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   graph.path_names.shrink_to_fit();
   graph.path_overlaps.clear();
   graph.path_overlaps.shrink_to_fit();
-  log_memory_checkpoint("after path flatten+compress");
 
   // Compress walks
+  const auto t_walks_start = std::chrono::high_resolution_clock::now();
   if (!graph.walks.walks.empty()) {
     std::vector<int32_t> flat;
     flatten_walks(graph.walks.walks, flat, out.walk_lengths);
@@ -439,6 +432,8 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
         Codec::compress_varint_int64(graph.walks.seq_starts);
     out.walk_seq_ends_zstd = Codec::compress_varint_int64(graph.walks.seq_ends);
   }
+  const auto t_walks_end = std::chrono::high_resolution_clock::now();
+  time_walks_ms = elapsed_ms(t_walks_start, t_walks_end);
   graph.walks.walks.clear();
   graph.walks.walks.shrink_to_fit();
   graph.walks.sample_ids.clear();
@@ -451,7 +446,6 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   graph.walks.seq_starts.shrink_to_fit();
   graph.walks.seq_ends.clear();
   graph.walks.seq_ends.shrink_to_fit();
-  log_memory_checkpoint("after walk flatten+compress");
 
   // Compress segments
   std::string seg_concat;
@@ -463,6 +457,7 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   const auto &links = graph.links;
   out.num_links = links.from_ids.size();
 
+  const auto t_segments_links_start = std::chrono::high_resolution_clock::now();
 #ifdef _OPENMP
 #pragma omp parallel sections
   {
@@ -504,6 +499,9 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   out.link_overlap_ops_zstd =
       Codec::zstd_compress_char_vector(links.overlap_ops);
 #endif
+  const auto t_segments_links_end = std::chrono::high_resolution_clock::now();
+  time_segments_links_ms =
+      elapsed_ms(t_segments_links_start, t_segments_links_end);
   graph.node_sequences.clear();
   graph.node_sequences.shrink_to_fit();
   graph.links.from_ids.clear();
@@ -518,21 +516,24 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   graph.links.overlap_nums.shrink_to_fit();
   graph.links.overlap_ops.clear();
   graph.links.overlap_ops.shrink_to_fit();
-  log_memory_checkpoint("after segment/link compress");
 
   // Compress optional fields
+  const auto t_optional_fields_start = std::chrono::high_resolution_clock::now();
   for (const auto &col : graph.segment_optional_fields)
     out.segment_optional_fields_zstd.push_back(compress_optional_column(col));
 
   for (const auto &col : graph.link_optional_fields)
     out.link_optional_fields_zstd.push_back(compress_optional_column(col));
+  const auto t_optional_fields_end = std::chrono::high_resolution_clock::now();
+  time_optional_fields_ms =
+      elapsed_ms(t_optional_fields_start, t_optional_fields_end);
   graph.segment_optional_fields.clear();
   graph.segment_optional_fields.shrink_to_fit();
   graph.link_optional_fields.clear();
   graph.link_optional_fields.shrink_to_fit();
-  log_memory_checkpoint("after optional-field compress");
 
   // Compress J-lines (jumps)
+  const auto t_jumps_start = std::chrono::high_resolution_clock::now();
   if (!graph.jumps.from_ids.empty()) {
     out.num_jumps = graph.jumps.size();
 
@@ -561,6 +562,8 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
     out.jump_rest_fields_zstd = Codec::zstd_compress_string(rest_concat);
     out.jump_rest_lengths_zstd = Codec::zstd_compress_uint32_vector(rest_lens);
   }
+  const auto t_jumps_end = std::chrono::high_resolution_clock::now();
+  time_jumps_ms = elapsed_ms(t_jumps_start, t_jumps_end);
   graph.jumps.from_ids.clear();
   graph.jumps.from_ids.shrink_to_fit();
   graph.jumps.from_orients.clear();
@@ -573,9 +576,9 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   graph.jumps.distances.shrink_to_fit();
   graph.jumps.rest_fields.clear();
   graph.jumps.rest_fields.shrink_to_fit();
-  log_memory_checkpoint("after jump compress");
 
   // Compress C-lines (containments)
+  const auto t_containments_start = std::chrono::high_resolution_clock::now();
   if (!graph.containments.container_ids.empty()) {
     out.num_containments = graph.containments.size();
 
@@ -608,6 +611,8 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
     out.containment_rest_lengths_zstd =
         Codec::zstd_compress_uint32_vector(rest_lens);
   }
+  const auto t_containments_end = std::chrono::high_resolution_clock::now();
+  time_containments_ms = elapsed_ms(t_containments_start, t_containments_end);
   graph.containments.container_ids.clear();
   graph.containments.container_ids.shrink_to_fit();
   graph.containments.container_orients.clear();
@@ -622,7 +627,6 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   graph.containments.overlaps.shrink_to_fit();
   graph.containments.rest_fields.clear();
   graph.containments.rest_fields.shrink_to_fit();
-  log_memory_checkpoint("after containment compress");
 
   auto t_zstd_end = std::chrono::high_resolution_clock::now();
   double time_zstd_ms = elapsed_ms(t_zstd_start, t_zstd_end);
@@ -633,43 +637,200 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
       elapsed_ms(compress_total_start, compress_total_end);
 
   if (gfaz_debug_enabled()) {
+    auto block_original_size = [](const ZstdCompressedBlock &block) {
+      return block.original_size;
+    };
+    auto block_payload_size = [](const ZstdCompressedBlock &block) {
+      return block.payload.size();
+    };
+    auto sum_optional_sizes =
+        [&](const std::vector<CompressedOptionalFieldColumn> &cols) {
+          size_t original = 0;
+          size_t compressed = 0;
+          for (const auto &c : cols) {
+            const ZstdCompressedBlock *blocks[] = {
+                &c.int_values_zstd,      &c.float_values_zstd,
+                &c.char_values_zstd,     &c.strings_zstd,
+                &c.string_lengths_zstd,  &c.b_subtypes_zstd,
+                &c.b_lengths_zstd,       &c.b_concat_bytes_zstd};
+            for (const auto *block : blocks) {
+              original += block_original_size(*block);
+              compressed += block_payload_size(*block);
+            }
+          }
+          return std::pair<size_t, size_t>{original, compressed};
+        };
+    auto format_ratio = [&](size_t original, size_t compressed) {
+      std::ostringstream oss;
+      oss << format_size(original) << " -> " << format_size(compressed);
+      if (compressed > 0) {
+        oss << " (" << std::fixed << std::setprecision(2)
+            << static_cast<double>(original) / static_cast<double>(compressed)
+            << "x)";
+      }
+      return oss.str();
+    };
+    auto emit_post_step = [&](int step, const std::string &label,
+                              const std::string &codec_label, double time_ms,
+                              size_t original, size_t compressed) {
+      std::cerr << "    " << step << ". " << label;
+      if (!codec_label.empty())
+        std::cerr << " (" << codec_label << ")";
+      std::cerr << ": " << std::fixed << std::setprecision(2) << time_ms
+                << " ms";
+      if (original > 0 || compressed > 0)
+        std::cerr << " | " << format_ratio(original, compressed);
+      std::cerr << std::endl;
+    };
+
+    const size_t rules_original =
+        block_original_size(out.rules_first_zstd) +
+        block_original_size(out.rules_second_zstd);
+    const size_t rules_compressed =
+        block_payload_size(out.rules_first_zstd) +
+        block_payload_size(out.rules_second_zstd);
+    const size_t path_original =
+        block_original_size(out.paths_zstd) + block_original_size(out.names_zstd) +
+        block_original_size(out.name_lengths_zstd) +
+        block_original_size(out.overlaps_zstd) +
+        block_original_size(out.overlap_lengths_zstd);
+    const size_t path_compressed =
+        block_payload_size(out.paths_zstd) + block_payload_size(out.names_zstd) +
+        block_payload_size(out.name_lengths_zstd) +
+        block_payload_size(out.overlaps_zstd) +
+        block_payload_size(out.overlap_lengths_zstd);
+    const size_t walk_original =
+        block_original_size(out.walks_zstd) +
+        block_original_size(out.walk_sample_ids_zstd) +
+        block_original_size(out.walk_sample_id_lengths_zstd) +
+        block_original_size(out.walk_hap_indices_zstd) +
+        block_original_size(out.walk_seq_ids_zstd) +
+        block_original_size(out.walk_seq_id_lengths_zstd) +
+        block_original_size(out.walk_seq_starts_zstd) +
+        block_original_size(out.walk_seq_ends_zstd);
+    const size_t walk_compressed =
+        block_payload_size(out.walks_zstd) +
+        block_payload_size(out.walk_sample_ids_zstd) +
+        block_payload_size(out.walk_sample_id_lengths_zstd) +
+        block_payload_size(out.walk_hap_indices_zstd) +
+        block_payload_size(out.walk_seq_ids_zstd) +
+        block_payload_size(out.walk_seq_id_lengths_zstd) +
+        block_payload_size(out.walk_seq_starts_zstd) +
+        block_payload_size(out.walk_seq_ends_zstd);
+    const size_t segments_links_original =
+        block_original_size(out.segment_sequences_zstd) +
+        block_original_size(out.segment_seq_lengths_zstd) +
+        block_original_size(out.link_from_ids_zstd) +
+        block_original_size(out.link_to_ids_zstd) +
+        block_original_size(out.link_from_orients_zstd) +
+        block_original_size(out.link_to_orients_zstd) +
+        block_original_size(out.link_overlap_nums_zstd) +
+        block_original_size(out.link_overlap_ops_zstd);
+    const size_t segments_links_compressed =
+        block_payload_size(out.segment_sequences_zstd) +
+        block_payload_size(out.segment_seq_lengths_zstd) +
+        block_payload_size(out.link_from_ids_zstd) +
+        block_payload_size(out.link_to_ids_zstd) +
+        block_payload_size(out.link_from_orients_zstd) +
+        block_payload_size(out.link_to_orients_zstd) +
+        block_payload_size(out.link_overlap_nums_zstd) +
+        block_payload_size(out.link_overlap_ops_zstd);
+    const auto [optional_original, optional_compressed] =
+        sum_optional_sizes(out.segment_optional_fields_zstd);
+    const auto [link_optional_original, link_optional_compressed] =
+        sum_optional_sizes(out.link_optional_fields_zstd);
+    const size_t optional_fields_original =
+        optional_original + link_optional_original;
+    const size_t optional_fields_compressed =
+        optional_compressed + link_optional_compressed;
+    const size_t jumps_original =
+        block_original_size(out.jump_from_ids_zstd) +
+        block_original_size(out.jump_from_orients_zstd) +
+        block_original_size(out.jump_to_ids_zstd) +
+        block_original_size(out.jump_to_orients_zstd) +
+        block_original_size(out.jump_distances_zstd) +
+        block_original_size(out.jump_distance_lengths_zstd) +
+        block_original_size(out.jump_rest_fields_zstd) +
+        block_original_size(out.jump_rest_lengths_zstd);
+    const size_t jumps_compressed =
+        block_payload_size(out.jump_from_ids_zstd) +
+        block_payload_size(out.jump_from_orients_zstd) +
+        block_payload_size(out.jump_to_ids_zstd) +
+        block_payload_size(out.jump_to_orients_zstd) +
+        block_payload_size(out.jump_distances_zstd) +
+        block_payload_size(out.jump_distance_lengths_zstd) +
+        block_payload_size(out.jump_rest_fields_zstd) +
+        block_payload_size(out.jump_rest_lengths_zstd);
+    const size_t containments_original =
+        block_original_size(out.containment_container_ids_zstd) +
+        block_original_size(out.containment_container_orients_zstd) +
+        block_original_size(out.containment_contained_ids_zstd) +
+        block_original_size(out.containment_contained_orients_zstd) +
+        block_original_size(out.containment_positions_zstd) +
+        block_original_size(out.containment_overlaps_zstd) +
+        block_original_size(out.containment_overlap_lengths_zstd) +
+        block_original_size(out.containment_rest_fields_zstd) +
+        block_original_size(out.containment_rest_lengths_zstd);
+    const size_t containments_compressed =
+        block_payload_size(out.containment_container_ids_zstd) +
+        block_payload_size(out.containment_container_orients_zstd) +
+        block_payload_size(out.containment_contained_ids_zstd) +
+        block_payload_size(out.containment_contained_orients_zstd) +
+        block_payload_size(out.containment_positions_zstd) +
+        block_payload_size(out.containment_overlaps_zstd) +
+        block_payload_size(out.containment_overlap_lengths_zstd) +
+        block_payload_size(out.containment_rest_fields_zstd) +
+        block_payload_size(out.containment_rest_lengths_zstd);
+
+    int step = 3;
     std::cerr << "\n[CPU Compress] === TIMING BREAKDOWN (" << std::fixed
               << std::setprecision(1) << data_size_mb << " MB, "
               << total_elements << " path+walk elements) ===" << std::endl;
     std::cerr << "  Pre-processing:" << std::endl;
     std::cerr << "    1. delta_transform (x" << delta_round
               << "):         " << std::fixed << std::setprecision(2)
-              << time_delta_ms << " ms  (" << std::setprecision(2)
-              << gbps_from_mb(data_size_mb, time_delta_ms) << " GB/s)"
-              << std::endl;
+              << time_delta_ms << " ms" << std::endl;
     std::cerr << "  Grammar compression:" << std::endl;
     std::cerr << "    2. run_grammar_compression:      " << std::fixed
-              << std::setprecision(2) << time_grammar_ms << " ms  ("
-              << std::setprecision(2)
-              << gbps_from_mb(data_size_mb, time_grammar_ms) << " GB/s)"
+              << std::setprecision(2) << time_grammar_ms << " ms"
               << std::endl;
     std::cerr << "  Post-processing:" << std::endl;
     double rules_size_mb = rule_count * sizeof(int32_t) * 2 / (1024.0 * 1024.0);
-    std::cerr << "    3. split+delta_encode rules (" << std::fixed
+    std::cerr << "    " << step++
+              << ". encode rules (" << std::fixed
               << std::setprecision(1) << rules_size_mb
               << " MB): " << std::setprecision(2) << time_process_rules_ms
-              << " ms  (" << std::setprecision(2)
-              << gbps_from_mb(rules_size_mb, time_process_rules_ms) << " GB/s)"
-              << std::endl;
-    std::cerr << "    4. ZSTD compress rules:          " << std::fixed
-              << std::setprecision(2) << time_zstd_rules_ms << " ms"
-              << std::endl;
-    std::cerr << "    5. ZSTD compress (all fields):   " << std::fixed
+              << " ms" << std::endl;
+    emit_post_step(step++, "compress rule fields", "ZSTD", time_zstd_rules_ms,
+                   rules_original, rules_compressed);
+    emit_post_step(step++, "compress path fields", "ZSTD", time_paths_ms,
+                   path_original, path_compressed);
+    emit_post_step(step++, "compress walk fields", "ZSTD+varint",
+                   time_walks_ms, walk_original, walk_compressed);
+    emit_post_step(step++, "compress segment/link fields", "mixed",
+                   time_segments_links_ms, segments_links_original,
+                   segments_links_compressed);
+    emit_post_step(step++, "compress optional fields", "mixed",
+                   time_optional_fields_ms, optional_fields_original,
+                   optional_fields_compressed);
+    if (out.num_jumps > 0) {
+      emit_post_step(step++, "compress jump fields", "mixed", time_jumps_ms,
+                     jumps_original, jumps_compressed);
+    }
+    if (out.num_containments > 0) {
+      emit_post_step(step++, "compress containment fields", "mixed",
+                     time_containments_ms, containments_original,
+                     containments_compressed);
+    }
+    std::cerr << "    field compression subtotal:      " << std::fixed
               << std::setprecision(2) << time_zstd_ms << " ms" << std::endl;
     std::cerr << "  ─────────────────────────────────" << std::endl;
     std::cerr << "  TOTAL (compress_gfa):              " << std::fixed
-              << std::setprecision(2) << compress_total_ms << " ms  ("
-              << std::setprecision(2)
-              << gbps_from_mb(data_size_mb, compress_total_ms) << " GB/s)"
+              << std::setprecision(2) << compress_total_ms << " ms"
               << std::endl;
   }
 
-  print_compression_stats(out, num_segments, num_rounds, delta_round);
+  print_compression_stats(out, num_segments, show_stats);
 
   return out;
 }

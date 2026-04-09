@@ -11,11 +11,6 @@
 
 namespace gfz::compression_utils {
 
-struct ProcessMemorySnapshot {
-  size_t vm_rss_kb = 0;
-  size_t vm_hwm_kb = 0;
-};
-
 ProcessMemorySnapshot read_process_memory_snapshot() {
   ProcessMemorySnapshot snapshot;
 
@@ -42,6 +37,8 @@ ProcessMemorySnapshot read_process_memory_snapshot() {
     };
 
     if (parse_kb_field("VmRSS:", snapshot.vm_rss_kb))
+      continue;
+    if (parse_kb_field("RssAnon:", snapshot.rss_anon_kb))
       continue;
     parse_kb_field("VmHWM:", snapshot.vm_hwm_kb);
   }
@@ -83,6 +80,7 @@ void log_memory_checkpoint(const std::string &label) {
 
   const ProcessMemorySnapshot snapshot = read_process_memory_snapshot();
   std::cerr << "[CPU Compress][Memory] " << label
+            << " | RssAnon=" << format_size(snapshot.rss_anon_kb * 1024)
             << " | VmRSS=" << format_size(snapshot.vm_rss_kb * 1024)
             << " | VmHWM=" << format_size(snapshot.vm_hwm_kb * 1024)
             << std::endl;
@@ -253,7 +251,7 @@ void remap_rule_ids(std::vector<std::vector<NodeId>> &sequences,
 }
 
 void print_compression_stats(const CompressedData &d, size_t num_segments,
-                             int num_rounds, int delta_round) {
+                             bool show_stats) {
   auto sum_optional =
       [](const std::vector<CompressedOptionalFieldColumn> &cols) {
         size_t total = 0;
@@ -325,7 +323,7 @@ void print_compression_stats(const CompressedData &d, size_t num_segments,
   total += d.walk_seq_starts_zstd.payload.size();
   total += d.walk_seq_ends_zstd.payload.size();
 
-  if (!gfaz_debug_enabled())
+  if (!show_stats)
     return;
 
   std::cerr << "\n=== Compressed Data Breakdown ===" << std::endl;
@@ -432,8 +430,7 @@ void print_compression_stats(const CompressedData &d, size_t num_segments,
 
   // Total
   std::cerr << "----------------------------------------" << std::endl;
-  std::cerr << "Total: " << format_size(total) << " (" << num_rounds
-            << " rounds, delta=" << delta_round << ")" << std::endl;
+  std::cerr << "Total: " << format_size(total) << std::endl;
 }
 
 } // namespace gfz::compression_utils

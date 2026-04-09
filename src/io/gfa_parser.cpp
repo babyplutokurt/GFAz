@@ -3,6 +3,7 @@
 #include "utils/threading_utils.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
@@ -28,10 +29,12 @@ namespace {
 
 constexpr const char *kParserErrorPrefix = "GFA parser error: ";
 constexpr const char *kParserWarningPrefix = "GFA parser warning: ";
+using Clock = std::chrono::steady_clock;
 
 struct ProcessMemorySnapshot {
   size_t vm_rss_kb = 0;
   size_t vm_hwm_kb = 0;
+  size_t rss_anon_kb = 0;
 };
 
 std::string format_memory_size(size_t bytes) {
@@ -73,21 +76,12 @@ ProcessMemorySnapshot read_process_memory_snapshot() {
 
     if (parse_kb_field("VmRSS:", snapshot.vm_rss_kb))
       continue;
+    if (parse_kb_field("RssAnon:", snapshot.rss_anon_kb))
+      continue;
     parse_kb_field("VmHWM:", snapshot.vm_hwm_kb);
   }
 
   return snapshot;
-}
-
-void log_parser_memory_checkpoint(const std::string &label) {
-  if (!gfaz_debug_enabled())
-    return;
-
-  const ProcessMemorySnapshot snapshot = read_process_memory_snapshot();
-  std::cerr << "[GfaParser][Memory] " << label
-            << " | VmRSS=" << format_memory_size(snapshot.vm_rss_kb * 1024)
-            << " | VmHWM=" << format_memory_size(snapshot.vm_hwm_kb * 1024)
-            << std::endl;
 }
 
 inline int64_t parse_int64(std::string_view s) {
@@ -214,6 +208,8 @@ bool GfaParser::is_numeric(std::string_view s) {
 
 GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   ScopedOMPThreads omp_scope(num_threads);
+  const auto parse_start = Clock::now();
+  auto phase_start = parse_start;
   GfaGraph graph;
   segment_field_meta_.clear();
   link_field_meta_.clear();
@@ -221,6 +217,23 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   num_segments_hint_ = 0;
   num_links_hint_ = 0;
   all_segment_names_numeric_ = true;
+
+  auto log_phase = [&](const std::string &label) {
+    if (!gfaz_debug_enabled())
+      return;
+    const auto now = Clock::now();
+    const double phase_ms =
+        std::chrono::duration<double, std::milli>(now - phase_start).count();
+    phase_start = now;
+
+    const ProcessMemorySnapshot snapshot = read_process_memory_snapshot();
+    std::cerr << "[GfaParser] " << label << ": " << std::fixed
+              << std::setprecision(2) << phase_ms << " ms"
+              << " | RssAnon=" << format_memory_size(snapshot.rss_anon_kb * 1024)
+              << " | VmRSS=" << format_memory_size(snapshot.vm_rss_kb * 1024)
+              << " | VmHWM=" << format_memory_size(snapshot.vm_hwm_kb * 1024)
+              << std::endl;
+  };
 
   // Index 0 is a placeholder to support 1-based node IDs.
   // This allows NodeId sign to encode orientation without ambiguity.
@@ -253,6 +266,7 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   }
 
   madvise(const_cast<char *>(mmap_data), file_size, MADV_SEQUENTIAL);
+  log_phase("mmap+madvise");
 
   // Single-pass line classification
   std::vector<LineOffset> s_offsets, l_offsets, p_offsets, w_offsets;
@@ -291,10 +305,9 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
       line_start = i + 1;
     }
   }
-  log_parser_memory_checkpoint("after line classification");
-
   num_segments_hint_ = s_offsets.size();
   num_links_hint_ = l_offsets.size();
+  log_phase("line classification");
 
   graph.node_id_to_name.reserve(num_segments_hint_ + 1);
   graph.node_sequences.reserve(num_segments_hint_ + 1);
@@ -322,8 +335,7 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   graph.containments.positions.reserve(c_offsets.size());
   graph.containments.overlaps.reserve(c_offsets.size());
   graph.containments.rest_fields.reserve(c_offsets.size());
-  log_parser_memory_checkpoint("after reserve");
-
+  log_phase("reserve");
   // Phase 1: Parse S-lines (sequential - must populate node_name_to_id first)
   for (const auto &off : s_offsets) {
     std::string_view line(mmap_data + off.offset, off.length);
@@ -361,17 +373,9 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
     }
   }
 
-  if (gfaz_debug_enabled()) {
-    std::cerr << "Parsed " << num_segments << " segments";
-    if (!graph.segment_optional_fields.empty())
-      std::cerr << " (" << graph.segment_optional_fields.size()
-                << " optional columns)";
-    std::cerr << std::endl;
-  }
-  log_parser_memory_checkpoint("after S-lines");
   s_offsets.clear();
   s_offsets.shrink_to_fit();
-  log_parser_memory_checkpoint("after clearing S offsets");
+  log_phase("parse S-lines");
 
   // Phase 2: Parse L-lines (sequential)
   for (const auto &off : l_offsets) {
@@ -409,10 +413,9 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
       break;
     }
   }
-  log_parser_memory_checkpoint("after L-lines");
   l_offsets.clear();
   l_offsets.shrink_to_fit();
-  log_parser_memory_checkpoint("after clearing L offsets");
+  log_phase("parse L-lines");
 
   // Phase 3: Parse P/W-lines (parallel - each writes to pre-allocated index)
   graph.paths.resize(p_offsets.size());
@@ -442,12 +445,11 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
     std::string_view line(mmap_data + w_offsets[i].offset, w_offsets[i].length);
     parse_w_line(line, graph, i);
   }
-  log_parser_memory_checkpoint("after P/W lines");
   p_offsets.clear();
   p_offsets.shrink_to_fit();
   w_offsets.clear();
   w_offsets.shrink_to_fit();
-  log_parser_memory_checkpoint("after clearing P/W offsets");
+  log_phase("parse P/W-lines");
 
   // Phase 4: Parse J/C lines (after S-lines, so node_name_to_id is populated)
   for (const auto &off : j_offsets) {
@@ -459,24 +461,41 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
     std::string_view line(mmap_data + off.offset, off.length);
     parse_c_line(line, graph);
   }
-  log_parser_memory_checkpoint("after J/C lines");
   j_offsets.clear();
   j_offsets.shrink_to_fit();
   c_offsets.clear();
   c_offsets.shrink_to_fit();
-  log_parser_memory_checkpoint("after clearing J/C offsets");
+  log_phase("parse J/C-lines");
 
   munmap(const_cast<char *>(mmap_data), file_size);
   close(fd);
-  log_parser_memory_checkpoint("after munmap");
+  log_phase("munmap+close");
 
   if (gfaz_debug_enabled()) {
-    std::cerr << "Parsed " << num_links << " links, " << graph.paths.size()
-              << " paths, " << graph.walks.size() << " walks";
-    if (graph.jumps.size() > 0 || graph.containments.size() > 0)
-      std::cerr << ", " << graph.jumps.size() << " jumps, "
-                << graph.containments.size() << " containments";
-    std::cerr << std::endl;
+    const auto parse_end = Clock::now();
+    const double parse_ms =
+        std::chrono::duration<double, std::milli>(parse_end - parse_start)
+            .count();
+    const ProcessMemorySnapshot snapshot = read_process_memory_snapshot();
+    std::cerr << "[GfaParser] segments=" << num_segments
+              << ", links=" << num_links << ", paths=" << graph.paths.size()
+              << ", walks=" << graph.walks.size()
+              << ", jumps=" << graph.jumps.size()
+              << ", containments=" << graph.containments.size();
+    if (!graph.segment_optional_fields.empty()) {
+      std::cerr << ", segment_optional_columns="
+                << graph.segment_optional_fields.size();
+    }
+    if (!graph.link_optional_fields.empty()) {
+      std::cerr << ", link_optional_columns="
+                << graph.link_optional_fields.size();
+    }
+    std::cerr << ", time=" << std::fixed << std::setprecision(2) << parse_ms
+              << " ms"
+              << " | RssAnon=" << format_memory_size(snapshot.rss_anon_kb * 1024)
+              << " | VmRSS=" << format_memory_size(snapshot.vm_rss_kb * 1024)
+              << " | VmHWM=" << format_memory_size(snapshot.vm_hwm_kb * 1024)
+              << std::endl;
   }
 
   return graph;
@@ -1106,4 +1125,3 @@ uint16_t GfaParser::field_tag_key(std::string_view field) {
   return (static_cast<uint16_t>(static_cast<unsigned char>(field[0])) << 8) |
          static_cast<uint16_t>(static_cast<unsigned char>(field[1]));
 }
-

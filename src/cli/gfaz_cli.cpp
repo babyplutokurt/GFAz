@@ -16,6 +16,7 @@
 #include "io/gfa_parser.hpp"
 #include "io/gfa_writer.hpp"
 #include "codec/serialization.hpp"
+#include "utils/debug_log.hpp"
 
 #ifdef ENABLE_CUDA
 #include "gpu/compression_workflow_gpu.hpp"
@@ -35,6 +36,7 @@ using Clock = std::chrono::steady_clock;
 constexpr int kOptGpuChunkMb = 1000;
 constexpr int kOptGpuLegacy = 1001;
 constexpr int kOptGpuTraversalsPerChunk = 1002;
+constexpr int kOptDebug = 1003;
 
 std::string format_size(uintmax_t bytes) {
   std::ostringstream oss;
@@ -58,7 +60,7 @@ uintmax_t file_size_or_zero(const std::string &path) {
   return ec ? 0 : size;
 }
 
-void configure_stats(bool enabled) {
+void configure_debug(bool enabled) {
   if (!enabled)
     return;
 
@@ -110,7 +112,8 @@ OPTIONS (compress):
     --gpu-chunk-mb <N>      Rolling GPU chunk size in MiB
     --gpu-legacy            Use the old whole-graph GPU compression path
                              Note: GPU mode ignores --delta/--threshold/--threads
-    -s, --stats             Show timing/size statistics
+    -s, --stats             Show size/statistics summary
+    --debug                 Show internal debug/timing output
     -h, --help              Show this help message
 
 OPTIONS (decompress):
@@ -121,7 +124,8 @@ OPTIONS (decompress):
     --gpu-traversals <N>    Traversals expanded per rolling GPU chunk
     --gpu-legacy            Use the old whole-graph GPU decompression path
                              Note: GPU mode ignores --threads
-    -s, --stats             Show timing/size statistics
+    -s, --stats             Show size/statistics summary
+    --debug                 Show internal debug/timing output
     -h, --help              Show this help message
 
 BEHAVIOR:
@@ -231,7 +235,8 @@ OPTIONS:
     --gpu-chunk-mb <N>      Rolling GPU chunk size in MiB
     --gpu-legacy            Use the old whole-graph GPU compression path
                              Note: GPU mode ignores --delta/--threshold/--threads
-    -s, --stats             Show timing/size statistics
+    -s, --stats             Show size/statistics summary
+    --debug                 Show internal debug/timing output
     -h, --help              Show this help message
 
 EXAMPLES:
@@ -262,7 +267,8 @@ OPTIONS:
     --gpu-traversals <N>    Traversals expanded per rolling GPU chunk
     --gpu-legacy            Use the old whole-graph GPU decompression path
                              Note: GPU mode ignores --threads
-    -s, --stats             Show timing/size statistics
+    -s, --stats             Show size/statistics summary
+    --debug                 Show internal debug/timing output
     -h, --help              Show this help message
 
 EXAMPLES:
@@ -288,6 +294,7 @@ int do_compress(int argc, char *argv[]) {
   bool use_gpu = false;
   bool use_gpu_legacy = false;
   bool show_stats = false;
+  bool debug = false;
   unsigned long long gpu_chunk_mb = 0;
 
   static struct option long_options[] = {
@@ -299,6 +306,7 @@ int do_compress(int argc, char *argv[]) {
       {"gpu-chunk-mb", required_argument, 0, kOptGpuChunkMb},
       {"gpu-legacy", no_argument, 0, kOptGpuLegacy},
       {"stats", no_argument, 0, 's'},
+      {"debug", no_argument, 0, kOptDebug},
       {"help", no_argument, 0, 'h'},
       {0, 0, 0, 0}};
 
@@ -332,6 +340,9 @@ int do_compress(int argc, char *argv[]) {
       break;
     case 's':
       show_stats = true;
+      break;
+    case kOptDebug:
+      debug = true;
       break;
     case 'h':
       print_compress_help();
@@ -395,6 +406,7 @@ int do_compress(int argc, char *argv[]) {
   std::cout << "Output: " << output_path << std::endl;
   std::cout << "Backend: " << (use_gpu ? "GPU" : "CPU") << std::endl;
   std::cout << "Stats: " << (show_stats ? "on" : "off") << std::endl;
+  std::cout << "Debug: " << (debug ? "on" : "off") << std::endl;
   std::cout << "Rounds: " << rounds << std::endl;
 #ifdef ENABLE_CUDA
   if (use_gpu) {
@@ -424,11 +436,14 @@ int do_compress(int argc, char *argv[]) {
   std::cout << std::endl;
 
   try {
-    configure_stats(show_stats);
+    configure_debug(debug);
     const uintmax_t input_size = file_size_or_zero(input_path);
     const auto start = Clock::now();
+    double workflow_ms = 0.0;
+    double serialize_ms = 0.0;
 #ifdef ENABLE_CUDA
     if (use_gpu) {
+      const auto workflow_start = Clock::now();
       gpu_compression::GpuCompressionOptions gpu_options;
       gpu_options.force_full_device_legacy = use_gpu_legacy;
       gpu_options.force_rolling_scheduler = !use_gpu_legacy;
@@ -438,16 +453,48 @@ int do_compress(int argc, char *argv[]) {
       }
       CompressedData compressed_data_gpu =
           gpu_compression::compress_gfa_gpu(input_path, rounds, gpu_options);
+      const auto workflow_end = Clock::now();
+      workflow_ms =
+          std::chrono::duration<double, std::milli>(workflow_end - workflow_start)
+              .count();
+      const auto serialize_start = Clock::now();
       serialize_compressed_data(compressed_data_gpu, output_path);
+      const auto serialize_end = Clock::now();
+      serialize_ms =
+          std::chrono::duration<double, std::milli>(serialize_end -
+                                                    serialize_start)
+              .count();
     } else {
 #endif
+      const auto workflow_start = Clock::now();
       CompressedData compressed_data = compress_gfa(
-          input_path, rounds, freq_threshold, delta_round, num_threads);
+          input_path, rounds, freq_threshold, delta_round, num_threads,
+          show_stats);
+      const auto workflow_end = Clock::now();
+      workflow_ms =
+          std::chrono::duration<double, std::milli>(workflow_end - workflow_start)
+              .count();
+      const auto serialize_start = Clock::now();
       serialize_compressed_data(compressed_data, output_path);
+      const auto serialize_end = Clock::now();
+      serialize_ms =
+          std::chrono::duration<double, std::milli>(serialize_end -
+                                                    serialize_start)
+              .count();
 #ifdef ENABLE_CUDA
     }
 #endif
     const auto end = Clock::now();
+    if (gfaz_debug_enabled()) {
+      const double total_ms =
+          std::chrono::duration<double, std::milli>(end - start).count();
+      std::cerr << "\n[CLI Compress] workflow:  " << std::fixed
+                << std::setprecision(2) << workflow_ms << " ms" << std::endl;
+      std::cerr << "[CLI Compress] serialize: " << std::fixed
+                << std::setprecision(2) << serialize_ms << " ms" << std::endl;
+      std::cerr << "[CLI Compress] total:     " << std::fixed
+                << std::setprecision(2) << total_ms << " ms" << std::endl;
+    }
     const uintmax_t output_size = file_size_or_zero(output_path);
 
     std::cout << "\nCompression complete!" << std::endl;
@@ -485,6 +532,7 @@ int do_decompress(int argc, char *argv[]) {
   bool use_legacy = false;
   bool use_gpu_legacy = false;
   bool show_stats = false;
+  bool debug = false;
   unsigned long long gpu_traversals_per_chunk = 128;
 
   static struct option long_options[] = {{"threads", required_argument, 0, 'j'},
@@ -495,6 +543,7 @@ int do_decompress(int argc, char *argv[]) {
                                          {"gpu-legacy", no_argument, 0,
                                           kOptGpuLegacy},
                                          {"stats", no_argument, 0, 's'},
+                                         {"debug", no_argument, 0, kOptDebug},
                                          {"help", no_argument, 0, 'h'},
                                          {0, 0, 0, 0}};
 
@@ -528,6 +577,9 @@ int do_decompress(int argc, char *argv[]) {
       break;
     case 's':
       show_stats = true;
+      break;
+    case kOptDebug:
+      debug = true;
       break;
     case 'h':
       print_decompress_help();
@@ -595,6 +647,7 @@ int do_decompress(int argc, char *argv[]) {
   std::cout << "Output: " << output_path << std::endl;
   std::cout << "Backend: " << (use_gpu ? "GPU" : "CPU") << std::endl;
   std::cout << "Stats: " << (show_stats ? "on" : "off") << std::endl;
+  std::cout << "Debug: " << (debug ? "on" : "off") << std::endl;
 #ifdef ENABLE_CUDA
   if (use_gpu) {
     std::cout << "Mode:   "
@@ -621,7 +674,7 @@ int do_decompress(int argc, char *argv[]) {
   std::cout << std::endl;
 
   try {
-    configure_stats(show_stats);
+    configure_debug(debug);
     const uintmax_t input_size = file_size_or_zero(input_path);
     const auto start = Clock::now();
 #ifdef ENABLE_CUDA
