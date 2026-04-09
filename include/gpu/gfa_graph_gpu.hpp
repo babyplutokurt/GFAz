@@ -1,7 +1,7 @@
 #ifndef GFA_GRAPH_GPU_HPP
 #define GFA_GRAPH_GPU_HPP
 
-#include "gfa_parser.hpp" // For NodeId, GfaGraph, OptionalFieldColumn
+#include "model/gfa_graph.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>

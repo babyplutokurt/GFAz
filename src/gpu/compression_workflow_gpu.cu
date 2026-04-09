@@ -1,4 +1,4 @@
-#include "gfa_parser.hpp"
+#include "io/gfa_parser.hpp"
 #include "gpu/codec_gpu.cuh"
 #include "gpu/compression_workflow_gpu_internal.hpp"
 #include "gpu/compression_workflow_gpu.hpp"
@@ -13,7 +13,7 @@
 #include <iostream>
 #include <map>
 
-#include "codec.hpp"
+#include "codec/codec.hpp"
 
 namespace gpu_compression {
 

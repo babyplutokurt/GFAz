@@ -3,7 +3,7 @@
 #include "gpu/path_rulebook_gpu.hpp"
 #include "gpu/path_compression_gpu_rolling.hpp"
 
-#include "codec.hpp"
+#include "codec/codec.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>

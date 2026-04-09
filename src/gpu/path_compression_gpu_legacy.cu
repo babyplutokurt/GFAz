@@ -2,7 +2,7 @@
 #include "gpu/codec_gpu.cuh"
 #include "gpu/path_compression_gpu_legacy.hpp"
 
-#include "codec.hpp"
+#include "codec/codec.hpp"
 #include <thrust/copy.h>
 #include <thrust/device_vector.h>
 #include <thrust/scan.h>

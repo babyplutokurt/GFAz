@@ -1,4 +1,5 @@
-#include "gfa_writer.hpp"
+#include "gpu/gfa_writer_gpu.hpp"
+#include "io/gfa_writer.hpp"
 
 #ifdef ENABLE_CUDA
 

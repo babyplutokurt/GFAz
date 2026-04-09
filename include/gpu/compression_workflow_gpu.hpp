@@ -1,7 +1,7 @@
 #ifndef COMPRESSION_WORKFLOW_GPU_HPP
 #define COMPRESSION_WORKFLOW_GPU_HPP
 
-#include "compression_workflow.hpp"
+#include "workflows/compression_workflow.hpp"
 #include "gpu/gfa_graph_gpu.hpp"
 #include <cstdint>
 #include <map>
