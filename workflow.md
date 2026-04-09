@@ -1,6 +1,6 @@
 # Workflow Reference
 
-This document describes the current end-to-end data flow for CPU and GPU paths.
+This document describes the current end-to-end data flow for CPU and GPU paths. The key architectural point is that both backends now emit and consume the same `CompressedData` representation and the same `.gfaz` file format.
 
 ## High-Level Pipelines
 
@@ -8,7 +8,7 @@ This document describes the current end-to-end data flow for CPU and GPU paths.
 
 1. Parse GFA text to `GfaGraph`.
 2. Compress with CPU workflow (`compress_gfa(...)`) to `CompressedData`.
-3. Serialize CPU payload (`serialize_compressed_data(...)`) to `.gfaz`.
+3. Serialize `CompressedData` (`serialize_compressed_data(...)`) to `.gfaz`.
 4. Deserialize CPU payload (`deserialize_compressed_data(...)`).
 5. Decompress (`decompress_gfa(...)`) back to `GfaGraph`.
 6. Write GFA text (`write_gfa(...)`) if needed.
@@ -18,10 +18,12 @@ This document describes the current end-to-end data flow for CPU and GPU paths.
 1. Parse GFA text to `GfaGraph`.
 2. Convert to GPU layout (`convert_to_gpu_layout(...)`) -> `GfaGraph_gpu`.
 3. Compress with GPU workflow (`compress_gpu_graph(...)` / `compress_gfa_gpu(...)`) to `CompressedData`.
-4. Serialize GPU payload (`serialize_compressed_data_gpu(...)`) to `.gfaz`.
-5. Deserialize GPU payload (`deserialize_compressed_data_gpu(...)`).
+4. Serialize `CompressedData` to `.gfaz`.
+5. Deserialize `CompressedData`.
 6. Decompress to GPU layout (`decompress_to_gpu_layout(...)`) -> `GfaGraph_gpu`.
 7. Convert back (`convert_from_gpu_layout(...)`) -> `GfaGraph`.
+
+The serializer entry points exposed to GPU callers are compatibility aliases over the shared serializer. There is no separate GPU container format.
 
 ## CPU Compression Workflow Details
 
@@ -62,6 +64,8 @@ Main implementations:
 Behavior:
 
 - Uses GPU-oriented flattened structures and kernels for path/rule processing, then stores the final payload in the shared `CompressedData` Zstd-based format.
+- GPU compression accelerates the transform pipeline; it does not define a different entropy layer or file format.
+- GPU decompression reads the same serialized blocks as CPU decompression and reconstructs GPU layout from the shared container.
 - High-level public Python APIs:
   - `compress_gfa_gpu(...)`
   - `compress_gpu_graph(...)`
@@ -69,7 +73,7 @@ Behavior:
 
 ## Serialization Contracts
 
-CPU serialization (`include/serialization.hpp`, `src/serialization.cpp`):
+Shared serialization (`include/serialization.hpp`, `src/serialization.cpp`):
 
 - Magic: `GFAZ`
 - Version: `5`
@@ -86,6 +90,8 @@ Important:
 
 - CPU and GPU serializers share the same `CompressedData` container and serializer implementation.
 - Deserializers validate magic/version and throw on mismatch.
+- CPU-compressed `.gfaz` files can be decompressed through the GPU path.
+- GPU-compressed `.gfaz` files can be decompressed through the CPU path.
 
 ## CLI Workflow
 
@@ -94,14 +100,16 @@ CLI entrypoint: `src/gfaz_cli.cpp`
 ### `gfaz compress`
 
 - CPU default path: parse -> `compress_gfa` -> `serialize_compressed_data`
-- GPU path (`--gpu`, CUDA build): `compress_gfa_gpu` -> `serialize_compressed_data_gpu`
+- GPU path (`--gpu`, CUDA build): parse/convert -> `compress_gfa_gpu` -> shared serializer
 - CPU-only build with `--gpu`: warns and falls back to CPU path.
 
 ### `gfaz decompress`
 
 - CPU default path: `deserialize_compressed_data` -> `decompress_gfa` -> `write_gfa`
-- GPU path (`--gpu`, CUDA build): `deserialize_compressed_data_gpu` -> `decompress_to_gpu_layout` -> `convert_from_gpu_layout` -> `write_gfa`
+- GPU path (`--gpu`, CUDA build): shared deserialize -> `decompress_to_gpu_layout` -> `convert_from_gpu_layout` -> `write_gfa`
 - CPU-only build with `--gpu`: warns and falls back to CPU path.
+
+Because the container is shared, the backend chosen at decompression time is independent of the backend that created the file.
 
 ## Python Binding Surface (Current)
 
@@ -122,3 +130,8 @@ Experimental GPU APIs (CUDA builds only):
 - `gfa_compression.experimental.gpu.*`
 
 Legacy GPU alias names are retained for compatibility in CUDA builds.
+
+## Semantic Notes
+
+- Segment names are reconstructed canonically during decompression as dense 1-based numeric IDs.
+- Round-trip verification is therefore based on graph semantics rather than original segment-name strings.

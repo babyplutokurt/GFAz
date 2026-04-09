@@ -7,7 +7,7 @@ This project has two build modes:
 - CPU-only (default)
 - CPU + GPU (`ENABLE_CUDA=ON`)
 
-Both modes build the Python module (`gfa_compression`) and the CLI (`gfaz`).
+Both modes build the Python module (`gfa_compression`) and the CLI (`gfaz`). In both cases, the compressed on-disk format is the same versioned `.gfaz` container. The GPU build adds GPU implementations for compression and decompression; it does not introduce a second file format.
 
 ## Build Flags (Current)
 
@@ -52,9 +52,8 @@ git submodule update --init --recursive
 ### CPU-only (default)
 
 ```bash
-cd build
-cmake ..
-cmake --build . -j$(nproc)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
 ```
 
 CMake should report:
@@ -64,15 +63,14 @@ CMake should report:
 ### CPU + GPU
 
 ```bash
-cd build
-cmake -DENABLE_CUDA=ON ..
-cmake --build . -j$(nproc)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_CUDA=ON
+cmake --build build -j"$(nproc)"
 ```
 
 If CUDA is not in default location, provide `CUDA_PATH`:
 
 ```bash
-cmake -DENABLE_CUDA=ON -DCUDA_PATH=/usr/local/cuda-12.8 ..
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_CUDA=ON -DCUDA_PATH=/usr/local/cuda-12.8
 ```
 
 ## Outputs
@@ -86,13 +84,14 @@ cmake -DENABLE_CUDA=ON -DCUDA_PATH=/usr/local/cuda-12.8 ..
 
 - Parse GFA text into `GfaGraph`
 - CPU grammar compression/decompression workflow
-- CPU serialization/deserialization (`.gfaz`)
+- Shared `.gfaz` serialization/deserialization
 - Baseline path for all builds
 
 ### GPU backend (`ENABLE_CUDA=ON`)
 
 - GPU-friendly graph layout conversion (`GfaGraph <-> GfaGraph_gpu`)
 - GPU compression/decompression workflows over the shared `.gfaz` format
+- Reuses the same serialized `CompressedData` schema and Zstd-based entropy layer as CPU
 
 ## File Format Versions
 
@@ -119,7 +118,7 @@ Current binary format in code:
 - `compress_gpu_graph()`
 - `decompress_to_gpu_layout()`
 - `verify_gpu_round_trip()`
-- `serialize_gpu()`, `deserialize_gpu()`
+- `serialize_gpu()`, `deserialize_gpu()` (compatibility aliases over the shared serializer)
 - `convert_to_gpu_layout()`, `convert_from_gpu_layout()`
 
 ### Experimental GPU helpers (CUDA builds only)
@@ -165,6 +164,8 @@ Options:
 ### CLI behavior notes
 
 - CPU-only build + `--gpu`: prints warning and falls back to CPU backend.
+- CPU-produced `.gfaz` can be decompressed with `--gpu`.
+- GPU-produced `.gfaz` can be decompressed without `--gpu`.
 - CPU `threads=0` uses auto policy:
   - `GFAZ_NUM_THREADS` if set
   - else `OMP_NUM_THREADS` if set
@@ -194,8 +195,9 @@ gfaz decompress --gpu input.gfa.gfaz
 
 ## Known Limitations
 
-- CPU and GPU backends share the same `.gfaz` container; choose `--gpu` only to select the GPU decompression implementation.
+- CPU and GPU backends share the same `.gfaz` container; `--gpu` selects the GPU implementation, not a different format.
 - GPU backend currently uses a different tuning surface than CPU backend; some CLI knobs are intentionally ignored in GPU mode.
+- Decompression reconstructs segment names canonically as dense 1-based numeric IDs rather than preserving original segment-name strings.
 
 ## Troubleshooting
 

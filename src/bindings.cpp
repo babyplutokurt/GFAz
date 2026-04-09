@@ -79,8 +79,10 @@ reconstruct_path_cpu(const std::vector<int32_t> &compressed_path,
 PYBIND11_MODULE(gfa_compression, m) {
   // Module metadata and shared defaults.
   m.doc() = "Python bindings for the GFA compression library.\n"
-            "Stable APIs are exposed at the module root. Experimental GPU\n"
-            "helpers are available under gfa_compression.experimental.gpu.";
+            "CPU and GPU workflows share the same CompressedData/.gfaz\n"
+            "format. Stable APIs are exposed at the module root.\n"
+            "Experimental GPU helpers are available under\n"
+            "gfa_compression.experimental.gpu.";
 
   m.attr("DEFAULT_ROUNDS") = kDefaultRounds;
   m.attr("DEFAULT_FREQ_THRESHOLD") = kDefaultFreqThreshold;
@@ -592,23 +594,27 @@ PYBIND11_MODULE(gfa_compression, m) {
       "Alias for decompress with normalized argument names", py::arg("data"),
       py::arg("threads") = kDefaultNumThreads);
 
-  m.def("serialize", &serialize_compressed_data, "Serialize to binary file",
+  m.def("serialize", &serialize_compressed_data,
+        "Serialize CompressedData to the shared .gfaz binary format",
         py::arg("data"), py::arg("output_path"));
   m.def("serialize_file", &serialize_compressed_data,
-        "Serialize to binary file", py::arg("data"), py::arg("output_path"));
+        "Serialize CompressedData to the shared .gfaz binary format",
+        py::arg("data"), py::arg("output_path"));
 
   m.def("deserialize", &deserialize_compressed_data,
-        "Deserialize from binary file", py::arg("input_path"));
+        "Deserialize CompressedData from the shared .gfaz binary format",
+        py::arg("input_path"));
   m.def("deserialize_file", &deserialize_compressed_data,
-        "Deserialize from binary file", py::arg("input_path"));
+        "Deserialize CompressedData from the shared .gfaz binary format",
+        py::arg("input_path"));
 
 #ifdef ENABLE_CUDA
   m.def("serialize_gpu", &serialize_compressed_data_gpu,
-        "Serialize GPU compressed data to binary file", py::arg("data"),
-        py::arg("output_path"));
+        "Compatibility alias for serialize(); writes the shared .gfaz format",
+        py::arg("data"), py::arg("output_path"));
 
   m.def("deserialize_gpu", &deserialize_compressed_data_gpu,
-        "Deserialize GPU compressed data from binary file",
+        "Compatibility alias for deserialize(); reads the shared .gfaz format",
         py::arg("input_path"));
 #endif
 
@@ -857,6 +863,8 @@ PYBIND11_MODULE(gfa_compression, m) {
                                                  options);
       },
       "Parse GFA and run GPU path compression with path metadata compression.\n"
+      "Returns the shared CompressedData representation used by both "
+      "backends.\n"
       "Rules are stored as delta-encoded Zstd-compressed first/second "
       "element arrays.",
       py::arg("gfa_file_path"), py::arg("num_rounds") = kDefaultRounds,
@@ -870,6 +878,7 @@ PYBIND11_MODULE(gfa_compression, m) {
                                                    options);
       },
       "GPU compression from pre-converted GfaGraph_gpu.\n"
+      "Returns the same CompressedData format as CPU compression.\n"
       "Use this for accurate timing of compression-only (no parsing).",
       py::arg("gpu_graph"), py::arg("num_rounds") = kDefaultRounds,
       py::arg("options") = gpu_compression::GpuCompressionOptions{});
@@ -914,8 +923,7 @@ PYBIND11_MODULE(gfa_compression, m) {
       },
       "GPU-accelerated path decompression.\n"
       "Decompresses shared Zstd blocks, inverse delta-encodes rules, and "
-      "expands "
-      "path on GPU.\n"
+      "expands paths on GPU.\n"
       "Returns FlattenedPaths with decompressed data and lengths.",
       py::arg("data"));
 
@@ -955,8 +963,9 @@ PYBIND11_MODULE(gfa_compression, m) {
          gpu_decompression::GpuDecompressionOptions options) {
         return gpu_decompression::decompress_to_gpu_layout(data, options);
       },
-      "Full GPU decompression: CompressedData -> GfaGraph_gpu.\n"
-      "Decompresses paths, names, overlaps, and segment sequences.",
+      "Full GPU decompression of the shared CompressedData format to "
+      "GfaGraph_gpu.\n"
+      "CPU-produced and GPU-produced .gfaz files are both supported.",
       py::arg("data"),
       py::arg("options") = gpu_decompression::GpuDecompressionOptions{});
 
@@ -966,7 +975,8 @@ PYBIND11_MODULE(gfa_compression, m) {
          gpu_decompression::GpuDecompressionOptions options) {
         return gpu_decompression::decompress_to_host_graph(data, options);
       },
-      "Full GPU decompression to host graph: CompressedData -> GfaGraph.\n"
+      "Full GPU decompression of the shared CompressedData format to "
+      "GfaGraph.\n"
       "Supports both legacy whole-device and rolling traversal expansion.",
       py::arg("data"),
       py::arg("options") = gpu_decompression::GpuDecompressionOptions{});

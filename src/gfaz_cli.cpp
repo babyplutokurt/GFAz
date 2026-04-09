@@ -127,6 +127,7 @@ BEHAVIOR:
       CPU/GPU compress -> <input>.gfaz
       Decompress removes .gfaz suffix when present
     - In CPU-only builds, --gpu falls back to CPU with a warning.
+    - CPU and GPU backends read and write the same .gfaz format.
 
 EXAMPLES:
     gfaz compress input.gfa                      # -> input.gfa.gfaz
@@ -156,7 +157,7 @@ OUTPUT:
     Writes the reconstructed P-lines to stdout, in the same order as requested.
 
 NOTE:
-    The current CPU .gfaz format does not store original segment names, so
+    The current .gfaz format reconstructs segment names canonically, so
     segment references are emitted as numeric IDs.
 
 )";
@@ -182,7 +183,7 @@ NOTE:
     Walk lookup uses the full W-line identifier tuple:
     (sample_id, hap_index, seq_id, seq_start, seq_end).
     Use '*' for seq_start / seq_end values from the original W-line.
-    The current CPU .gfaz format does not store original segment names, so
+    The current .gfaz format reconstructs segment names canonically, so
     segment references are emitted as numeric IDs.
 
 )";
@@ -190,7 +191,7 @@ NOTE:
 
 void print_add_haplotypes_help() {
   std::cout << R"(
-gfaz add-haplotypes - Append path-only or walk-only haplotypes to a CPU GFAZ file
+gfaz add-haplotypes - Append path-only or walk-only haplotypes to a GFAZ file
 
 USAGE:
     gfaz add-haplotypes [OPTIONS] <input.gfaz> <paths_or_walks.gfa> [output.gfaz]
@@ -203,7 +204,7 @@ BEHAVIOR:
     - The append file must contain only H/P lines or only H/W lines.
     - The existing rulebook is reused; no new grammar rules are generated.
     - Appended path/walk names must be unique.
-    - Because the CPU .gfaz format does not store original segment names,
+    - Because the .gfaz format reconstructs segment names canonically,
       appended paths/walks must use numeric segment IDs.
     - If no output path is provided, writes <input>.updated.gfaz.
     - If delta encoding causes appended IDs to collide with the stored rule
