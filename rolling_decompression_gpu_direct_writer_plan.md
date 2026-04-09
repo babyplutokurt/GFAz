@@ -33,7 +33,7 @@ Current behavior:
 - rolling in-memory decompression is still slow because it materializes the full
   traversal in host memory
 - debug timings show the main cost is `chunk device->host copies`, not:
-  - nvcomp inflate
+  - host-side Zstd inflate
   - rule decode
   - rolling decode kernels
   - schedule construction

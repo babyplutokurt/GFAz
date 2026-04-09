@@ -14,7 +14,7 @@
   3. Build System Consolidation
 
   - Refactor CMakeLists.txt to reduce duplication between Python module and CLI source lists.
-  - Centralize compile options, include paths, and feature flags (ENABLE_CUDA, ENABLE_PROFILING, nvComp detection).
+  - Centralize compile options, include paths, and feature flags (ENABLE_CUDA, ENABLE_PROFILING).
   - Ensure CPU-only builds do not pull GPU-only codepaths accidentally.
   - Verify clean builds for both modes from scratch.
 
@@ -38,7 +38,7 @@
       - CPU vs GPU backend responsibilities
       - Python binding capabilities by build mode
       - CLI usage and examples
-  - Document known limitations and optional dependencies (OpenMP, CUDA, nvComp).
+  - Document known limitations and optional dependencies (OpenMP, CUDA).
 
   7. Test Coverage Strengthening
 

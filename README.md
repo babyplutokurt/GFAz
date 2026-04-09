@@ -1,11 +1,11 @@
 # GFAz: State-of-the-Art Graphical Fragment Assembly Compression
 
-A high-performance C++/CUDA library and command-line tool for compressing and decompressing Graphical Fragment Assembly (GFA) files via grammar-based compression. It features both a CPU-only path as well as a GPU-accelerated backend using CUDA and nvComp.
+A high-performance C++/CUDA library and command-line tool for compressing and decompressing Graphical Fragment Assembly (GFA) files via grammar-based compression. It features both a CPU-only path as well as a GPU-accelerated backend using CUDA.
 
 ## Features
 
 - **High Performance**: Achieves up to 20X higher compression ratio compared to Gzip and 15X compared to Zstd, with GB/s-level throughput.
-- **Dual Backends**: Run on CPU (with OpenMP parallelism) or GPU (CUDA + nvComp).
+- **Dual Backends**: Run on CPU (with OpenMP parallelism) or GPU (CUDA).
 - **Python Extension**: Fully featured Python API (`gfa_compression`).
 - **Command-Line Interface**: Easy to use `gfaz` CLI for quick compression/decompression.
 - **Efficient Binary Formats**: Dedicated, magic-number-versioned binary file formats for CPU (`.gfaz`) and GPU (`.gfaz_gpu`).
@@ -42,8 +42,6 @@ First, install the prerequisites using conda:
 conda create -n gfa python=3.11
 conda activate gfa
 conda install -c conda-forge pybind11 numpy
-conda install -c conda-forge nvcomp
-pip install nvidia-libnvcomp-cu12
 ```
 
 Then, clone the repository and initialize submodules:
@@ -119,13 +117,12 @@ if has_gpu:
 
 ## Documentation
 
-- **[Build Guide](BUILD_GUIDE.md)**: Full instructions on how to build the project, including optional dependencies and CMake flags (`ENABLE_CUDA`, `ENABLE_PROFILING`).
+- **[Build Guide](BUILD_GUIDE.md)**: Full instructions on how to build the project, including CMake flags (`ENABLE_CUDA`, `ENABLE_PROFILING`).
 - **[Workflow Reference](workflow.md)**: An overview of the internal architecture, compression pipelines, and serialization contracts.
 
 ## Known Limitations
 
-- The CPU (`.gfaz`) and GPU (`.gfaz_gpu`) binary formats are fundamentally distinct and not interchangeable. 
-- You must specify `--gpu` when decompressing a `.gfaz_gpu` file via the CLI. It does not auto-detect the backend via file magic.
+- CPU and GPU backends now share the same Zstd-based compressed representation internally; the difference is in how the data transforms are computed.
 
 ## License
 

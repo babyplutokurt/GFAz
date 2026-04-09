@@ -16,7 +16,6 @@ Both modes build the Python module (`gfa_compression`) and the CLI (`gfaz`).
 | `ENABLE_CUDA` | `OFF` | Enables CUDA backend, GPU workflows, and GPU Python APIs. |
 | `ENABLE_PROFILING` | `OFF` | Links `gfaz` with gperftools profiler. |
 | `CUDA_PATH` | empty | Optional CUDA toolkit root used to locate `nvcc`. |
-| `NVCOMP_ROOT` | auto | Optional nvComp root. If missing, CMake tries Python package auto-detect. |
 
 Related standard CMake options you may set:
 
@@ -27,9 +26,6 @@ Related standard CMake options you may set:
 
 - OpenMP: optional. If found, CPU k-mer collection is parallelized.
 - CUDA Toolkit: required only when `ENABLE_CUDA=ON`.
-- nvComp: optional in CUDA builds.
-  - If found, GPU metadata/path block compression uses nvComp ZSTD.
-  - If not found, GPU code falls back to CPU ZSTD-compatible path where implemented.
 
 ## Environment Setup
 
@@ -44,8 +40,7 @@ conda install -c conda-forge pybind11 numpy
 Additional GPU-related packages used in some environments:
 
 ```bash
-conda install -c conda-forge nvcomp
-pip install nvidia-libnvcomp-cu12
+conda install -c conda-forge cudatoolkit
 ```
 
 ## Build Instructions
@@ -80,12 +75,6 @@ If CUDA is not in default location, provide `CUDA_PATH`:
 cmake -DENABLE_CUDA=ON -DCUDA_PATH=/usr/local/cuda-12.8 ..
 ```
 
-If nvComp is not auto-detected, set `NVCOMP_ROOT`:
-
-```bash
-cmake -DENABLE_CUDA=ON -DNVCOMP_ROOT=/path/to/nvcomp ..
-```
-
 ## Outputs
 
 - Python extension module: `gfa_compression` (in build tree)
@@ -104,7 +93,6 @@ cmake -DENABLE_CUDA=ON -DNVCOMP_ROOT=/path/to/nvcomp ..
 
 - GPU-friendly graph layout conversion (`GfaGraph <-> GfaGraph_gpu`)
 - GPU compression/decompression workflows and GPU serialization (`.gfaz_gpu`)
-- Optional nvComp acceleration for GPU compressed blocks
 
 ## File Format Versions
 
@@ -116,8 +104,6 @@ Current binary formats in code:
 - GPU format
   - Magic: `GPUG`
   - Version: `1`
-
-CPU and GPU binary formats are distinct; use matching serialize/deserialize paths.
 
 ## Python API Capabilities by Build Mode
 

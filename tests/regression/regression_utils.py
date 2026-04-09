@@ -139,7 +139,6 @@ def is_gpu_runtime_unavailable(exc: Exception) -> bool:
   markers = [
       "cudaError",
       "CUDA",
-      "nvcomp",
       "std::bad_alloc",
       "operation not supported on this OS",
   ]

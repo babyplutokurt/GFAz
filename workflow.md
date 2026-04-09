@@ -2,7 +2,7 @@
 
 This document describes the current end-to-end data flow for CPU and GPU paths.
 
-See also [backend_schema_map.md](/home/kurty/Release/gfa_compression/backend_schema_map.md) for a field-by-field mapping of `GfaGraph`, `CompressedData`, `GfaGraph_gpu`, and `CompressedData_gpu`.
+See also [backend_schema_map.md](/home/kurty/Release/gfa_compression/backend_schema_map.md) for a field-by-field mapping of `GfaGraph`, `CompressedData`, and `GfaGraph_gpu`.
 
 ## High-Level Pipelines
 
@@ -19,7 +19,7 @@ See also [backend_schema_map.md](/home/kurty/Release/gfa_compression/backend_sch
 
 1. Parse GFA text to `GfaGraph`.
 2. Convert to GPU layout (`convert_to_gpu_layout(...)`) -> `GfaGraph_gpu`.
-3. Compress with GPU workflow (`compress_gpu_graph(...)` / `compress_gfa_gpu(...)`) to `CompressedData_gpu`.
+3. Compress with GPU workflow (`compress_gpu_graph(...)` / `compress_gfa_gpu(...)`) to `CompressedData`.
 4. Serialize GPU payload (`serialize_compressed_data_gpu(...)`) to `.gfaz_gpu`.
 5. Deserialize GPU payload (`deserialize_compressed_data_gpu(...)`).
 6. Decompress to GPU layout (`decompress_to_gpu_layout(...)`) -> `GfaGraph_gpu`.
@@ -64,7 +64,7 @@ Main implementations:
 Behavior:
 
 - Uses GPU-oriented flattened structures and kernels for path/rule processing.
-- Metadata/path blocks use nvComp when available (`ENABLE_NVCOMP`), otherwise fallback behavior is used where implemented.
+- Uses GPU-oriented flattened structures and kernels for path/rule processing, then stores the final payload in the shared `CompressedData` Zstd-based format.
 - High-level public Python APIs:
   - `compress_gfa_gpu(...)`
   - `compress_gpu_graph(...)`
@@ -82,11 +82,11 @@ GPU serialization (`include/gpu/serialization_gpu.hpp`, `src/gpu/serialization_g
 
 - Magic: `GPUG`
 - Version: `1`
-- Type: `CompressedData_gpu`
+- Type: `CompressedData`
 
 Important:
 
-- CPU and GPU formats are separate and not interchangeable.
+- CPU and GPU serializers currently share the same `CompressedData` container and serializer implementation.
 - Deserializers validate magic/version and throw on mismatch.
 
 ## CLI Workflow

@@ -33,7 +33,7 @@ namespace {
 
 std::vector<int32_t> expand_sequence_gpu(
                                          const ZstdCompressedBlock &encoded_block,
-                                         const std::vector<uint32_t> &encoded_lengths,
+                                         const std::vector<uint32_t> & /*encoded_lengths*/,
                                          const std::vector<uint32_t> &final_lengths,
                                          const CompressedData &data,
                                          GpuDecompressionOptions options) {

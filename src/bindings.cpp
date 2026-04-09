@@ -857,7 +857,7 @@ PYBIND11_MODULE(gfa_compression, m) {
                                                  options);
       },
       "Parse GFA and run GPU path compression with path metadata compression.\n"
-      "Rules are stored as delta-encoded + nvComp ZSTD compressed first/second "
+      "Rules are stored as delta-encoded Zstd-compressed first/second "
       "element arrays.",
       py::arg("gfa_file_path"), py::arg("num_rounds") = kDefaultRounds,
       py::arg("options") = gpu_compression::GpuCompressionOptions{});
