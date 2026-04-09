@@ -1,6 +1,7 @@
 #include "workflows/decompression_workflow.hpp"
 #include "codec/codec.hpp"
 #include "utils/debug_log.hpp"
+#include "utils/runtime_utils.hpp"
 #include "utils/threading_utils.hpp"
 
 #include <chrono>
@@ -18,15 +19,8 @@ constexpr const char *kDecompressionWarningPrefix =
     "Decompression workflow warning: ";
 
 using Clock = std::chrono::high_resolution_clock;
-
-double elapsed_ms(const Clock::time_point &start,
-                  const Clock::time_point &end) {
-  return std::chrono::duration<double, std::milli>(end - start).count();
-}
-
-double gbps_from_mb(double size_mb, double time_ms) {
-  return (time_ms > 0) ? (size_mb / 1024.0) / (time_ms / 1000.0) : 0;
-}
+using gfz::runtime_utils::elapsed_ms;
+using gfz::runtime_utils::gbps_from_mb;
 
 // Reconstruct 2D sequences from flattened array + lengths
 void reconstruct_sequences(const std::vector<int32_t> &flat,

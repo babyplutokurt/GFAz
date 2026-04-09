@@ -3,8 +3,8 @@
 #include "grammar/packed_2mer.hpp"
 #include "model/compressed_data.hpp"
 #include "model/gfa_graph.hpp"
+#include "utils/runtime_utils.hpp"
 
-#include <chrono>
 #include <string>
 #include <vector>
 
@@ -12,26 +12,7 @@ namespace gfz::compression_utils {
 
 inline constexpr const char *kCompressionErrorPrefix = "Compression workflow error: ";
 
-using Clock = std::chrono::high_resolution_clock;
-
-struct ProcessMemorySnapshot {
-  size_t vm_rss_kb = 0;
-  size_t vm_hwm_kb = 0;
-  size_t rss_anon_kb = 0;
-};
-
-double elapsed_ms(const Clock::time_point &start,
-                  const Clock::time_point &end);
-
-double gbps_from_mb(double size_mb, double time_ms);
-
 size_t total_node_count(const std::vector<std::vector<NodeId>> &sequences);
-
-std::string format_size(size_t bytes);
-
-ProcessMemorySnapshot read_process_memory_snapshot();
-
-void log_memory_checkpoint(const std::string &label);
 
 void append_string_column(const std::vector<std::string> &values,
                           std::string &concatenated,

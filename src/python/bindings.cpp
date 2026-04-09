@@ -248,7 +248,8 @@ PYBIND11_MODULE(gfa_compression, m) {
         py::arg("gfa_file_path"), py::arg("num_rounds") = kDefaultRounds,
         py::arg("freq_threshold") = kDefaultFreqThreshold,
         py::arg("delta_round") = kDefaultDeltaRound,
-        py::arg("num_threads") = kDefaultNumThreads);
+        py::arg("num_threads") = kDefaultNumThreads,
+        py::arg("show_stats") = false);
 
   m.def(
       "decompress",
@@ -585,7 +586,8 @@ PYBIND11_MODULE(gfa_compression, m) {
         py::arg("gfa_file_path"), py::arg("rounds") = kDefaultRounds,
         py::arg("threshold") = kDefaultFreqThreshold,
         py::arg("delta_round") = kDefaultDeltaRound,
-        py::arg("threads") = kDefaultNumThreads);
+        py::arg("threads") = kDefaultNumThreads,
+        py::arg("show_stats") = false);
   m.def(
       "decompress_data",
       [](const CompressedData &data, int threads) {

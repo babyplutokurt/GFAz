@@ -128,7 +128,9 @@ set(GFA_CORE_SOURCES
   src/workflows/add_haplotypes_workflow.cpp
   src/workflows/extraction_workflow.cpp
   src/workflows/compression_workflow.cpp
+  src/workflows/compression_debug.cpp
   src/workflows/decompression_workflow.cpp
+  src/utils/runtime_utils.cpp
   src/codec/codec.cpp
   src/codec/serialization.cpp
   src/io/gfa_writer.cpp

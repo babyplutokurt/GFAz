@@ -1,5 +1,6 @@
 #include "io/gfa_parser.hpp"
 #include "utils/debug_log.hpp"
+#include "utils/runtime_utils.hpp"
 #include "utils/threading_utils.hpp"
 
 #include <algorithm>
@@ -8,7 +9,6 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <fcntl.h>
 #include <iomanip>
 #include <iostream>
@@ -30,59 +30,6 @@ namespace {
 constexpr const char *kParserErrorPrefix = "GFA parser error: ";
 constexpr const char *kParserWarningPrefix = "GFA parser warning: ";
 using Clock = std::chrono::steady_clock;
-
-struct ProcessMemorySnapshot {
-  size_t vm_rss_kb = 0;
-  size_t vm_hwm_kb = 0;
-  size_t rss_anon_kb = 0;
-};
-
-std::string format_memory_size(size_t bytes) {
-  std::ostringstream oss;
-  if (bytes >= 1024 * 1024)
-    oss << std::fixed << std::setprecision(2) << (bytes / (1024.0 * 1024.0))
-        << " MB";
-  else if (bytes >= 1024)
-    oss << std::fixed << std::setprecision(1) << (bytes / 1024.0) << " KB";
-  else
-    oss << bytes << " Bytes";
-  return oss.str();
-}
-
-ProcessMemorySnapshot read_process_memory_snapshot() {
-  ProcessMemorySnapshot snapshot;
-
-  std::ifstream status("/proc/self/status");
-  if (!status)
-    return snapshot;
-
-  std::string line;
-  while (std::getline(status, line)) {
-    auto parse_kb_field = [&](const char *prefix, size_t &out_value) {
-      const std::string_view view(line);
-      const std::string_view key(prefix);
-      if (view.size() < key.size() || view.substr(0, key.size()) != key)
-        return false;
-
-      std::istringstream iss(std::string(view.substr(key.size())));
-      size_t value = 0;
-      std::string unit;
-      if (iss >> value >> unit) {
-        out_value = value;
-        return true;
-      }
-      return false;
-    };
-
-    if (parse_kb_field("VmRSS:", snapshot.vm_rss_kb))
-      continue;
-    if (parse_kb_field("RssAnon:", snapshot.rss_anon_kb))
-      continue;
-    parse_kb_field("VmHWM:", snapshot.vm_hwm_kb);
-  }
-
-  return snapshot;
-}
 
 inline int64_t parse_int64(std::string_view s) {
   if (s.empty())
@@ -194,6 +141,9 @@ inline uint32_t parse_overlap_num(std::string_view overlap_view, char &op) {
 
 } // namespace
 
+using gfz::runtime_utils::format_memory_snapshot;
+using gfz::runtime_utils::read_process_memory_snapshot;
+
 GfaParser::GfaParser() = default;
 
 bool GfaParser::is_numeric(std::string_view s) {
@@ -226,12 +176,10 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
         std::chrono::duration<double, std::milli>(now - phase_start).count();
     phase_start = now;
 
-    const ProcessMemorySnapshot snapshot = read_process_memory_snapshot();
+    const auto snapshot = read_process_memory_snapshot();
     std::cerr << "[GfaParser] " << label << ": " << std::fixed
               << std::setprecision(2) << phase_ms << " ms"
-              << " | RssAnon=" << format_memory_size(snapshot.rss_anon_kb * 1024)
-              << " | VmRSS=" << format_memory_size(snapshot.vm_rss_kb * 1024)
-              << " | VmHWM=" << format_memory_size(snapshot.vm_hwm_kb * 1024)
+              << " | " << format_memory_snapshot(snapshot)
               << std::endl;
   };
 
@@ -476,7 +424,7 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
     const double parse_ms =
         std::chrono::duration<double, std::milli>(parse_end - parse_start)
             .count();
-    const ProcessMemorySnapshot snapshot = read_process_memory_snapshot();
+    const auto snapshot = read_process_memory_snapshot();
     std::cerr << "[GfaParser] segments=" << num_segments
               << ", links=" << num_links << ", paths=" << graph.paths.size()
               << ", walks=" << graph.walks.size()
@@ -492,9 +440,7 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
     }
     std::cerr << ", time=" << std::fixed << std::setprecision(2) << parse_ms
               << " ms"
-              << " | RssAnon=" << format_memory_size(snapshot.rss_anon_kb * 1024)
-              << " | VmRSS=" << format_memory_size(snapshot.vm_rss_kb * 1024)
-              << " | VmHWM=" << format_memory_size(snapshot.vm_hwm_kb * 1024)
+              << " | " << format_memory_snapshot(snapshot)
               << std::endl;
   }
 
