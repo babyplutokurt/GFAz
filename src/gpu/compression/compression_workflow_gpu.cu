@@ -4,6 +4,7 @@
 #include "gpu/compression/metadata_codec_gpu.hpp"
 #include "gpu/compression/traversal_compression_gpu.hpp"
 #include "utils/runtime_utils.hpp"
+#include "utils/threading_utils.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -224,10 +225,11 @@ std::map<uint32_t, uint64_t> build_rulebook(const CompressedData &data) {
 CompressedData compress_gfa_gpu(const std::string &gfa_file_path,
                                 int num_rounds,
                                 GpuCompressionOptions options) {
+  ScopedOMPThreads omp_scope(options.num_threads);
   const auto total_start = Clock::now();
   const auto parse_start = Clock::now();
   GfaParser parser;
-  GfaGraph graph = parser.parse(gfa_file_path);
+  GfaGraph graph = parser.parse(gfa_file_path, options.num_threads);
   const auto parse_end = Clock::now();
   log_gpu_memory_checkpoint("after parse");
 
@@ -252,6 +254,7 @@ CompressedData compress_gfa_gpu(const std::string &gfa_file_path,
 CompressedData compress_gpu_graph(const GfaGraph_gpu &gpu_graph,
                                   int num_rounds,
                                   GpuCompressionOptions options) {
+  ScopedOMPThreads omp_scope(options.num_threads);
   auto compress_start = Clock::now();
   GpuPathCompressionDebugInfo path_debug;
   GpuMetadataCompressionDebugInfo metadata_debug;

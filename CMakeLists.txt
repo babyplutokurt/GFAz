@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Feature toggles
 option(ENABLE_CUDA "Enable GPU acceleration with CUDA" OFF)
 option(ENABLE_PROFILING "Enable gperftools CPU profiling" OFF)
-option(GFAZ_USE_SYSTEM_ZSTD "Use system-installed Zstd instead of vendored copy" OFF)
+option(GFAZ_USE_SYSTEM_ZSTD "Use system-installed Zstd instead of vendored copy" ON)
 option(BUILD_PYTHON_BINDINGS "Build Pybind11 Python bindings" ON)
 option(BUILD_CLI "Build the gfaz CLI executable" ON)
 set(CUDA_PATH "" CACHE PATH "Root directory of the CUDA Toolkit (e.g., /usr/local/cuda)")
@@ -98,14 +98,19 @@ else()
   file(GLOB ZSTD_COMMON_SRC extern/zstd/lib/common/*.c)
   file(GLOB ZSTD_COMPRESS_SRC extern/zstd/lib/compress/*.c)
   file(GLOB ZSTD_DECOMPRESS_SRC extern/zstd/lib/decompress/*.c)
+  set(ZSTD_THREADING_SRC extern/zstd/lib/common/pool.c
+                         extern/zstd/lib/common/threading.c)
 
   add_library(zstd_static STATIC
     ${ZSTD_COMMON_SRC}
     ${ZSTD_COMPRESS_SRC}
     ${ZSTD_DECOMPRESS_SRC}
+    ${ZSTD_THREADING_SRC}
   )
   target_include_directories(zstd_static PUBLIC extern/zstd/lib)
-  target_compile_definitions(zstd_static PRIVATE ZSTD_DISABLE_ASM)
+  target_compile_definitions(zstd_static PRIVATE ZSTD_DISABLE_ASM ZSTD_MULTITHREAD)
+  find_package(Threads REQUIRED)
+  target_link_libraries(zstd_static PRIVATE Threads::Threads)
 
   add_library(gfaz_zstd INTERFACE)
   target_link_libraries(gfaz_zstd INTERFACE zstd_static)

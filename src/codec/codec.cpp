@@ -1,4 +1,5 @@
 #include "codec/codec.hpp"
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 
@@ -119,23 +120,87 @@ int get_zstd_level() {
   }
   return level;
 }
-} // namespace
 
-ZstdCompressedBlock
-zstd_compress_int32_vector(const std::vector<int32_t> &data) {
+int get_zstd_workers() {
+  static int env_workers = -1;
+  if (env_workers == -1) {
+    env_workers = 0;
+    const char *env_val = std::getenv("GFA_COMPRESSION_ZSTD_WORKERS");
+    if (env_val) {
+      int parsed = std::atoi(env_val);
+      if (parsed >= 0) {
+        env_workers = parsed;
+      } else {
+        std::cerr << "Warning: GFA_COMPRESSION_ZSTD_WORKERS=" << env_val
+                  << " is invalid (must be >= 0), using active thread count."
+                  << std::endl;
+      }
+    }
+  }
+
+  if (env_workers > 0) {
+    return env_workers;
+  }
+
+#ifdef _OPENMP
+  return std::max(1, omp_get_max_threads());
+#else
+  return 1;
+#endif
+}
+
+bool configure_zstd_context(ZSTD_CCtx *ctx) {
+  const size_t level_result =
+      ZSTD_CCtx_setParameter(ctx, ZSTD_c_compressionLevel, get_zstd_level());
+  if (ZSTD_isError(level_result)) {
+    std::cerr << "ZSTD parameter setup failed: "
+              << ZSTD_getErrorName(level_result) << std::endl;
+    return false;
+  }
+
+  const int workers = get_zstd_workers();
+  const size_t worker_result =
+      ZSTD_CCtx_setParameter(ctx, ZSTD_c_nbWorkers, workers);
+  if (ZSTD_isError(worker_result)) {
+    static bool warned_unsupported_workers = false;
+    if (!warned_unsupported_workers) {
+      std::cerr
+          << "Warning: ZSTD multithreaded compression is unavailable ("
+          << ZSTD_getErrorName(worker_result)
+          << "); falling back to single-threaded ZSTD." << std::endl;
+      warned_unsupported_workers = true;
+    }
+  }
+
+  return true;
+}
+
+ZstdCompressedBlock zstd_compress_bytes(const void *data, size_t size_bytes) {
   ZstdCompressedBlock block;
-  block.original_size = data.size() * sizeof(int32_t);
+  block.original_size = size_bytes;
 
-  if (data.empty()) {
+  if (size_bytes == 0) {
     return block;
   }
 
-  size_t bound = ZSTD_compressBound(block.original_size);
-  block.payload.resize(bound);
+  ZSTD_CCtx *ctx = ZSTD_createCCtx();
+  if (ctx == nullptr) {
+    std::cerr << "ZSTD compression failed: unable to create compression context"
+              << std::endl;
+    return block;
+  }
 
-  size_t compressed_size =
-      ZSTD_compress(block.payload.data(), block.payload.size(), data.data(),
-                    block.original_size, get_zstd_level());
+  if (!configure_zstd_context(ctx)) {
+    ZSTD_freeCCtx(ctx);
+    return block;
+  }
+
+  const size_t bound = ZSTD_compressBound(size_bytes);
+  block.payload.resize(bound);
+  const size_t compressed_size =
+      ZSTD_compress2(ctx, block.payload.data(), block.payload.size(), data,
+                     size_bytes);
+  ZSTD_freeCCtx(ctx);
 
   if (ZSTD_isError(compressed_size)) {
     std::cerr << "ZSTD compression failed: "
@@ -146,6 +211,12 @@ zstd_compress_int32_vector(const std::vector<int32_t> &data) {
 
   block.payload.resize(compressed_size);
   return block;
+}
+} // namespace
+
+ZstdCompressedBlock
+zstd_compress_int32_vector(const std::vector<int32_t> &data) {
+  return zstd_compress_bytes(data.data(), data.size() * sizeof(int32_t));
 }
 
 std::vector<int32_t>
@@ -171,29 +242,7 @@ zstd_decompress_int32_vector(const ZstdCompressedBlock &block) {
 }
 
 ZstdCompressedBlock zstd_compress_string(const std::string &data) {
-  ZstdCompressedBlock block;
-  block.original_size = data.size();
-
-  if (data.empty()) {
-    return block;
-  }
-
-  size_t bound = ZSTD_compressBound(data.size());
-  block.payload.resize(bound);
-
-  size_t compressed_size =
-      ZSTD_compress(block.payload.data(), block.payload.size(), data.data(),
-                    data.size(), get_zstd_level());
-
-  if (ZSTD_isError(compressed_size)) {
-    std::cerr << "ZSTD compression failed: "
-              << ZSTD_getErrorName(compressed_size) << std::endl;
-    block.payload.clear();
-    return block;
-  }
-
-  block.payload.resize(compressed_size);
-  return block;
+  return zstd_compress_bytes(data.data(), data.size());
 }
 
 std::string zstd_decompress_string(const ZstdCompressedBlock &block) {
@@ -216,29 +265,7 @@ std::string zstd_decompress_string(const ZstdCompressedBlock &block) {
 
 ZstdCompressedBlock
 zstd_compress_uint32_vector(const std::vector<uint32_t> &data) {
-  ZstdCompressedBlock block;
-  block.original_size = data.size() * sizeof(uint32_t);
-
-  if (data.empty()) {
-    return block;
-  }
-
-  size_t bound = ZSTD_compressBound(block.original_size);
-  block.payload.resize(bound);
-
-  size_t compressed_size =
-      ZSTD_compress(block.payload.data(), block.payload.size(), data.data(),
-                    block.original_size, get_zstd_level());
-
-  if (ZSTD_isError(compressed_size)) {
-    std::cerr << "ZSTD compression failed: "
-              << ZSTD_getErrorName(compressed_size) << std::endl;
-    block.payload.clear();
-    return block;
-  }
-
-  block.payload.resize(compressed_size);
-  return block;
+  return zstd_compress_bytes(data.data(), data.size() * sizeof(uint32_t));
 }
 
 std::vector<uint32_t>
@@ -264,29 +291,7 @@ zstd_decompress_uint32_vector(const ZstdCompressedBlock &block) {
 }
 
 ZstdCompressedBlock zstd_compress_char_vector(const std::vector<char> &data) {
-  ZstdCompressedBlock block;
-  block.original_size = data.size();
-
-  if (data.empty()) {
-    return block;
-  }
-
-  size_t bound = ZSTD_compressBound(data.size());
-  block.payload.resize(bound);
-
-  size_t compressed_size =
-      ZSTD_compress(block.payload.data(), block.payload.size(), data.data(),
-                    data.size(), get_zstd_level());
-
-  if (ZSTD_isError(compressed_size)) {
-    std::cerr << "ZSTD compression failed: "
-              << ZSTD_getErrorName(compressed_size) << std::endl;
-    block.payload.clear();
-    return block;
-  }
-
-  block.payload.resize(compressed_size);
-  return block;
+  return zstd_compress_bytes(data.data(), data.size());
 }
 
 std::vector<char>
@@ -519,29 +524,7 @@ std::vector<int64_t> decompress_varint_int64(const ZstdCompressedBlock &block,
 }
 
 ZstdCompressedBlock zstd_compress_float_vector(const std::vector<float> &data) {
-  ZstdCompressedBlock block;
-  block.original_size = data.size() * sizeof(float);
-
-  if (data.empty()) {
-    return block;
-  }
-
-  size_t bound = ZSTD_compressBound(block.original_size);
-  block.payload.resize(bound);
-
-  size_t compressed_size =
-      ZSTD_compress(block.payload.data(), block.payload.size(), data.data(),
-                    block.original_size, get_zstd_level());
-
-  if (ZSTD_isError(compressed_size)) {
-    std::cerr << "ZSTD compression failed: "
-              << ZSTD_getErrorName(compressed_size) << std::endl;
-    block.payload.clear();
-    return block;
-  }
-
-  block.payload.resize(compressed_size);
-  return block;
+  return zstd_compress_bytes(data.data(), data.size() * sizeof(float));
 }
 
 std::vector<float>
@@ -567,4 +550,3 @@ zstd_decompress_float_vector(const ZstdCompressedBlock &block) {
 }
 
 } // namespace Codec
-

@@ -115,7 +115,7 @@ OPTIONS (compress):
     --gpu-rolling-input-chunk-mb <N>
                             Rolling GPU input chunk size in MiB
     --gpu-legacy            Use the old whole-graph GPU compression path
-                             Note: GPU mode ignores --delta/--threshold/--threads
+                             Note: GPU mode ignores --delta/--threshold
     -s, --stats             Show size/statistics summary
     --debug                 Show internal debug/timing output
     -h, --help              Show this help message
@@ -245,7 +245,7 @@ OPTIONS:
     --gpu-rolling-input-chunk-mb <N>
                             Rolling GPU input chunk size in MiB
     --gpu-legacy            Use the old whole-graph GPU compression path
-                             Note: GPU mode ignores --delta/--threshold/--threads
+                             Note: GPU mode ignores --delta/--threshold
     -s, --stats             Show size/statistics summary
     --debug                 Show internal debug/timing output
     -h, --help              Show this help message
@@ -405,9 +405,9 @@ int do_compress(int argc, char *argv[]) {
 
 #ifdef ENABLE_CUDA
   if (use_gpu) {
-    if (delta_round != kDefaultDeltaRound || freq_threshold != kDefaultFreqThreshold ||
-        num_threads != kDefaultNumThreads) {
-      std::cerr << "Note: GPU backend ignores --delta, --threshold, and --threads."
+    if (delta_round != kDefaultDeltaRound ||
+        freq_threshold != kDefaultFreqThreshold) {
+      std::cerr << "Note: GPU backend ignores --delta and --threshold."
                 << std::endl;
     }
     if (use_gpu_legacy && gpu_chunk_mb > 0) {
@@ -462,6 +462,7 @@ int do_compress(int argc, char *argv[]) {
     if (use_gpu) {
       const auto workflow_start = Clock::now();
       gpu_compression::GpuCompressionOptions gpu_options;
+      gpu_options.num_threads = num_threads;
       gpu_options.force_full_device_legacy = use_gpu_legacy;
       gpu_options.force_rolling_scheduler = !use_gpu_legacy;
       if (gpu_chunk_mb > 0) {

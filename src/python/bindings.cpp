@@ -830,6 +830,8 @@ PYBIND11_MODULE(gfa_compression, m) {
       .def_readwrite(
           "rolling_input_chunk_bytes",
           &gpu_compression::GpuCompressionOptions::rolling_input_chunk_bytes)
+      .def_readwrite("num_threads",
+                     &gpu_compression::GpuCompressionOptions::num_threads)
       .def_property(
           "rolling_chunk_bytes",
           [](gpu_compression::GpuCompressionOptions &options) {
