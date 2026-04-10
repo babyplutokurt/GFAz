@@ -201,7 +201,7 @@ class GFACompressor:
         print(f"[GPU] Rules: {self.compressed_data_gpu.total_rules():,}")
         return self.compressed_data_gpu
 
-    def decompress_gpu(self, traversals_per_chunk: int = 128, force_legacy: bool = False):
+    def decompress_gpu(self, traversals_per_chunk: int = 4096, force_legacy: bool = False):
         """GPU-accelerated decompression."""
         if self.compressed_data_gpu is None:
             print("Error: No GPU data. Call compress_gpu() first.")

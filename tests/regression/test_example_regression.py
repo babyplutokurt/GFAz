@@ -123,7 +123,7 @@ def print_header(title: str):
 
 
 def print_result(name: str, elapsed: float, details: str = ""):
-  print(f"PASS {name} ({elapsed:.3f}s)")
+  print(f"✅ PASS {name} ({elapsed:.3f}s)")
   if details:
     print(f"  {details}")
 
@@ -203,12 +203,12 @@ def serialize_gpu_roundtrip(compressed, prefix: str):
 
 def assert_host_graph_matches(original_graph, actual_graph, case_name: str):
   if not gfa_lib.verify_round_trip(original_graph, actual_graph):
-    raise AssertionError(f"{case_name} verification failed")
+    raise AssertionError(f"❌ {case_name} verification failed")
 
 
 def assert_gpu_graph_matches(original_gpu_graph, actual_gpu_graph, case_name: str):
   if not gfa_lib.verify_gpu_round_trip(original_gpu_graph, actual_gpu_graph):
-    raise AssertionError(f"{case_name} verification failed")
+    raise AssertionError(f"❌ {case_name} verification failed")
 
 
 def test_cpu_legacy_roundtrip(args, original_graph):
@@ -369,8 +369,6 @@ def test_gpu_direct_writer_roundtrip(args, original_graph, cli_path: Path):
             str(cli_path),
             "decompress",
             "--gpu",
-            "--gpu-traversals",
-            str(args.gpu_traversals_per_chunk),
             str(gfaz_path),
             str(out_path),
         ]
@@ -527,7 +525,7 @@ def main():
   total = time.perf_counter() - started
 
   print_header("Regression Summary")
-  print(f"PASS all requested regressions in {total:.3f}s")
+  print(f"✅ PASS all requested regressions in {total:.3f}s")
   return 0
 
 

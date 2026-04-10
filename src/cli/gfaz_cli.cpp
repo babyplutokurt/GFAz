@@ -36,7 +36,6 @@ constexpr int kDefaultNumThreads = 0;
 using Clock = std::chrono::steady_clock;
 constexpr int kOptGpuChunkMb = 1000;
 constexpr int kOptGpuLegacy = 1001;
-constexpr int kOptGpuTraversalsPerChunk = 1002;
 constexpr int kOptDebug = 1003;
 constexpr int kOptGpuMaxExpandedChunkMb = 1004;
 
@@ -125,7 +124,6 @@ OPTIONS (decompress):
     -l, --legacy            Use the legacy CPU path:
                              CompressedData -> GfaGraph -> write_gfa
     -g, --gpu               Use GPU backend (if available)
-    --gpu-traversals <N>    Traversals expanded per rolling GPU chunk
     --gpu-max-expanded-chunk-mb <N>
                             Maximum expanded output size per rolling GPU chunk
     --gpu-legacy            Use the old whole-graph GPU decompression path
@@ -153,7 +151,6 @@ EXAMPLES:
     gfaz decompress input.gfaz                   # -> input.gfa (removes .gfaz)
     gfaz decompress --gpu input.gfaz             # -> input.gfa
     gfaz decompress input.gfaz output.gfa        # -> output.gfa
-    gfaz decompress --gpu --gpu-traversals 256 input.gfaz
     gfaz decompress --gpu --gpu-max-expanded-chunk-mb 128 input.gfaz
     gfaz decompress --gpu --gpu-legacy input.gfaz
 
@@ -276,7 +273,6 @@ OPTIONS:
     -l, --legacy            Use the legacy CPU path:
                              CompressedData -> GfaGraph -> write_gfa
     -g, --gpu               Use GPU backend (if available)
-    --gpu-traversals <N>    Traversals expanded per rolling GPU chunk
     --gpu-max-expanded-chunk-mb <N>
                             Maximum expanded output size per rolling GPU chunk
     --gpu-legacy            Use the old whole-graph GPU decompression path
@@ -289,7 +285,6 @@ EXAMPLES:
     gfaz decompress input.gfaz                   # -> input.gfa
     gfaz decompress --gpu input.gfaz             # -> input.gfa
     gfaz decompress input.gfaz output.gfa
-    gfaz decompress --gpu --gpu-traversals 256 input.gfaz
     gfaz decompress --gpu --gpu-max-expanded-chunk-mb 128 input.gfaz
     gfaz decompress --gpu --gpu-legacy input.gfaz
 
@@ -548,15 +543,12 @@ int do_decompress(int argc, char *argv[]) {
   bool use_gpu_legacy = false;
   bool show_stats = false;
   bool debug = false;
-  unsigned long long gpu_traversals_per_chunk = 128;
   unsigned long long gpu_max_expanded_chunk_mb =
       gpu_decompression::kDefaultMaxExpandedChunkBytes / (1024ull * 1024ull);
 
   static struct option long_options[] = {{"threads", required_argument, 0, 'j'},
                                          {"legacy", no_argument, 0, 'l'},
                                          {"gpu", no_argument, 0, 'g'},
-                                         {"gpu-traversals", required_argument, 0,
-                                          kOptGpuTraversalsPerChunk},
                                          {"gpu-max-expanded-chunk-mb",
                                           required_argument, 0,
                                           kOptGpuMaxExpandedChunkMb},
@@ -579,18 +571,6 @@ int do_decompress(int argc, char *argv[]) {
       break;
     case 'g':
       use_gpu = true;
-      break;
-    case kOptGpuTraversalsPerChunk:
-      if (!parse_ull_arg("--gpu-traversals", optarg,
-                         gpu_traversals_per_chunk)) {
-        return 1;
-      }
-      if (gpu_traversals_per_chunk >
-          std::numeric_limits<uint32_t>::max()) {
-        std::cerr << "Error: --gpu-traversals exceeds uint32 range"
-                  << std::endl;
-        return 1;
-      }
       break;
     case kOptGpuMaxExpandedChunkMb:
       if (!parse_ull_arg("--gpu-max-expanded-chunk-mb", optarg,
@@ -626,13 +606,12 @@ int do_decompress(int argc, char *argv[]) {
   std::string output_path;
 
   if (!use_gpu &&
-      (gpu_traversals_per_chunk != 128 ||
-       gpu_max_expanded_chunk_mb !=
+      (gpu_max_expanded_chunk_mb !=
            gpu_decompression::kDefaultMaxExpandedChunkBytes /
                (1024ull * 1024ull) ||
        use_gpu_legacy)) {
-    std::cerr << "Error: --gpu-traversals, --gpu-max-expanded-chunk-mb, and "
-                 "--gpu-legacy require --gpu\n";
+    std::cerr << "Error: --gpu-max-expanded-chunk-mb and --gpu-legacy "
+                 "require --gpu\n";
     return 1;
   }
 
@@ -669,12 +648,11 @@ int do_decompress(int argc, char *argv[]) {
               << std::endl;
   }
   if (use_gpu && use_gpu_legacy &&
-      (gpu_traversals_per_chunk != 128 ||
-       gpu_max_expanded_chunk_mb !=
+      (gpu_max_expanded_chunk_mb !=
            gpu_decompression::kDefaultMaxExpandedChunkBytes /
                (1024ull * 1024ull))) {
-    std::cerr << "Note: --gpu-traversals and --gpu-max-expanded-chunk-mb are "
-                 "ignored with --gpu-legacy."
+    std::cerr << "Note: --gpu-max-expanded-chunk-mb is ignored with "
+                 "--gpu-legacy."
               << std::endl;
   }
 #endif
@@ -692,8 +670,6 @@ int do_decompress(int argc, char *argv[]) {
                                  : "rolling traversal expansion")
               << std::endl;
     if (!use_gpu_legacy) {
-      std::cout << "GPU Traversals/Chunk: " << gpu_traversals_per_chunk
-                << std::endl;
       std::cout << "GPU Max Expanded Chunk: "
                 << gpu_max_expanded_chunk_mb << " MiB" << std::endl;
     }
@@ -722,8 +698,6 @@ int do_decompress(int argc, char *argv[]) {
     if (use_gpu) {
       const auto deserialize_start = Clock::now();
       gpu_decompression::GpuDecompressionOptions gpu_options;
-      gpu_options.traversals_per_chunk =
-          static_cast<uint32_t>(gpu_traversals_per_chunk);
       gpu_options.max_expanded_chunk_bytes =
           static_cast<size_t>(gpu_max_expanded_chunk_mb) * 1024ull * 1024ull;
       gpu_options.use_legacy_full_decompression = use_gpu_legacy;

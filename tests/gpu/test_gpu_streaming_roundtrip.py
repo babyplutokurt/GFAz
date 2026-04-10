@@ -136,12 +136,6 @@ def parse_args():
         help="Compression rolling chunk size in GiB (e.g. 0.5 for 512MiB)",
     )
     parser.add_argument(
-        "--traversals-per-chunk",
-        type=int,
-        default=16,
-        help="Rolling GPU decompression traversals per chunk (default: 16)",
-    )
-    parser.add_argument(
         "--stats",
         action="store_true",
         help="Pass --stats to gfaz decompress for detailed timing output",
@@ -158,7 +152,6 @@ def main():
     print(f"Rounds:     {args.rounds}")
     print("Mode:       rolling compression + rolling direct writer")
     print(f"Chunk GiB:  {args.chunk_gb}")
-    print(f"Traversals: {args.traversals_per_chunk}")
     print(f"CLI:        {gfaz_bin}")
 
     original_file_size = os.path.getsize(args.gfa_file)
@@ -220,8 +213,6 @@ def main():
             str(gfaz_bin),
             "decompress",
             "--gpu",
-            "--gpu-traversals",
-            str(args.traversals_per_chunk),
         ]
         if args.stats:
             cmd.append("--stats")
