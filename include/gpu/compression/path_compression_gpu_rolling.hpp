@@ -5,10 +5,9 @@
 
 namespace gpu_compression {
 
-CompressedData run_path_compression_gpu_rolling(const FlattenedPaths &paths,
-                                                uint32_t num_paths,
-                                                int num_rounds,
-                                                size_t chunk_bytes);
+CompressedData compress_gpu_traversals_rolling_scheduler(
+    const FlattenedPaths &paths, uint32_t num_paths, int num_rounds,
+    size_t chunk_bytes, GpuPathCompressionDebugInfo *debug_info);
 
 } // namespace gpu_compression
 

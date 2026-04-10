@@ -1,11 +1,8 @@
 #include "io/gfa_parser.hpp"
-#include "gpu/core/codec_gpu.cuh"
 #include "gpu/compression/compression_workflow_gpu_internal.hpp"
 #include "gpu/compression/compression_workflow_gpu.hpp"
 #include "gpu/compression/metadata_codec_gpu.hpp"
-#include "gpu/core/path_chunk_planner.hpp"
-#include "gpu/compression/path_compression_gpu_legacy.hpp"
-#include "gpu/compression/path_compression_gpu_rolling.hpp"
+#include "gpu/compression/traversal_compression_gpu.hpp"
 #include "utils/runtime_utils.hpp"
 
 #include <algorithm>
@@ -90,7 +87,7 @@ std::string format_ratio(size_t original_bytes, size_t compressed_bytes) {
 }
 
 void print_gpu_path_compression_debug(const GpuPathCompressionDebugInfo &info) {
-  std::cerr << "[GPU Path Compress] === " << info.mode_label << " ("
+  std::cerr << "[GPU Path Compress] === " << info.path_label << " ("
             << std::fixed << std::setprecision(1)
             << (info.traversal_bytes / (1024.0 * 1024.0)) << " MB, "
             << info.num_traversals << " traversals";
@@ -187,58 +184,8 @@ void set_gpu_compression_debug(bool enabled) {
 CompressedData run_path_compression_gpu(
     const FlattenedPaths &paths, uint32_t num_paths, int num_rounds,
     GpuCompressionOptions options, GpuPathCompressionDebugInfo *debug_info) {
-  const size_t traversal_bytes = paths.data.size() * sizeof(int32_t);
-  const size_t chunk_bytes =
-      (options.rolling_chunk_bytes > 0) ? options.rolling_chunk_bytes
-                                        : default_rolling_chunk_bytes();
-
-  if (scheduler_debug_enabled()) {
-    std::cerr << "[GPU Scheduler] traversal=" << format_size(traversal_bytes)
-              << ", chunk_budget=" << format_size(chunk_bytes)
-              << ", requested_chunk="
-              << (options.rolling_chunk_bytes > 0
-                      ? format_size(options.rolling_chunk_bytes)
-                      : std::string("default"))
-              << ", policy="
-              << (options.force_rolling_scheduler
-                      ? "force-rolling"
-                      : (options.force_full_device_legacy ? "force-legacy"
-                                                          : "auto"))
-              << std::endl;
-  }
-
-  if (options.force_full_device_legacy) {
-    if (scheduler_debug_enabled()) {
-      std::cerr << "[GPU Scheduler] selected mode: legacy whole-device"
-                << std::endl;
-    }
-    return run_path_compression_gpu_full_device(paths, num_paths, num_rounds,
-                                                debug_info);
-  }
-
-  if (options.force_rolling_scheduler) {
-    if (scheduler_debug_enabled()) {
-      std::cerr << "[GPU Scheduler] selected mode: rolling scheduler"
-                << std::endl;
-    }
-    return run_path_compression_gpu_rolling(paths, num_paths, num_rounds,
-                                            chunk_bytes, debug_info);
-  }
-
-  if (traversal_bytes <= chunk_bytes) {
-    if (scheduler_debug_enabled()) {
-      std::cerr << "[GPU Scheduler] selected mode: legacy whole-device"
-                << " (fits chunk budget)" << std::endl;
-    }
-    return run_path_compression_gpu_full_device(paths, num_paths, num_rounds,
-                                                debug_info);
-  }
-  if (scheduler_debug_enabled()) {
-    std::cerr << "[GPU Scheduler] selected mode: rolling scheduler"
-              << " (exceeds chunk budget)" << std::endl;
-  }
-  return run_path_compression_gpu_rolling(paths, num_paths, num_rounds,
-                                          chunk_bytes, debug_info);
+  return compress_gpu_traversals(paths, num_paths, num_rounds, options,
+                                 debug_info);
 }
 
 

@@ -322,17 +322,14 @@ void collapse_histogram_levels(
 
 } // namespace
 
-CompressedData run_path_compression_gpu_rolling(const FlattenedPaths &paths,
-                                                uint32_t num_paths,
-                                                int num_rounds,
-                                                size_t chunk_bytes,
-                                                GpuPathCompressionDebugInfo
-                                                    *debug_info) {
+CompressedData compress_gpu_traversals_rolling_scheduler(
+    const FlattenedPaths &paths, uint32_t num_paths, int num_rounds,
+    size_t chunk_bytes, GpuPathCompressionDebugInfo *debug_info) {
   CompressedData result;
   const auto total_start = Clock::now();
 
   if (debug_info != nullptr) {
-    debug_info->mode_label = "rolling scheduler";
+    debug_info->path_label = "rolling scheduler";
     debug_info->traversal_bytes = paths.data.size() * sizeof(int32_t);
     debug_info->num_traversals = paths.lengths.size();
     debug_info->chunk_bytes = chunk_bytes;

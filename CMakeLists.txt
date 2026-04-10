@@ -150,6 +150,7 @@ set(GFA_CUDA_SOURCES
 
   # GPU compression pipeline
   src/gpu/compression/compression_workflow_gpu.cu
+  src/gpu/compression/traversal_compression_gpu.cu
   src/gpu/compression/path_compression_gpu_legacy.cu
   src/gpu/compression/path_compression_gpu_rolling.cu
   src/gpu/compression/path_rulebook_gpu.cu
@@ -159,6 +160,7 @@ set(GFA_CUDA_SOURCES
   # GPU decompression pipeline
   src/gpu/decompression/decompression_workflow_gpu.cu
   src/gpu/decompression/decompression_primitives_gpu.cu
+  src/gpu/decompression/traversal_decode_gpu.cu
   src/gpu/decompression/path_decompression_gpu_plan.cu
   src/gpu/decompression/path_decompression_gpu_legacy.cu
   src/gpu/decompression/path_decompression_gpu_rolling.cu

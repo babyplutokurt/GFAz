@@ -26,7 +26,7 @@ struct GpuGrammarRoundDebugInfo {
 };
 
 struct GpuPathCompressionDebugInfo {
-  std::string mode_label;
+  std::string path_label;
   size_t traversal_bytes = 0;
   size_t num_traversals = 0;
   size_t chunk_bytes = 0;

@@ -30,13 +30,4 @@ GpuTraversalPayload prepare_gpu_traversal_payload(
     const ZstdCompressedBlock &encoded_block,
     const std::vector<uint32_t> &final_lengths);
 
-std::vector<int32_t> decode_gpu_traversal_to_host(
-    const GpuTraversalPayload &payload, const GpuTraversalRulebook &rulebook,
-    GpuDecompressionOptions options);
-
-void stream_gpu_traversal_to_host(
-    const GpuTraversalPayload &payload, const GpuTraversalRulebook &rulebook,
-    GpuDecompressionOptions options, RollingPathChunkConsumer consumer,
-    RollingPathStreamOptions stream_options = {});
-
 } // namespace gpu_decompression

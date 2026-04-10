@@ -49,16 +49,14 @@ void finalize_traversal_columns(CompressedData &data,
 
 } // namespace
 
-CompressedData run_path_compression_gpu_full_device(const FlattenedPaths &paths,
-                                                    uint32_t num_paths,
-                                                    int num_rounds,
-                                                    GpuPathCompressionDebugInfo
-                                                        *debug_info) {
+CompressedData compress_gpu_traversals_legacy_whole_device(
+    const FlattenedPaths &paths, uint32_t num_paths, int num_rounds,
+    GpuPathCompressionDebugInfo *debug_info) {
   CompressedData result;
   const auto total_start = Clock::now();
 
   if (debug_info != nullptr) {
-    debug_info->mode_label = "legacy whole-device";
+    debug_info->path_label = "legacy whole-device";
     debug_info->traversal_bytes = paths.data.size() * sizeof(int32_t);
     debug_info->num_traversals = paths.lengths.size();
     const size_t path_count = std::min<size_t>(num_paths, paths.lengths.size());
