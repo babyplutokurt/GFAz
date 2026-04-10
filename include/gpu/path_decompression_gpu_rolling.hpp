@@ -1,13 +1,13 @@
 #ifndef PATH_DECOMPRESSION_GPU_ROLLING_HPP
 #define PATH_DECOMPRESSION_GPU_ROLLING_HPP
 
-#include "gpu/codec_gpu.cuh"
+#include "gpu/decompression_workflow_gpu.hpp"
+#include "gpu/path_decompression_gpu_plan.hpp"
 
 #include <cuda_runtime.h>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <thrust/device_vector.h>
 #include <vector>
 
 namespace gpu_decompression {
@@ -35,19 +35,6 @@ struct RollingPathPinnedHostBuffer {
   cudaEvent_t ready = nullptr;
 };
 
-struct RollingPathDecodeContext {
-  gpu_codec::RollingDecodeSchedule schedule;
-  std::vector<uint32_t> lengths;
-  thrust::device_vector<int64_t> d_output_offsets;
-  thrust::device_vector<int64_t> d_rule_offsets;
-  thrust::device_vector<int64_t> d_rule_sizes;
-  thrust::device_vector<uint64_t> d_offs_final;
-  thrust::device_vector<int32_t> d_expanded_rules;
-  thrust::device_vector<int32_t> d_chunk_workspace;
-  uint32_t min_rule_id = 0;
-  uint32_t max_rule_id = 0;
-};
-
 struct RollingPathStreamOptions {
   size_t num_host_buffers = 2;
   size_t max_expanded_chunk_bytes = kDefaultMaxExpandedChunkBytes;
@@ -56,24 +43,18 @@ struct RollingPathStreamOptions {
 using RollingPathChunkConsumer =
     std::function<void(const RollingPathPinnedHostBuffer &)>;
 
-RollingPathDecodeContext prepare_rolling_path_decode(
-    const thrust::device_vector<int32_t> &d_encoded_path,
-    const thrust::device_vector<int32_t> &d_rules_first,
-    const thrust::device_vector<int32_t> &d_rules_second,
-    uint32_t min_rule_id, size_t num_rules,
-    const thrust::device_vector<uint32_t> &d_lens_final,
-    uint32_t traversals_per_chunk, size_t max_expanded_chunk_bytes);
-
 void decode_rolling_path_chunk_to_device(
     const thrust::device_vector<int32_t> &d_encoded_path,
-    RollingPathDecodeContext &context, size_t chunk_index);
+    const RollingPathDecodePlan &plan,
+    thrust::device_vector<int32_t> &d_chunk_workspace, size_t chunk_index);
 
-void prepare_rolling_path_host_buffer(const RollingPathDecodeContext &context,
+void prepare_rolling_path_host_buffer(const RollingPathDecodePlan &plan,
                                       size_t chunk_index,
                                       RollingPathHostBuffer &host_buffer);
 
 void copy_rolling_path_chunk_to_host_buffer(
-    const RollingPathDecodeContext &context, size_t chunk_index,
+    const RollingPathDecodePlan &plan,
+    const thrust::device_vector<int32_t> &d_chunk_workspace, size_t chunk_index,
     RollingPathHostBuffer &host_buffer);
 
 void ensure_rolling_path_pinned_host_buffer_capacity(
@@ -83,7 +64,8 @@ void release_rolling_path_pinned_host_buffer(
     RollingPathPinnedHostBuffer &host_buffer);
 
 void copy_rolling_path_chunk_to_pinned_host_async(
-    const RollingPathDecodeContext &context, size_t chunk_index,
+    const RollingPathDecodePlan &plan,
+    const thrust::device_vector<int32_t> &d_chunk_workspace, size_t chunk_index,
     RollingPathPinnedHostBuffer &host_buffer, cudaStream_t copy_stream);
 
 void wait_for_rolling_path_pinned_host_buffer(

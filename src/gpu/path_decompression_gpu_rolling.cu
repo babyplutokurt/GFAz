@@ -13,11 +13,6 @@
 #include <stdexcept>
 #include <thread>
 #include <thrust/copy.h>
-#include <thrust/functional.h>
-#include <thrust/iterator/transform_iterator.h>
-#include <thrust/reduce.h>
-#include <thrust/scan.h>
-#include <thrust/transform_reduce.h>
 
 namespace gpu_decompression {
 
@@ -73,187 +68,41 @@ struct ScopedCudaEvent {
   ScopedCudaEvent &operator=(const ScopedCudaEvent &) = delete;
 };
 
-struct FinalExpansionSizeOp {
-  const int64_t *d_rule_sizes;
-  uint32_t min_rule_id;
-  uint32_t max_rule_id;
-
-  __host__ __device__ FinalExpansionSizeOp(const int64_t *sizes,
-                                           uint32_t min_id, uint32_t max_id)
-      : d_rule_sizes(sizes), min_rule_id(min_id), max_rule_id(max_id) {}
-
-  __host__ __device__ __forceinline__ int64_t operator()(int32_t val) const {
-    uint32_t abs_val = static_cast<uint32_t>(val >= 0 ? val : -val);
-    if (abs_val >= min_rule_id && abs_val < max_rule_id) {
-      return d_rule_sizes[abs_val - min_rule_id];
-    }
-    return 1;
-  }
-};
-
-gpu_codec::RollingDecodeSchedule build_passthrough_schedule(
-    const thrust::device_vector<uint32_t> &d_lens_final, size_t encoded_size,
-    uint32_t traversals_per_chunk, size_t max_expanded_chunk_bytes) {
-  gpu_codec::RollingDecodeSchedule schedule;
-  const uint32_t num_segs_final = static_cast<uint32_t>(d_lens_final.size());
-  if (num_segs_final == 0) {
-    schedule.output_size = static_cast<int64_t>(encoded_size);
-    return schedule;
-  }
-
-  thrust::device_vector<uint64_t> d_offs_final(num_segs_final);
-  thrust::exclusive_scan(d_lens_final.begin(), d_lens_final.end(),
-                         d_offs_final.begin(), uint64_t(0));
-
-  schedule.expanded_offsets.resize(num_segs_final);
-  thrust::copy(d_offs_final.begin(), d_offs_final.end(),
-               schedule.expanded_offsets.begin());
-  schedule.encoded_offsets.assign(schedule.expanded_offsets.begin(),
-                                  schedule.expanded_offsets.end());
-  schedule.output_size = static_cast<int64_t>(encoded_size);
-
-  uint32_t current_seg_begin = 0;
-  for (uint32_t i = 0; i < num_segs_final; ++i) {
-    const int64_t seg_expanded_start =
-        static_cast<int64_t>(schedule.expanded_offsets[current_seg_begin]);
-    const int64_t next_expanded_start =
-        (i + 1 < num_segs_final)
-            ? static_cast<int64_t>(schedule.expanded_offsets[i + 1])
-            : static_cast<int64_t>(encoded_size);
-    const int64_t size_so_far = next_expanded_start - seg_expanded_start;
-
-    bool split = false;
-    if (i - current_seg_begin >= traversals_per_chunk) {
-      split = true;
-    }
-    if (size_so_far >= static_cast<int64_t>(max_expanded_chunk_bytes) &&
-        i > current_seg_begin) {
-      split = true;
-    }
-    if (i + 1 == num_segs_final) {
-      split = true;
-    }
-
-    if (!split) {
-      continue;
-    }
-
-    const uint32_t chunk_seg_end = i + 1;
-    const int64_t chunk_begin =
-        static_cast<int64_t>(schedule.expanded_offsets[current_seg_begin]);
-    schedule.chunks.push_back({current_seg_begin, chunk_seg_end, chunk_begin,
-                               next_expanded_start, chunk_begin,
-                               next_expanded_start});
-    current_seg_begin = chunk_seg_end;
-  }
-
-  return schedule;
-}
-
-void populate_rolling_path_host_buffer_metadata(
-    const RollingPathDecodeContext &context, size_t chunk_index,
-    uint32_t &segment_begin, uint32_t &segment_end, int64_t &expanded_begin,
-    int64_t &expanded_end, size_t &node_count, std::vector<uint32_t> &lengths) {
-  const auto &chunk = context.schedule.chunks.at(chunk_index);
-  node_count = static_cast<size_t>(chunk.expanded_count());
-  segment_begin = chunk.segment_begin;
-  segment_end = chunk.segment_end;
-  expanded_begin = chunk.expanded_begin;
-  expanded_end = chunk.expanded_end;
-  lengths.assign(context.lengths.begin() + chunk.segment_begin,
-                 context.lengths.begin() + chunk.segment_end);
-}
-
 } // namespace
-
-RollingPathDecodeContext prepare_rolling_path_decode(
-    const thrust::device_vector<int32_t> &d_encoded_path,
-    const thrust::device_vector<int32_t> &d_rules_first,
-    const thrust::device_vector<int32_t> &d_rules_second,
-    uint32_t min_rule_id, size_t num_rules,
-    const thrust::device_vector<uint32_t> &d_lens_final,
-    uint32_t traversals_per_chunk, size_t max_expanded_chunk_bytes) {
-  RollingPathDecodeContext context;
-  context.min_rule_id = min_rule_id;
-  context.max_rule_id = min_rule_id + static_cast<uint32_t>(num_rules);
-  context.lengths.resize(d_lens_final.size());
-  thrust::copy(d_lens_final.begin(), d_lens_final.end(), context.lengths.begin());
-
-  if (num_rules == 0 || d_encoded_path.empty()) {
-    context.schedule = build_passthrough_schedule(
-        d_lens_final, d_encoded_path.size(), traversals_per_chunk,
-        max_expanded_chunk_bytes);
-    context.d_offs_final = thrust::device_vector<uint64_t>(
-        context.schedule.expanded_offsets.begin(),
-        context.schedule.expanded_offsets.end());
-    return context;
-  }
-
-  context.d_rule_sizes.resize(num_rules);
-  gpu_codec::compute_rule_final_sizes_device_vec(
-      d_rules_first, d_rules_second, context.d_rule_sizes, min_rule_id);
-
-  context.d_rule_offsets.resize(num_rules);
-  thrust::exclusive_scan(context.d_rule_sizes.begin(), context.d_rule_sizes.end(),
-                         context.d_rule_offsets.begin());
-
-  const int64_t total_expanded_size =
-      context.d_rule_offsets.back() + context.d_rule_sizes.back();
-  context.d_expanded_rules.resize(total_expanded_size);
-  gpu_codec::expand_rules_to_buffer_device_vec(
-      d_rules_first, d_rules_second, context.d_rule_offsets,
-      context.d_expanded_rules, min_rule_id);
-
-  context.d_output_offsets.resize(d_encoded_path.size());
-  FinalExpansionSizeOp size_op(
-      thrust::raw_pointer_cast(context.d_rule_sizes.data()), min_rule_id,
-      context.max_rule_id);
-  auto size_iter =
-      thrust::make_transform_iterator(d_encoded_path.begin(), size_op);
-  const int64_t output_size = thrust::transform_reduce(
-      d_encoded_path.begin(), d_encoded_path.end(), size_op, int64_t(0),
-      thrust::plus<int64_t>());
-  thrust::exclusive_scan(size_iter, size_iter + d_encoded_path.size(),
-                         context.d_output_offsets.begin());
-
-  context.schedule = gpu_codec::build_rolling_decode_schedule(
-      context.d_output_offsets, d_lens_final, d_encoded_path.size(),
-      output_size, traversals_per_chunk, max_expanded_chunk_bytes);
-  context.d_offs_final = thrust::device_vector<uint64_t>(
-      context.schedule.expanded_offsets.begin(),
-      context.schedule.expanded_offsets.end());
-
-  return context;
-}
 
 void decode_rolling_path_chunk_to_device(
     const thrust::device_vector<int32_t> &d_encoded_path,
-    RollingPathDecodeContext &context, size_t chunk_index) {
-  const auto &chunk = context.schedule.chunks.at(chunk_index);
-  if (context.d_rule_sizes.empty()) {
-    context.d_chunk_workspace.resize(chunk.expanded_count());
+    const RollingPathDecodePlan &plan,
+    thrust::device_vector<int32_t> &d_chunk_workspace, size_t chunk_index) {
+  const auto &chunk = plan.schedule.chunks.at(chunk_index);
+  if (plan.d_rule_sizes.empty()) {
+    d_chunk_workspace.resize(chunk.expanded_count());
     thrust::copy(
         d_encoded_path.begin() + static_cast<std::ptrdiff_t>(chunk.encoded_begin),
         d_encoded_path.begin() + static_cast<std::ptrdiff_t>(chunk.encoded_end),
-        context.d_chunk_workspace.begin());
+        d_chunk_workspace.begin());
     return;
   }
   gpu_codec::expand_and_inverse_decode_chunk_device(
-      d_encoded_path, context.d_output_offsets, context.d_expanded_rules,
-      context.d_rule_offsets, context.d_rule_sizes, context.d_chunk_workspace,
-      context.d_offs_final, chunk.encoded_begin, chunk.encoded_end,
+      d_encoded_path, plan.d_output_offsets, plan.d_expanded_rules,
+      plan.d_rule_offsets, plan.d_rule_sizes, d_chunk_workspace,
+      plan.d_offs_final, chunk.encoded_begin, chunk.encoded_end,
       chunk.expanded_begin, chunk.expanded_end, chunk.segment_begin,
-      chunk.segment_end, context.min_rule_id, context.max_rule_id,
-      static_cast<size_t>(context.schedule.output_size));
+      chunk.segment_end, plan.min_rule_id, plan.max_rule_id,
+      static_cast<size_t>(plan.schedule.output_size));
 }
 
-void prepare_rolling_path_host_buffer(const RollingPathDecodeContext &context,
+void prepare_rolling_path_host_buffer(const RollingPathDecodePlan &plan,
                                       size_t chunk_index,
                                       RollingPathHostBuffer &host_buffer) {
-  populate_rolling_path_host_buffer_metadata(
-      context, chunk_index, host_buffer.segment_begin, host_buffer.segment_end,
-      host_buffer.expanded_begin, host_buffer.expanded_end,
-      host_buffer.node_count, host_buffer.lengths);
+  const RollingPathChunkMetadata metadata =
+      describe_rolling_path_chunk(plan, chunk_index);
+  host_buffer.segment_begin = metadata.segment_begin;
+  host_buffer.segment_end = metadata.segment_end;
+  host_buffer.expanded_begin = metadata.expanded_begin;
+  host_buffer.expanded_end = metadata.expanded_end;
+  host_buffer.node_count = metadata.node_count;
+  host_buffer.lengths = metadata.lengths;
 
   if (host_buffer.node_capacity < host_buffer.node_count) {
     throw std::runtime_error(
@@ -266,11 +115,12 @@ void prepare_rolling_path_host_buffer(const RollingPathDecodeContext &context,
 }
 
 void copy_rolling_path_chunk_to_host_buffer(
-    const RollingPathDecodeContext &context, size_t chunk_index,
+    const RollingPathDecodePlan &plan,
+    const thrust::device_vector<int32_t> &d_chunk_workspace, size_t chunk_index,
     RollingPathHostBuffer &host_buffer) {
-  prepare_rolling_path_host_buffer(context, chunk_index, host_buffer);
-  thrust::copy(context.d_chunk_workspace.begin(),
-               context.d_chunk_workspace.begin() +
+  prepare_rolling_path_host_buffer(plan, chunk_index, host_buffer);
+  thrust::copy(d_chunk_workspace.begin(),
+               d_chunk_workspace.begin() +
                    static_cast<std::ptrdiff_t>(host_buffer.node_count),
                host_buffer.host_nodes);
 }
@@ -321,25 +171,19 @@ void release_rolling_path_pinned_host_buffer(
 }
 
 void copy_rolling_path_chunk_to_pinned_host_async(
-    const RollingPathDecodeContext &context, size_t chunk_index,
+    const RollingPathDecodePlan &plan,
+    const thrust::device_vector<int32_t> &d_chunk_workspace, size_t chunk_index,
     RollingPathPinnedHostBuffer &host_buffer, cudaStream_t copy_stream) {
-  size_t node_count = 0;
-  uint32_t segment_begin = 0;
-  uint32_t segment_end = 0;
-  int64_t expanded_begin = 0;
-  int64_t expanded_end = 0;
-  std::vector<uint32_t> lengths;
-  populate_rolling_path_host_buffer_metadata(
-      context, chunk_index, segment_begin, segment_end, expanded_begin,
-      expanded_end, node_count, lengths);
+  const RollingPathChunkMetadata metadata =
+      describe_rolling_path_chunk(plan, chunk_index);
   ensure_rolling_path_pinned_host_buffer_capacity(host_buffer,
-                                                  node_count);
-  host_buffer.node_count = node_count;
-  host_buffer.segment_begin = segment_begin;
-  host_buffer.segment_end = segment_end;
-  host_buffer.expanded_begin = expanded_begin;
-  host_buffer.expanded_end = expanded_end;
-  host_buffer.lengths = std::move(lengths);
+                                                  metadata.node_count);
+  host_buffer.node_count = metadata.node_count;
+  host_buffer.segment_begin = metadata.segment_begin;
+  host_buffer.segment_end = metadata.segment_end;
+  host_buffer.expanded_begin = metadata.expanded_begin;
+  host_buffer.expanded_end = metadata.expanded_end;
+  host_buffer.lengths = metadata.lengths;
 
   if (host_buffer.ready == nullptr) {
     check_cuda(cudaEventCreateWithFlags(&host_buffer.ready,
@@ -350,7 +194,7 @@ void copy_rolling_path_chunk_to_pinned_host_async(
   if (host_buffer.node_count > 0) {
     check_cuda(cudaMemcpyAsync(
                    host_buffer.host_nodes,
-                   thrust::raw_pointer_cast(context.d_chunk_workspace.data()),
+                   thrust::raw_pointer_cast(d_chunk_workspace.data()),
                    host_buffer.node_count * sizeof(int32_t),
                    cudaMemcpyDeviceToHost, copy_stream),
                "cudaMemcpyAsync(rolling chunk to pinned host)");
@@ -394,10 +238,11 @@ void stream_decompress_paths_gpu_rolling(
               << " MiB, min_rule_id=" << min_rule_id << std::endl;
   }
 
-  RollingPathDecodeContext context = prepare_rolling_path_decode(
+  RollingPathDecodePlan plan = prepare_rolling_path_decode_plan(
       d_encoded_path, d_rules_first, d_rules_second, min_rule_id, num_rules,
       d_lens_final, resolved_traversals_per_chunk,
       stream_options.max_expanded_chunk_bytes);
+  thrust::device_vector<int32_t> d_chunk_workspace;
 
   std::vector<RollingPathPinnedHostBuffer> host_buffers(num_host_buffers);
   ScopedCudaStream copy_stream(cudaStreamNonBlocking);
@@ -456,7 +301,7 @@ void stream_decompress_paths_gpu_rolling(
   });
 
   try {
-    for (size_t chunk_index = 0; chunk_index < context.schedule.chunks.size();
+    for (size_t chunk_index = 0; chunk_index < plan.schedule.chunks.size();
          ++chunk_index) {
       size_t buffer_index = 0;
       {
@@ -471,13 +316,15 @@ void stream_decompress_paths_gpu_rolling(
         free_indices.pop_front();
       }
 
-      decode_rolling_path_chunk_to_device(d_encoded_path, context, chunk_index);
+      decode_rolling_path_chunk_to_device(d_encoded_path, plan,
+                                          d_chunk_workspace, chunk_index);
       check_cuda(cudaEventRecord(decode_ready.event, 0),
                  "cudaEventRecord(rolling decode ready)");
       check_cuda(cudaStreamWaitEvent(copy_stream.stream, decode_ready.event, 0),
                  "cudaStreamWaitEvent(rolling copy waits for decode)");
       copy_rolling_path_chunk_to_pinned_host_async(
-          context, chunk_index, host_buffers[buffer_index], copy_stream.stream);
+          plan, d_chunk_workspace, chunk_index, host_buffers[buffer_index],
+          copy_stream.stream);
       // The rolling streaming path currently reuses a single device workspace
       // for all chunks. Do not launch the next decode until the D2H copy from
       // that workspace has completed, or the next chunk will overwrite the
@@ -543,28 +390,31 @@ void decompress_paths_gpu_rolling(
   }
 
   const auto prepare_start = Clock::now();
-  RollingPathDecodeContext context = prepare_rolling_path_decode(
+  RollingPathDecodePlan plan = prepare_rolling_path_decode_plan(
       d_encoded_path, d_rules_first, d_rules_second, min_rule_id, num_rules,
       d_lens_final, resolved_traversals_per_chunk,
       std::max<size_t>(1, max_expanded_chunk_bytes));
   const auto prepare_end = Clock::now();
-  out_data.resize(static_cast<size_t>(context.schedule.output_size));
+  out_data.resize(static_cast<size_t>(plan.schedule.output_size));
+  thrust::device_vector<int32_t> d_chunk_workspace;
 
   double decode_ms = 0.0;
   double copy_ms = 0.0;
-  for (size_t chunk_index = 0; chunk_index < context.schedule.chunks.size();
+  for (size_t chunk_index = 0; chunk_index < plan.schedule.chunks.size();
        ++chunk_index) {
     const auto decode_start = Clock::now();
-    decode_rolling_path_chunk_to_device(d_encoded_path, context, chunk_index);
+    decode_rolling_path_chunk_to_device(d_encoded_path, plan, d_chunk_workspace,
+                                        chunk_index);
     const auto decode_end = Clock::now();
     RollingPathHostBuffer host_buffer;
     host_buffer.host_nodes =
-        out_data.data() + context.schedule.chunks[chunk_index].expanded_begin;
+        out_data.data() + plan.schedule.chunks[chunk_index].expanded_begin;
     host_buffer.node_capacity =
         out_data.size() -
-        static_cast<size_t>(context.schedule.chunks[chunk_index].expanded_begin);
+        static_cast<size_t>(plan.schedule.chunks[chunk_index].expanded_begin);
     const auto copy_start = Clock::now();
-    copy_rolling_path_chunk_to_host_buffer(context, chunk_index, host_buffer);
+    copy_rolling_path_chunk_to_host_buffer(plan, d_chunk_workspace, chunk_index,
+                                           host_buffer);
     const auto copy_end = Clock::now();
 
     decode_ms += elapsed_ms(decode_start, decode_end);
@@ -582,7 +432,7 @@ void decompress_paths_gpu_rolling(
               << std::fixed << std::setprecision(2) << copy_ms << " ms"
               << std::endl;
     std::cout << "[GPU Decompress][Rolling] chunks: "
-              << context.schedule.chunks.size() << ", output nodes: "
+              << plan.schedule.chunks.size() << ", output nodes: "
               << out_data.size() << std::endl;
   }
 }

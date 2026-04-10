@@ -1,4 +1,5 @@
 #include "io/gfa_writer.hpp"
+#include "io/gfa_write_utils.hpp"
 #include "codec/codec.hpp"
 #include "utils/debug_log.hpp"
 #include "utils/runtime_utils.hpp"
@@ -26,146 +27,7 @@ constexpr const char *kWriterErrorPrefix = "GFA writer error: ";
 using Clock = std::chrono::high_resolution_clock;
 using gfz::runtime_utils::elapsed_ms;
 using namespace gfz::decompression_debug;
-
-// Format float without unnecessary trailing zeros
-std::string format_float(float val) {
-  std::ostringstream oss;
-  oss << val;
-  return oss.str();
-}
-
-// Precomputed offsets for string and B-type fields in optional columns
-using FieldOffsets = std::vector<std::vector<size_t>>;
-
-using SequenceOffsets = std::vector<size_t>;
-
-// Get byte size per element for B-type subtype
-inline size_t b_elem_size(char subtype) {
-  switch (subtype) {
-  case 'c':
-  case 'C':
-    return 1;
-  case 's':
-  case 'S':
-    return 2;
-  case 'i':
-  case 'I':
-  case 'f':
-    return 4;
-  default:
-    return 0;
-  }
-}
-
-FieldOffsets build_field_offsets(const std::vector<OptionalFieldColumn> &cols) {
-  FieldOffsets offsets(cols.size());
-  for (size_t c = 0; c < cols.size(); ++c) {
-    const auto &col = cols[c];
-    if (col.type == 'Z' || col.type == 'J' || col.type == 'H') {
-      const size_t n = col.string_lengths.size();
-      offsets[c].resize(n + 1, 0);
-      for (size_t i = 0; i < n; ++i)
-        offsets[c][i + 1] = offsets[c][i] + col.string_lengths[i];
-    } else if (col.type == 'B') {
-      const size_t n = col.b_lengths.size();
-      offsets[c].resize(n + 1, 0);
-      for (size_t i = 0; i < n; ++i) {
-        size_t elem_sz = b_elem_size(col.b_subtypes[i]);
-        offsets[c][i + 1] = offsets[c][i] + col.b_lengths[i] * elem_sz;
-      }
-    }
-  }
-  return offsets;
-}
-
-// Format optional fields for a given index
-std::string format_optional_fields(const std::vector<OptionalFieldColumn> &cols,
-                                   const FieldOffsets &offsets, size_t index) {
-  std::string result;
-  for (size_t c = 0; c < cols.size(); ++c) {
-    const auto &col = cols[c];
-    switch (col.type) {
-    case 'i':
-      if (index < col.int_values.size()) {
-        int64_t val = col.int_values[index];
-        if (val != std::numeric_limits<int64_t>::min())
-          result += "\t" + col.tag + ":i:" + std::to_string(val);
-      }
-      break;
-    case 'f':
-      if (index < col.float_values.size()) {
-        float val = col.float_values[index];
-        if (val != std::numeric_limits<float>::lowest())
-          result += "\t" + col.tag + ":f:" + format_float(val);
-      }
-      break;
-    case 'A':
-      if (index < col.char_values.size()) {
-        char val = col.char_values[index];
-        if (val != '\0')
-          result += "\t" + col.tag + ":A:" + std::string(1, val);
-      }
-      break;
-    case 'Z':
-    case 'J':
-    case 'H':
-      if (index < col.string_lengths.size()) {
-        uint32_t len = col.string_lengths[index];
-        if (len > 0) {
-          size_t off = offsets[c][index];
-          result += "\t" + col.tag + ":" + std::string(1, col.type) + ":";
-          result.append(col.concatenated_strings, off, len);
-        }
-      }
-      break;
-    case 'B':
-      if (index < col.b_lengths.size()) {
-        char subtype = col.b_subtypes[index];
-        uint32_t count = col.b_lengths[index];
-        if (subtype != '\0' && count > 0) {
-          size_t byte_off = offsets[c][index];
-          size_t elem_sz = b_elem_size(subtype);
-          const uint8_t *ptr = col.b_concat_bytes.data() + byte_off;
-
-          result += "\t" + col.tag + ":B:" + std::string(1, subtype);
-          for (uint32_t i = 0; i < count; ++i) {
-            result += ',';
-            if (subtype == 'c') {
-              int8_t v;
-              std::memcpy(&v, ptr + i * elem_sz, 1);
-              result += std::to_string(v);
-            } else if (subtype == 'C') {
-              uint8_t v = ptr[i];
-              result += std::to_string(v);
-            } else if (subtype == 's') {
-              int16_t v;
-              std::memcpy(&v, ptr + i * elem_sz, 2);
-              result += std::to_string(v);
-            } else if (subtype == 'S') {
-              uint16_t v;
-              std::memcpy(&v, ptr + i * elem_sz, 2);
-              result += std::to_string(v);
-            } else if (subtype == 'i') {
-              int32_t v;
-              std::memcpy(&v, ptr + i * elem_sz, 4);
-              result += std::to_string(v);
-            } else if (subtype == 'I') {
-              uint32_t v;
-              std::memcpy(&v, ptr + i * elem_sz, 4);
-              result += std::to_string(v);
-            } else if (subtype == 'f') {
-              float v;
-              std::memcpy(&v, ptr + i * elem_sz, 4);
-              result += format_float(v);
-            }
-          }
-        }
-      }
-      break;
-    }
-  }
-  return result;
-}
+using namespace gfz::gfa_write_utils;
 
 // Get node name or numeric ID as string
 inline void append_node_name(std::string &out, uint32_t node_id,
@@ -174,94 +36,6 @@ inline void append_node_name(std::string &out, uint32_t node_id,
     out += names[node_id];
   else
     out += std::to_string(node_id);
-}
-
-void append_numeric_node_name(std::string &out, uint32_t node_id) {
-  out += std::to_string(node_id);
-}
-
-void reconstruct_strings(const std::string &concat,
-                         const std::vector<uint32_t> &lengths,
-                         std::vector<std::string> &out) {
-  out.clear();
-  out.reserve(lengths.size());
-
-  size_t offset = 0;
-  for (uint32_t len : lengths) {
-    if (offset + len > concat.size()) {
-      throw std::runtime_error(std::string(kWriterErrorPrefix) +
-                               "string column is truncated");
-    }
-    out.push_back(concat.substr(offset, len));
-    offset += len;
-  }
-}
-
-std::vector<std::string>
-decompress_string_column(const ZstdCompressedBlock &strings_zstd,
-                         const ZstdCompressedBlock &lengths_zstd) {
-  std::vector<std::string> out;
-  reconstruct_strings(Codec::zstd_decompress_string(strings_zstd),
-                      Codec::zstd_decompress_uint32_vector(lengths_zstd), out);
-  return out;
-}
-
-OptionalFieldColumn
-decompress_optional_column(const CompressedOptionalFieldColumn &c) {
-  OptionalFieldColumn col;
-  col.tag = c.tag;
-  col.type = c.type;
-
-  switch (c.type) {
-  case 'i':
-    col.int_values =
-        Codec::decompress_varint_int64(c.int_values_zstd, c.num_elements);
-    break;
-  case 'f':
-    col.float_values = Codec::zstd_decompress_float_vector(c.float_values_zstd);
-    break;
-  case 'A':
-    col.char_values = Codec::zstd_decompress_char_vector(c.char_values_zstd);
-    break;
-  case 'Z':
-  case 'J':
-  case 'H':
-    col.concatenated_strings = Codec::zstd_decompress_string(c.strings_zstd);
-    col.string_lengths =
-        Codec::zstd_decompress_uint32_vector(c.string_lengths_zstd);
-    break;
-  case 'B': {
-    col.b_subtypes = Codec::zstd_decompress_char_vector(c.b_subtypes_zstd);
-    col.b_lengths = Codec::zstd_decompress_uint32_vector(c.b_lengths_zstd);
-    const std::string bytes =
-        Codec::zstd_decompress_string(c.b_concat_bytes_zstd);
-    col.b_concat_bytes = std::vector<uint8_t>(bytes.begin(), bytes.end());
-    break;
-  }
-  default:
-    throw std::runtime_error(std::string(kWriterErrorPrefix) +
-                             "unsupported optional field type");
-  }
-
-  return col;
-}
-
-SequenceOffsets build_offsets(const std::vector<uint32_t> &lengths) {
-  SequenceOffsets offsets(lengths.size() + 1, 0);
-  for (size_t i = 0; i < lengths.size(); ++i)
-    offsets[i + 1] = offsets[i] + lengths[i];
-  return offsets;
-}
-
-std::pair<std::vector<int32_t>, std::vector<int32_t>>
-decode_rules(const CompressedData &data) {
-  std::vector<int32_t> first =
-      Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
-  std::vector<int32_t> second =
-      Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
-  Codec::delta_decode_int32(first);
-  Codec::delta_decode_int32(second);
-  return {std::move(first), std::move(second)};
 }
 
 void expand_rule(uint32_t rule_id, bool reverse,
@@ -343,58 +117,6 @@ decode_sequence_at_index(const std::vector<int32_t> &flat,
   for (int round = 0; round < delta_round; ++round)
     Codec::inverse_delta_transform(seqs);
   return std::move(seqs[0]);
-}
-
-std::string format_path_line_numeric(const std::string &path_name,
-                                     const std::vector<NodeId> &path,
-                                     const std::string &overlap) {
-  std::string line = "P\t";
-  line += path_name;
-  line += '\t';
-
-  for (size_t i = 0; i < path.size(); ++i) {
-    if (i > 0)
-      line += ',';
-
-    const NodeId node = path[i];
-    const bool reverse = node < 0;
-    append_numeric_node_name(
-        line, static_cast<uint32_t>(reverse ? -node : node));
-    line += (reverse ? '-' : '+');
-  }
-
-  line += '\t';
-  line += overlap.empty() ? "*" : overlap;
-  line += '\n';
-  return line;
-}
-
-std::string format_walk_line_numeric(const std::string &sample_id,
-                                     uint32_t hap_index,
-                                     const std::string &seq_id,
-                                     int64_t seq_start, int64_t seq_end,
-                                     const std::vector<NodeId> &walk) {
-  std::string line = "W\t";
-  line += sample_id;
-  line += '\t';
-  line += std::to_string(hap_index);
-  line += '\t';
-  line += seq_id;
-  line += '\t';
-  line += (seq_start >= 0) ? std::to_string(seq_start) : "*";
-  line += '\t';
-  line += (seq_end >= 0) ? std::to_string(seq_end) : "*";
-  line += '\t';
-
-  for (NodeId node : walk) {
-    const bool reverse = node < 0;
-    line += (reverse ? '<' : '>');
-    append_numeric_node_name(
-        line, static_cast<uint32_t>(reverse ? -node : node));
-  }
-
-  line += '\n';
-  return line;
 }
 
 template <typename Formatter>
@@ -995,8 +717,8 @@ void write_gfa_from_compressed_data(const CompressedData &data,
                                     (index < path_overlaps.size())
                                         ? path_overlaps[index]
                                         : "";
-                                return format_path_line_numeric(name, path,
-                                                                overlap);
+                                return format_path_line_numeric(
+                                    name, path.data(), path.size(), overlap);
                               });
   t1 = Clock::now();
   debug_stages.push_back({"expand+write paths", elapsed_ms(t0, t1)});
@@ -1034,7 +756,7 @@ void write_gfa_from_compressed_data(const CompressedData &data,
                                         : -1;
                                 return format_walk_line_numeric(
                                     sample_id, hap_index, seq_id, seq_start,
-                                    seq_end, walk);
+                                    seq_end, walk.data(), walk.size());
                               });
   t1 = Clock::now();
   debug_stages.push_back({"expand+write walks", elapsed_ms(t0, t1)});

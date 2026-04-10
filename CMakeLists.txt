@@ -135,6 +135,7 @@ set(GFA_CORE_SOURCES
   src/codec/codec.cpp
   src/codec/serialization.cpp
   src/io/gfa_writer.cpp
+  src/io/gfa_write_utils.cpp
   src/workflows/compression_utils.cpp
   src/gpu/gfa_graph_gpu.cpp
   src/gpu/path_chunk_planner.cpp
@@ -150,6 +151,7 @@ set(GFA_CUDA_SOURCES
   src/gpu/path_expand_gpu.cu
   src/gpu/metadata_codec_gpu.cu
   src/gpu/decompression_workflow_gpu.cu
+  src/gpu/path_decompression_gpu_plan.cu
   src/gpu/path_decompression_gpu_legacy.cu
   src/gpu/path_decompression_gpu_rolling.cu
   src/gpu/gfa_writer_gpu.cu

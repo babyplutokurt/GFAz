@@ -11,4 +11,3 @@ void write_gfa_from_compressed_data(const CompressedData &data,
                                     int num_threads = 0);
 
 #endif
-
