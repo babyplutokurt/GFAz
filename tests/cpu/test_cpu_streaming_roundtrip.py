@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-CPU streaming round-trip test:
+CPU direct-writer round-trip test:
 1) Parse GFA to original GfaGraph
 2) Compress and serialize to a temporary .gfaz file
-3) Deserialize and write GFA directly from CompressedData
+3) Deserialize and write GFA through the CPU direct-writer path
 4) Parse the streamed GFA output
 5) Verify original vs reparsed streamed output
 """
@@ -23,7 +23,7 @@ import gfa_compression as gfa_lib
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="CPU streaming round-trip test for direct GFA writing"
+        description="CPU direct-writer round-trip test for direct GFA writing"
     )
     parser.add_argument("gfa_file", help="Input GFA file")
     parser.add_argument(
@@ -56,12 +56,13 @@ def parse_args():
 def main():
     args = parse_args()
 
-    print("=== CPU Streaming Round-Trip Test ===")
+    print("=== CPU Direct-Writer Round-Trip Test ===")
     print(f"Input:      {args.gfa_file}")
     print(f"Rounds:     {args.rounds}")
     print(f"Delta:      {args.delta_rounds}")
     print(f"Threshold:  {args.threshold}")
     print(f"Threads:    {args.threads if args.threads > 0 else 'all available'}")
+    print("Mode:       CPU direct writer")
     original_file_size = os.path.getsize(args.gfa_file)
 
     print("\n[1] Parse original GFA")
@@ -124,7 +125,7 @@ def main():
         print("\n[5] Verify original vs streamed-output GfaGraph")
         ok = gfa_lib.verify_round_trip(original_graph, streamed_graph)
         if not ok:
-            print("❌ FAIL CPU streaming round-trip verification FAILED")
+            print("❌ FAIL CPU direct-writer round-trip verification FAILED")
             return 1
     finally:
         if os.path.exists(tmp_gfaz_path):
@@ -132,7 +133,7 @@ def main():
         if os.path.exists(tmp_out_path):
             os.remove(tmp_out_path)
 
-    print("✅ PASS CPU streaming round-trip verification PASSED")
+    print("✅ PASS CPU direct-writer round-trip verification PASSED")
     print("\nResults")
     print(f"  Original size:   {original_file_size / (1024 * 1024):.2f} MB")
     print(f"  Compressed size: {compressed_size / (1024 * 1024):.2f} MB")

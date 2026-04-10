@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GPU rolling host round-trip test:
+GPU rolling host-graph round-trip test:
 1) Parse GFA to original GfaGraph
 2) Convert original graph to GfaGraph_gpu
 3) GPU compress using the rolling scheduler
@@ -25,7 +25,7 @@ import gfa_compression as gfac
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="GPU rolling host round-trip test for GfaGraph"
+        description="GPU rolling host-graph round-trip test for GfaGraph"
     )
     parser.add_argument("gfa_file", help="Input GFA file")
     parser.add_argument(
@@ -37,14 +37,14 @@ def parse_args():
     parser.add_argument(
         "--chunk-GB",
         type=float,
-        default=None,
+        default=4096 / (1024 * 1024 * 1024),
         help="Compression rolling chunk size in GiB (e.g. 0.5 for 512MiB)",
     )
     parser.add_argument(
         "--traversals-per-chunk",
         type=int,
-        default=128,
-        help="Rolling decompression traversals per chunk (default: 128)",
+        default=16,
+        help="Rolling decompression traversals per chunk (default: 16)",
     )
     parser.add_argument(
         "--debug-decompression",
@@ -57,10 +57,12 @@ def parse_args():
 def main():
     args = parse_args()
 
-    print("=== GPU Rolling Host Round-Trip Test ===")
+    print("=== GPU Rolling Host-Graph Round-Trip Test ===")
     print(f"Input:      {args.gfa_file}")
     print(f"Rounds:     {args.rounds}")
-    print("Mode:       rolling compression + rolling host reconstruction")
+    print("Mode:       rolling compression + rolling host-graph reconstruction")
+    print(f"Chunk GiB:  {args.chunk_GB}")
+    print(f"Traversals: {args.traversals_per_chunk}")
 
     if args.debug_decompression:
         gfac.set_gpu_decompression_debug(True)
@@ -126,13 +128,13 @@ def main():
         print("\n[5] Verify original vs reconstructed host GfaGraph")
         ok = gfac.verify_round_trip(original_graph, host_graph)
         if not ok:
-            print("❌ GPU rolling host round-trip verification FAILED")
+            print("❌ GPU rolling host-graph round-trip verification FAILED")
             return 1
     finally:
         if os.path.exists(tmp_gfaz):
             os.remove(tmp_gfaz)
 
-    print("✅ PASS GPU rolling host round-trip verification PASSED")
+    print("✅ PASS GPU rolling host-graph round-trip verification PASSED")
     print("\nResults")
     print(f"  Original size:   {original_file_size / (1024 * 1024):.2f} MB")
     print(f"  Compressed size: {compressed_size / (1024 * 1024):.2f} MB")

@@ -2,9 +2,15 @@
 """
 Regression suite for example.gfa.
 
-This keeps one curated fixture and validates the major invariants we care about:
-CPU round-trip, CPU streaming path, GPU round-trip, CPU/GPU parity, and CLI
-stats behavior for both backends.
+This suite explicitly covers each CPU/GPU compression and decompression path
+that matters for backend compatibility:
+  - CPU legacy materialized round-trip
+  - CPU direct-writer round-trip
+  - GPU legacy materialized round-trip
+  - GPU rolling materialized round-trip
+  - GPU rolling host-materialized round-trip
+  - GPU rolling direct-writer round-trip
+  - Cross-backend container compatibility
 """
 
 import argparse
@@ -19,11 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tests.regression.regression_utils import (
     CLI_PATH,
     add_repo_and_build_to_syspath,
-    assert_stats_output,
-    calculate_gpu_compressed_size,
     ensure_cli_exists,
-    file_size,
-    format_size_mb,
     graph_summary,
     has_gpu_bindings,
     is_gpu_runtime_unavailable,
@@ -35,9 +37,13 @@ add_repo_and_build_to_syspath()
 import gfa_compression as gfa_lib
 
 
+DEFAULT_GPU_ROLLING_CHUNK_BYTES = 4096
+DEFAULT_GPU_TRAVERSALS_PER_CHUNK = 16
+
+
 def parse_args():
   parser = argparse.ArgumentParser(
-      description="Regression suite for example.gfa"
+      description="Explicit backend/path regression suite for example.gfa"
   )
   parser.add_argument(
       "gfa_file",
@@ -79,6 +85,34 @@ def parse_args():
       action="store_true",
       help="Skip GPU-specific regressions",
   )
+  parser.add_argument(
+      "--gpu-rolling-chunk-bytes",
+      type=int,
+      default=int(
+          os.environ.get(
+              "GFA_GPU_ROLLING_CHUNK_BYTES",
+              str(DEFAULT_GPU_ROLLING_CHUNK_BYTES),
+          )
+      ),
+      help=(
+          "GPU rolling compression chunk size in bytes. "
+          "Defaults small to force chunking on regression fixtures."
+      ),
+  )
+  parser.add_argument(
+      "--gpu-traversals-per-chunk",
+      type=int,
+      default=int(
+          os.environ.get(
+              "GFA_GPU_TRAVERSALS_PER_CHUNK",
+              str(DEFAULT_GPU_TRAVERSALS_PER_CHUNK),
+          )
+      ),
+      help=(
+          "GPU rolling decompression traversals per chunk. "
+          "Defaults small to force chunking on regression fixtures."
+      ),
+  )
   return parser.parse_args()
 
 
@@ -94,9 +128,8 @@ def print_result(name: str, elapsed: float, details: str = ""):
     print(f"  {details}")
 
 
-def test_cpu_legacy(args, original_graph):
-  start = time.perf_counter()
-  compressed = gfa_lib.compress(
+def cpu_compress(args):
+  return gfa_lib.compress(
       args.gfa_file,
       num_rounds=args.rounds,
       freq_threshold=args.threshold,
@@ -104,46 +137,97 @@ def test_cpu_legacy(args, original_graph):
       num_threads=args.threads,
   )
 
+
+def gpu_compress_options_legacy():
+  options = gfa_lib.GpuCompressionOptions()
+  options.force_full_device_legacy = True
+  return options
+
+
+def gpu_compress_options_rolling(args):
+  options = gfa_lib.GpuCompressionOptions()
+  options.force_rolling_scheduler = True
+  options.rolling_chunk_bytes = args.gpu_rolling_chunk_bytes
+  return options
+
+
+def gpu_decompress_options_legacy():
+  options = gfa_lib.GpuDecompressionOptions()
+  options.use_legacy_full_decompression = True
+  return options
+
+
+def gpu_decompress_options_rolling(args):
+  options = gfa_lib.GpuDecompressionOptions()
+  options.traversals_per_chunk = args.gpu_traversals_per_chunk
+  return options
+
+
+def with_temp_gfaz(prefix: str):
   handle = tempfile.NamedTemporaryFile(
-      mode="wb", suffix=".gfaz", prefix="reg_cpu_legacy_", delete=False
+      mode="wb", suffix=".gfaz", prefix=prefix, delete=False
   )
-  tmp_path = Path(handle.name)
+  path = Path(handle.name)
   handle.close()
+  return path
 
+
+def with_temp_gfa(prefix: str):
+  handle = tempfile.NamedTemporaryFile(
+      mode="w", suffix=".gfa", prefix=prefix, delete=False
+  )
+  path = Path(handle.name)
+  handle.close()
+  return path
+
+
+def serialize_cpu_roundtrip(compressed, prefix: str):
+  gfaz_path = with_temp_gfaz(prefix)
   try:
-    gfa_lib.serialize(compressed, str(tmp_path))
-    loaded = gfa_lib.deserialize(str(tmp_path))
-    decompressed = gfa_lib.decompress(loaded, num_threads=args.threads)
-    if not gfa_lib.verify_round_trip(original_graph, decompressed):
-      raise AssertionError("CPU legacy round-trip verification failed")
+    gfa_lib.serialize(compressed, str(gfaz_path))
+    return gfa_lib.deserialize(str(gfaz_path))
   finally:
-    if tmp_path.exists():
-      tmp_path.unlink()
-
-  elapsed = time.perf_counter() - start
-  print_result("cpu_legacy_roundtrip", elapsed, graph_summary(original_graph))
+    if gfaz_path.exists():
+      gfaz_path.unlink()
 
 
-def test_cpu_streaming(args, original_graph):
+def serialize_gpu_roundtrip(compressed, prefix: str):
+  gfaz_path = with_temp_gfaz(prefix)
+  try:
+    gfa_lib.serialize_gpu(compressed, str(gfaz_path))
+    return gfa_lib.deserialize_gpu(str(gfaz_path))
+  finally:
+    if gfaz_path.exists():
+      gfaz_path.unlink()
+
+
+def assert_host_graph_matches(original_graph, actual_graph, case_name: str):
+  if not gfa_lib.verify_round_trip(original_graph, actual_graph):
+    raise AssertionError(f"{case_name} verification failed")
+
+
+def assert_gpu_graph_matches(original_gpu_graph, actual_gpu_graph, case_name: str):
+  if not gfa_lib.verify_gpu_round_trip(original_gpu_graph, actual_gpu_graph):
+    raise AssertionError(f"{case_name} verification failed")
+
+
+def test_cpu_legacy_roundtrip(args, original_graph):
   start = time.perf_counter()
-  compressed = gfa_lib.compress(
-      args.gfa_file,
-      num_rounds=args.rounds,
-      freq_threshold=args.threshold,
-      delta_round=args.delta_rounds,
-      num_threads=args.threads,
+  compressed = cpu_compress(args)
+  loaded = serialize_cpu_roundtrip(compressed, "reg_cpu_legacy_")
+  decompressed = gfa_lib.decompress(loaded, num_threads=args.threads)
+  assert_host_graph_matches(
+      original_graph, decompressed, "CPU legacy round-trip"
   )
+  elapsed = time.perf_counter() - start
+  print_result("cpu_legacy_roundtrip", elapsed)
 
-  gfaz_handle = tempfile.NamedTemporaryFile(
-      mode="wb", suffix=".gfaz", prefix="reg_cpu_stream_", delete=False
-  )
-  out_handle = tempfile.NamedTemporaryFile(
-      mode="w", suffix=".gfa", prefix="reg_cpu_stream_", delete=False
-  )
-  gfaz_path = Path(gfaz_handle.name)
-  out_path = Path(out_handle.name)
-  gfaz_handle.close()
-  out_handle.close()
+
+def test_cpu_direct_writer_roundtrip(args, original_graph):
+  start = time.perf_counter()
+  compressed = cpu_compress(args)
+  gfaz_path = with_temp_gfaz("reg_cpu_direct_")
+  out_path = with_temp_gfa("reg_cpu_direct_")
 
   try:
     gfa_lib.serialize(compressed, str(gfaz_path))
@@ -151,9 +235,10 @@ def test_cpu_streaming(args, original_graph):
     gfa_lib.write_gfa_from_compressed_data(
         loaded, str(out_path), num_threads=args.threads
     )
-    streamed = gfa_lib.parse(str(out_path))
-    if not gfa_lib.verify_round_trip(original_graph, streamed):
-      raise AssertionError("CPU streaming round-trip verification failed")
+    reparsed = gfa_lib.parse(str(out_path))
+    assert_host_graph_matches(
+        original_graph, reparsed, "CPU direct-writer round-trip"
+    )
   finally:
     if gfaz_path.exists():
       gfaz_path.unlink()
@@ -161,269 +246,255 @@ def test_cpu_streaming(args, original_graph):
       out_path.unlink()
 
   elapsed = time.perf_counter() - start
-  print_result("cpu_streaming_roundtrip", elapsed)
+  print_result("cpu_direct_writer_roundtrip", elapsed)
 
 
-def test_gpu_roundtrip(args, original_graph):
+def test_gpu_legacy_roundtrip(args, original_graph):
   if args.skip_gpu or not has_gpu_bindings(gfa_lib):
-    print("SKIP gpu_roundtrip (GPU bindings unavailable or --skip-gpu set)")
+    print("SKIP gpu_legacy_roundtrip (GPU bindings unavailable or --skip-gpu set)")
     return
 
   start = time.perf_counter()
   try:
-    gpu_graph = gfa_lib.convert_to_gpu_layout(original_graph)
-    compressed = gfa_lib.compress_gpu_graph(gpu_graph, args.rounds)
+    original_gpu_graph = gfa_lib.convert_to_gpu_layout(original_graph)
+    compressed = gfa_lib.compress_gpu_graph(
+        original_gpu_graph, args.rounds, gpu_compress_options_legacy()
+    )
+    loaded = serialize_gpu_roundtrip(compressed, "reg_gpu_legacy_")
+    decompressed_gpu = gfa_lib.decompress_to_gpu_layout(
+        loaded, gpu_decompress_options_legacy()
+    )
+    assert_gpu_graph_matches(
+        original_gpu_graph, decompressed_gpu, "GPU legacy round-trip"
+    )
   except Exception as exc:
     if is_gpu_runtime_unavailable(exc):
-      print(f"SKIP gpu_roundtrip ({exc})")
+      print(f"SKIP gpu_legacy_roundtrip ({exc})")
       return
     raise
 
-  handle = tempfile.NamedTemporaryFile(
-      mode="wb", suffix=".gfaz", prefix="reg_gpu_", delete=False
+  elapsed = time.perf_counter() - start
+  print_result("gpu_legacy_roundtrip", elapsed)
+
+
+def test_gpu_rolling_device_graph_roundtrip(args, original_graph):
+  if args.skip_gpu or not has_gpu_bindings(gfa_lib):
+    print("SKIP gpu_rolling_device_graph_roundtrip (GPU bindings unavailable or --skip-gpu set)")
+    return
+
+  start = time.perf_counter()
+  try:
+    original_gpu_graph = gfa_lib.convert_to_gpu_layout(original_graph)
+    compressed = gfa_lib.compress_gpu_graph(
+        original_gpu_graph, args.rounds, gpu_compress_options_rolling(args)
+    )
+    loaded = serialize_gpu_roundtrip(compressed, "reg_gpu_rolling_")
+    decompressed_gpu = gfa_lib.decompress_to_gpu_layout(
+        loaded, gpu_decompress_options_rolling(args)
+    )
+    assert_gpu_graph_matches(
+        original_gpu_graph, decompressed_gpu, "GPU rolling device-graph round-trip"
+    )
+  except Exception as exc:
+    if is_gpu_runtime_unavailable(exc):
+      print(f"SKIP gpu_rolling_device_graph_roundtrip ({exc})")
+      return
+    raise
+
+  elapsed = time.perf_counter() - start
+  print_result(
+      "gpu_rolling_device_graph_roundtrip",
+      elapsed,
+      (
+          f"chunk_bytes={args.gpu_rolling_chunk_bytes}, "
+          f"traversals_per_chunk={args.gpu_traversals_per_chunk}"
+      ),
   )
-  tmp_path = Path(handle.name)
-  handle.close()
+
+
+def test_gpu_rolling_host_graph_roundtrip(args, original_graph):
+  if args.skip_gpu or not has_gpu_bindings(gfa_lib):
+    print("SKIP gpu_rolling_host_graph_roundtrip (GPU bindings unavailable or --skip-gpu set)")
+    return
+
+  start = time.perf_counter()
+  try:
+    original_gpu_graph = gfa_lib.convert_to_gpu_layout(original_graph)
+    compressed = gfa_lib.compress_gpu_graph(
+        original_gpu_graph, args.rounds, gpu_compress_options_rolling(args)
+    )
+    loaded = serialize_gpu_roundtrip(compressed, "reg_gpu_host_")
+    host_graph = gfa_lib.decompress_to_host_graph_gpu(
+        loaded, gpu_decompress_options_rolling(args)
+    )
+    assert_host_graph_matches(
+        original_graph,
+        host_graph,
+        "GPU rolling host-graph round-trip",
+    )
+  except Exception as exc:
+    if is_gpu_runtime_unavailable(exc):
+      print(f"SKIP gpu_rolling_host_graph_roundtrip ({exc})")
+      return
+    raise
+
+  elapsed = time.perf_counter() - start
+  print_result("gpu_rolling_host_graph_roundtrip", elapsed)
+
+
+def test_gpu_direct_writer_roundtrip(args, original_graph, cli_path: Path):
+  if args.skip_gpu or not has_gpu_bindings(gfa_lib):
+    print("SKIP gpu_direct_writer_roundtrip (GPU bindings unavailable or --skip-gpu set)")
+    return
+
+  start = time.perf_counter()
+  gfaz_path = with_temp_gfaz("reg_gpu_direct_")
+  out_path = with_temp_gfa("reg_gpu_direct_")
 
   try:
     try:
-      gfa_lib.serialize_gpu(compressed, str(tmp_path))
-      loaded = gfa_lib.deserialize_gpu(str(tmp_path))
-      decompressed_gpu = gfa_lib.decompress_to_gpu_layout(loaded)
-      if not gfa_lib.verify_gpu_round_trip(gpu_graph, decompressed_gpu):
-        raise AssertionError("GPU round-trip verification failed")
-      compressed_size = calculate_gpu_compressed_size(compressed)
+      original_gpu_graph = gfa_lib.convert_to_gpu_layout(original_graph)
+      compressed = gfa_lib.compress_gpu_graph(
+          original_gpu_graph, args.rounds, gpu_compress_options_rolling(args)
+      )
+      gfa_lib.serialize_gpu(compressed, str(gfaz_path))
     except Exception as exc:
       if is_gpu_runtime_unavailable(exc):
-        print(f"SKIP gpu_roundtrip ({exc})")
+        print(f"SKIP gpu_direct_writer_roundtrip ({exc})")
         return
       raise
-  finally:
-    if tmp_path.exists():
-      tmp_path.unlink()
-
-  elapsed = time.perf_counter() - start
-  ratio = file_size(Path(args.gfa_file)) / compressed_size if compressed_size else 0.0
-  print_result(
-      "gpu_roundtrip",
-      elapsed,
-      f"compressed={format_size_mb(compressed_size)}, ratio={ratio:.2f}x",
-  )
-
-
-def test_backend_parity(args, original_graph):
-  if args.skip_gpu or not has_gpu_bindings(gfa_lib):
-    print("SKIP backend_parity (GPU bindings unavailable or --skip-gpu set)")
-    return
-
-  start = time.perf_counter()
-  cpu_compressed = gfa_lib.compress(
-      args.gfa_file,
-      num_rounds=args.rounds,
-      freq_threshold=args.threshold,
-      delta_round=args.delta_rounds,
-      num_threads=args.threads,
-  )
-  cpu_graph = gfa_lib.decompress(cpu_compressed, num_threads=args.threads)
-
-  try:
-    gpu_graph = gfa_lib.convert_to_gpu_layout(original_graph)
-    gpu_compressed = gfa_lib.compress_gpu_graph(gpu_graph, args.rounds)
-    gpu_roundtrip = gfa_lib.decompress_to_gpu_layout(gpu_compressed)
-    gpu_host_graph = gfa_lib.convert_from_gpu_layout(gpu_roundtrip)
-  except Exception as exc:
-    if is_gpu_runtime_unavailable(exc):
-      print(f"SKIP backend_parity ({exc})")
-      return
-    raise
-
-  if not gfa_lib.verify_round_trip(original_graph, cpu_graph):
-    raise AssertionError("CPU graph diverged from original before parity check")
-  if not gfa_lib.verify_round_trip(original_graph, gpu_host_graph):
-    raise AssertionError("GPU graph diverged from original before parity check")
-  if not gfa_lib.verify_round_trip(cpu_graph, gpu_host_graph):
-    raise AssertionError("CPU and GPU decompressed graphs do not match")
-
-  elapsed = time.perf_counter() - start
-  print_result("backend_parity_cpu_vs_gpu", elapsed)
-
-
-def test_cross_backend_container_compatibility(args, original_graph):
-  if args.skip_gpu or not has_gpu_bindings(gfa_lib):
-    print("SKIP cross_backend_container_compatibility (GPU bindings unavailable or --skip-gpu set)")
-    return
-
-  start = time.perf_counter()
-
-  cpu_compressed = gfa_lib.compress(
-      args.gfa_file,
-      num_rounds=args.rounds,
-      freq_threshold=args.threshold,
-      delta_round=args.delta_rounds,
-      num_threads=args.threads,
-  )
-
-  try:
-    gpu_graph = gfa_lib.convert_to_gpu_layout(original_graph)
-    gpu_compressed = gfa_lib.compress_gpu_graph(gpu_graph, args.rounds)
-  except Exception as exc:
-    if is_gpu_runtime_unavailable(exc):
-      print(f"SKIP cross_backend_container_compatibility ({exc})")
-      return
-    raise
-
-  cpu_handle = tempfile.NamedTemporaryFile(
-      mode="wb", suffix=".gfaz", prefix="reg_cross_cpu_", delete=False
-  )
-  gpu_handle = tempfile.NamedTemporaryFile(
-      mode="wb", suffix=".gfaz", prefix="reg_cross_gpu_", delete=False
-  )
-  cpu_path = Path(cpu_handle.name)
-  gpu_path = Path(gpu_handle.name)
-  cpu_handle.close()
-  gpu_handle.close()
-
-  try:
-    gfa_lib.serialize(cpu_compressed, str(cpu_path))
-    gfa_lib.serialize_gpu(gpu_compressed, str(gpu_path))
-
-    cpu_loaded_via_gpu_api = gfa_lib.deserialize_gpu(str(cpu_path))
-    gpu_loaded_via_cpu_api = gfa_lib.deserialize(str(gpu_path))
-
-    cpu_file_gpu_graph = gfa_lib.decompress_to_gpu_layout(cpu_loaded_via_gpu_api)
-    cpu_file_host_graph = gfa_lib.convert_from_gpu_layout(cpu_file_gpu_graph)
-    if not gfa_lib.verify_round_trip(original_graph, cpu_file_host_graph):
-      raise AssertionError("GPU failed to read CPU-produced .gfaz correctly")
-
-    gpu_file_cpu_graph = gfa_lib.decompress(gpu_loaded_via_cpu_api,
-                                            num_threads=args.threads)
-    if not gfa_lib.verify_round_trip(original_graph, gpu_file_cpu_graph):
-      raise AssertionError("CPU failed to read GPU-produced .gfaz correctly")
-  except Exception as exc:
-    if is_gpu_runtime_unavailable(exc):
-      print(f"SKIP cross_backend_container_compatibility ({exc})")
-      return
-    raise
-  finally:
-    if cpu_path.exists():
-      cpu_path.unlink()
-    if gpu_path.exists():
-      gpu_path.unlink()
-
-  elapsed = time.perf_counter() - start
-  print_result("cross_backend_container_compatibility", elapsed)
-
-
-def test_cli_cpu_stats(args, original_graph, cli_path: Path):
-  start = time.perf_counter()
-  out_handle = tempfile.NamedTemporaryFile(
-      mode="wb", suffix=".gfaz", prefix="reg_cli_cpu_", delete=False
-  )
-  gfaz_path = Path(out_handle.name)
-  out_handle.close()
-  gfa_path = gfaz_path.with_suffix(".roundtrip.gfa")
-
-  try:
-    result = run_command(
-        [
-            str(cli_path),
-            "compress",
-            "--stats",
-            args.gfa_file,
-            str(gfaz_path),
-        ]
-    )
-    require_success(result, "CLI CPU compress --stats")
-    assert_stats_output(result.stdout, expect_ratio=True)
-
-    result = run_command(
-        [
-            str(cli_path),
-            "decompress",
-            "--stats",
-            str(gfaz_path),
-            str(gfa_path),
-        ]
-    )
-    require_success(result, "CLI CPU decompress --stats")
-    assert_stats_output(result.stdout, expect_ratio=False)
-
-    roundtrip_graph = gfa_lib.parse(str(gfa_path))
-    if not gfa_lib.verify_round_trip(original_graph, roundtrip_graph):
-      raise AssertionError("CLI CPU stats round-trip verification failed")
-  finally:
-    if gfaz_path.exists():
-      gfaz_path.unlink()
-    if gfa_path.exists():
-      gfa_path.unlink()
-
-  elapsed = time.perf_counter() - start
-  print_result("cli_cpu_stats", elapsed)
-
-
-def test_cli_gpu_stats(args, original_graph, cli_path: Path):
-  if args.skip_gpu or not has_gpu_bindings(gfa_lib):
-    print("SKIP cli_gpu_stats (GPU bindings unavailable or --skip-gpu set)")
-    return
-
-  start = time.perf_counter()
-  out_handle = tempfile.NamedTemporaryFile(
-      mode="wb", suffix=".gfaz", prefix="reg_cli_gpu_", delete=False
-  )
-  gfaz_path = Path(out_handle.name)
-  out_handle.close()
-  gfa_path = gfaz_path.with_suffix(".roundtrip.gfa")
-
-  try:
-    result = run_command(
-        [
-            str(cli_path),
-            "compress",
-            "--gpu",
-            "--stats",
-            args.gfa_file,
-            str(gfaz_path),
-        ]
-    )
-    try:
-      require_success(result, "CLI GPU compress --stats")
-    except AssertionError as exc:
-      if is_gpu_runtime_unavailable(exc):
-        print(f"SKIP cli_gpu_stats ({exc})")
-        return
-      raise
-    assert_stats_output(result.stdout, expect_ratio=True)
 
     result = run_command(
         [
             str(cli_path),
             "decompress",
             "--gpu",
-            "--stats",
+            "--gpu-traversals",
+            str(args.gpu_traversals_per_chunk),
             str(gfaz_path),
-            str(gfa_path),
+            str(out_path),
         ]
     )
     try:
-      require_success(result, "CLI GPU decompress --stats")
+      require_success(result, "GPU direct-writer CLI decompression")
     except AssertionError as exc:
       if is_gpu_runtime_unavailable(exc):
-        print(f"SKIP cli_gpu_stats ({exc})")
+        print(f"SKIP gpu_direct_writer_roundtrip ({exc})")
         return
       raise
-    assert_stats_output(result.stdout, expect_ratio=False)
 
-    roundtrip_graph = gfa_lib.parse(str(gfa_path))
-    if not gfa_lib.verify_round_trip(original_graph, roundtrip_graph):
-      raise AssertionError("CLI GPU stats round-trip verification failed")
+    reparsed = gfa_lib.parse(str(out_path))
+    assert_host_graph_matches(
+        original_graph, reparsed, "GPU rolling direct-writer round-trip"
+    )
   finally:
     if gfaz_path.exists():
       gfaz_path.unlink()
-    if gfa_path.exists():
-      gfa_path.unlink()
+    if out_path.exists():
+      out_path.unlink()
 
   elapsed = time.perf_counter() - start
-  print_result("cli_gpu_stats", elapsed)
+  print_result("gpu_direct_writer_roundtrip", elapsed)
+
+
+def test_cpu_container_to_gpu_rolling(args, original_graph):
+  if args.skip_gpu or not has_gpu_bindings(gfa_lib):
+    print("SKIP cpu_container_to_gpu_rolling (GPU bindings unavailable or --skip-gpu set)")
+    return
+
+  start = time.perf_counter()
+  try:
+    cpu_compressed = cpu_compress(args)
+    gfaz_path = with_temp_gfaz("reg_cpu_to_gpu_roll_")
+    try:
+      gfa_lib.serialize(cpu_compressed, str(gfaz_path))
+      loaded = gfa_lib.deserialize_gpu(str(gfaz_path))
+      host_graph = gfa_lib.decompress_to_host_graph_gpu(
+          loaded, gpu_decompress_options_rolling(args)
+      )
+      assert_host_graph_matches(
+          original_graph,
+          host_graph,
+          "CPU container -> GPU rolling decompression",
+      )
+    finally:
+      if gfaz_path.exists():
+        gfaz_path.unlink()
+  except Exception as exc:
+    if is_gpu_runtime_unavailable(exc):
+      print(f"SKIP cpu_container_to_gpu_rolling ({exc})")
+      return
+    raise
+
+  elapsed = time.perf_counter() - start
+  print_result("cpu_container_to_gpu_rolling", elapsed)
+
+
+def test_cpu_container_to_gpu_legacy(args, original_graph):
+  if args.skip_gpu or not has_gpu_bindings(gfa_lib):
+    print("SKIP cpu_container_to_gpu_legacy (GPU bindings unavailable or --skip-gpu set)")
+    return
+
+  start = time.perf_counter()
+  try:
+    cpu_compressed = cpu_compress(args)
+    gfaz_path = with_temp_gfaz("reg_cpu_to_gpu_legacy_")
+    try:
+      gfa_lib.serialize(cpu_compressed, str(gfaz_path))
+      loaded = gfa_lib.deserialize_gpu(str(gfaz_path))
+      host_graph = gfa_lib.decompress_to_host_graph_gpu(
+          loaded, gpu_decompress_options_legacy()
+      )
+      assert_host_graph_matches(
+          original_graph,
+          host_graph,
+          "CPU container -> GPU legacy decompression",
+      )
+    finally:
+      if gfaz_path.exists():
+        gfaz_path.unlink()
+  except Exception as exc:
+    if is_gpu_runtime_unavailable(exc):
+      print(f"SKIP cpu_container_to_gpu_legacy ({exc})")
+      return
+    raise
+
+  elapsed = time.perf_counter() - start
+  print_result("cpu_container_to_gpu_legacy", elapsed)
+
+
+def test_gpu_container_to_cpu(args, original_graph):
+  if args.skip_gpu or not has_gpu_bindings(gfa_lib):
+    print("SKIP gpu_container_to_cpu (GPU bindings unavailable or --skip-gpu set)")
+    return
+
+  start = time.perf_counter()
+  try:
+    original_gpu_graph = gfa_lib.convert_to_gpu_layout(original_graph)
+    compressed = gfa_lib.compress_gpu_graph(
+        original_gpu_graph, args.rounds, gpu_compress_options_rolling(args)
+    )
+    gfaz_path = with_temp_gfaz("reg_gpu_to_cpu_")
+    try:
+      gfa_lib.serialize_gpu(compressed, str(gfaz_path))
+      loaded = gfa_lib.deserialize(str(gfaz_path))
+      host_graph = gfa_lib.decompress(loaded, num_threads=args.threads)
+      assert_host_graph_matches(
+          original_graph,
+          host_graph,
+          "GPU container -> CPU decompression",
+      )
+    finally:
+      if gfaz_path.exists():
+        gfaz_path.unlink()
+  except Exception as exc:
+    if is_gpu_runtime_unavailable(exc):
+      print(f"SKIP gpu_container_to_cpu ({exc})")
+      return
+    raise
+
+  elapsed = time.perf_counter() - start
+  print_result("gpu_container_to_cpu", elapsed)
 
 
 def main():
@@ -432,23 +503,27 @@ def main():
   ensure_cli_exists(cli_path)
 
   print_header("Example Regression Suite")
-  print(f"Fixture: {args.gfa_file}")
-  print(f"CLI:     {cli_path}")
-  print(f"Rounds:  {args.rounds}")
-  print(f"Delta:   {args.delta_rounds}")
-  print(f"Threads: {args.threads if args.threads > 0 else 'auto'}")
+  print(f"Fixture:               {args.gfa_file}")
+  print(f"CLI:                   {cli_path}")
+  print(f"Rounds:                {args.rounds}")
+  print(f"Delta:                 {args.delta_rounds}")
+  print(f"Threads:               {args.threads if args.threads > 0 else 'auto'}")
+  print(f"GPU rolling bytes:     {args.gpu_rolling_chunk_bytes}")
+  print(f"GPU traversals/chunk:  {args.gpu_traversals_per_chunk}")
 
   original_graph = gfa_lib.parse(args.gfa_file)
-  print(f"Graph:   {graph_summary(original_graph)}")
+  print(f"Graph:                 {graph_summary(original_graph)}")
 
   started = time.perf_counter()
-  test_cpu_legacy(args, original_graph)
-  test_cpu_streaming(args, original_graph)
-  test_gpu_roundtrip(args, original_graph)
-  test_backend_parity(args, original_graph)
-  test_cross_backend_container_compatibility(args, original_graph)
-  test_cli_cpu_stats(args, original_graph, cli_path)
-  test_cli_gpu_stats(args, original_graph, cli_path)
+  test_cpu_legacy_roundtrip(args, original_graph)
+  test_cpu_direct_writer_roundtrip(args, original_graph)
+  test_gpu_legacy_roundtrip(args, original_graph)
+  test_gpu_rolling_device_graph_roundtrip(args, original_graph)
+  test_gpu_rolling_host_graph_roundtrip(args, original_graph)
+  test_gpu_direct_writer_roundtrip(args, original_graph, cli_path)
+  test_cpu_container_to_gpu_rolling(args, original_graph)
+  test_cpu_container_to_gpu_legacy(args, original_graph)
+  test_gpu_container_to_cpu(args, original_graph)
   total = time.perf_counter() - started
 
   print_header("Regression Summary")

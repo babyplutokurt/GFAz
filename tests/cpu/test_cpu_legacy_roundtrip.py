@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-CPU round-trip test:
+CPU legacy materialized round-trip test:
 1) Parse GFA to original GfaGraph
 2) Compress and serialize to a temporary .gfaz file
-3) Deserialize and decompress to GfaGraph
+3) Deserialize and decompress through the CPU legacy materialized path
 4) Verify original vs decompressed GfaGraph
 """
 import argparse
@@ -22,7 +22,7 @@ import gfa_compression as gfa_lib
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="CPU round-trip test for GFA compression"
+        description="CPU legacy materialized round-trip test for GFA compression"
     )
     parser.add_argument("gfa_file", help="Input GFA file")
     parser.add_argument(
@@ -55,12 +55,13 @@ def parse_args():
 def main():
     args = parse_args()
 
-    print("=== CPU Round-Trip Test ===")
+    print("=== CPU Legacy Materialized Round-Trip Test ===")
     print(f"Input:      {args.gfa_file}")
     print(f"Rounds:     {args.rounds}")
     print(f"Delta:      {args.delta_rounds}")
     print(f"Threshold:  {args.threshold}")
     print(f"Threads:    {args.threads if args.threads > 0 else 'all available'}")
+    print("Mode:       CPU legacy materialized")
     original_file_size = os.path.getsize(args.gfa_file)
 
     print("\n[1] Parse original GFA")
@@ -101,7 +102,7 @@ def main():
         )
         print(f"  Saved temporary file: {tmp_gfaz}")
 
-        print("\n[3] Load temporary .gfaz and decompress")
+        print("\n[3] Load temporary .gfaz and legacy-decompress")
         t_decompress_start = time.perf_counter()
         loaded = gfa_lib.deserialize(tmp_gfaz)
         decompressed_graph = gfa_lib.decompress(loaded, num_threads=args.threads)
@@ -110,13 +111,13 @@ def main():
         print("\n[4] Verify original vs decompressed GfaGraph")
         ok = gfa_lib.verify_round_trip(original_graph, decompressed_graph)
         if not ok:
-            print("❌ CPU round-trip verification FAILED")
+            print("❌ CPU legacy materialized round-trip verification FAILED")
             return 1
     finally:
         if os.path.exists(tmp_gfaz):
             os.remove(tmp_gfaz)
 
-    print("✅ CPU round-trip verification PASSED")
+    print("✅ PASS CPU legacy materialized round-trip verification PASSED")
     print("\nResults")
     print(f"  Original size:   {original_file_size / (1024 * 1024):.2f} MB")
     print(f"  Compressed size: {compressed_size / (1024 * 1024):.2f} MB")

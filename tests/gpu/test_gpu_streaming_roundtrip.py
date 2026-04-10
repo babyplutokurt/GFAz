@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GPU rolling streaming round-trip test:
+GPU rolling direct-writer round-trip test:
 1) Parse GFA to original GfaGraph
 2) Convert original graph to GfaGraph_gpu
 3) GPU compress using the rolling scheduler
@@ -119,7 +119,7 @@ def find_gfaz_binary():
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="GPU rolling streaming round-trip test through CLI writer"
+        description="GPU rolling direct-writer round-trip test through CLI writer"
     )
     parser.add_argument("gfa_file", help="Input GFA file")
     parser.add_argument(
@@ -132,14 +132,14 @@ def parse_args():
         "--chunk-GB",
         dest="chunk_gb",
         type=float,
-        default=None,
+        default=4096 / (1024 * 1024 * 1024),
         help="Compression rolling chunk size in GiB (e.g. 0.5 for 512MiB)",
     )
     parser.add_argument(
         "--traversals-per-chunk",
         type=int,
-        default=128,
-        help="Rolling GPU decompression traversals per chunk (default: 128)",
+        default=16,
+        help="Rolling GPU decompression traversals per chunk (default: 16)",
     )
     parser.add_argument(
         "--stats",
@@ -153,14 +153,11 @@ def main():
     args = parse_args()
     gfaz_bin = find_gfaz_binary()
 
-    print("=== GPU Rolling Streaming Round-Trip Test ===")
+    print("=== GPU Rolling Direct-Writer Round-Trip Test ===")
     print(f"Input:      {args.gfa_file}")
     print(f"Rounds:     {args.rounds}")
-    print("Mode:       rolling compression + rolling CLI decompression")
-    print(
-        "Chunk GiB:  "
-        f"{args.chunk_gb if args.chunk_gb is not None else 'default'}"
-    )
+    print("Mode:       rolling compression + rolling direct writer")
+    print(f"Chunk GiB:  {args.chunk_gb}")
     print(f"Traversals: {args.traversals_per_chunk}")
     print(f"CLI:        {gfaz_bin}")
 
@@ -243,7 +240,7 @@ def main():
         print("\n[6] Verify original vs streamed-output GfaGraph")
         ok = gfac.verify_round_trip(original_graph, streamed_graph)
         if not ok:
-            print("❌ GPU rolling streaming round-trip verification FAILED")
+            print("❌ GPU rolling direct-writer round-trip verification FAILED")
             return 1
     finally:
         if os.path.exists(tmp_gfaz_path):
@@ -251,7 +248,7 @@ def main():
         if os.path.exists(tmp_out_path):
             os.remove(tmp_out_path)
 
-    print("✅ PASS GPU rolling streaming round-trip verification PASSED")
+    print("✅ PASS GPU rolling direct-writer round-trip verification PASSED")
     print("\nResults")
     print(f"  Original size:   {original_file_size / (1024 * 1024):.2f} MB")
     print(f"  Compressed size: {compressed_size / (1024 * 1024):.2f} MB")
