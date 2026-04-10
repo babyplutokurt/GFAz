@@ -42,8 +42,8 @@ void stream_gpu_traversal_column_to_writer(
         write_chunk(out, buffer, metadata);
       },
       {.num_host_buffers = 2,
-       .max_expanded_chunk_bytes =
-           std::max<size_t>(1, options.max_expanded_chunk_bytes)},
+       .rolling_output_chunk_bytes =
+           std::max<size_t>(1, options.rolling_output_chunk_bytes)},
       &stats);
   debug_stages.push_back({payload_label, stats.payload_decode_ms});
   debug_stages.push_back({write_label, stats.expand_ms});

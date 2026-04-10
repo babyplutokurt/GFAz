@@ -619,7 +619,8 @@ void rolling_expand_and_inverse_delta_decode(
 
   const RollingDecodeSchedule schedule = build_rolling_decode_schedule(
       d_output_offsets, d_lens_final, d_encoded_path.size(), output_size,
-      traversals_per_chunk, gpu_decompression::kDefaultMaxExpandedChunkBytes);
+      traversals_per_chunk,
+      gpu_decompression::kDefaultRollingOutputChunkBytes);
 
   thrust::device_vector<uint64_t> d_offs_final(schedule.expanded_offsets.begin(),
                                                schedule.expanded_offsets.end());

@@ -828,8 +828,16 @@ PYBIND11_MODULE(gfa_compression, m) {
   py::class_<gpu_compression::GpuCompressionOptions>(m, "GpuCompressionOptions")
       .def(py::init<>())
       .def_readwrite(
+          "rolling_input_chunk_bytes",
+          &gpu_compression::GpuCompressionOptions::rolling_input_chunk_bytes)
+      .def_property(
           "rolling_chunk_bytes",
-          &gpu_compression::GpuCompressionOptions::rolling_chunk_bytes)
+          [](gpu_compression::GpuCompressionOptions &options) {
+            return options.rolling_input_chunk_bytes;
+          },
+          [](gpu_compression::GpuCompressionOptions &options, size_t value) {
+            options.rolling_input_chunk_bytes = value;
+          })
       .def_readwrite(
           "force_rolling_scheduler",
           &gpu_compression::GpuCompressionOptions::force_rolling_scheduler)
@@ -843,9 +851,18 @@ PYBIND11_MODULE(gfa_compression, m) {
       .def_readwrite(
           "traversals_per_chunk",
           &gpu_decompression::GpuDecompressionOptions::traversals_per_chunk)
-      .def_readwrite("max_expanded_chunk_bytes",
+      .def_readwrite("rolling_output_chunk_bytes",
                      &gpu_decompression::GpuDecompressionOptions::
-                         max_expanded_chunk_bytes)
+                         rolling_output_chunk_bytes)
+      .def_property(
+          "max_expanded_chunk_bytes",
+          [](gpu_decompression::GpuDecompressionOptions &options) {
+            return options.rolling_output_chunk_bytes;
+          },
+          [](gpu_decompression::GpuDecompressionOptions &options,
+             size_t value) {
+            options.rolling_output_chunk_bytes = value;
+          })
       .def_readwrite("use_legacy_full_decompression",
                      &gpu_decompression::GpuDecompressionOptions::
                          use_legacy_full_decompression);

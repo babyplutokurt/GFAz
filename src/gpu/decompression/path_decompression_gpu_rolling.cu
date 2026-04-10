@@ -233,15 +233,16 @@ void stream_decompress_paths_gpu_rolling(
     std::cout << "[GPU Decompress] Streaming rolling path chunks with "
               << num_host_buffers << " pinned host buffers ("
               << resolved_traversals_per_chunk << " traversals per chunk), "
-              << "max expanded chunk="
-              << (stream_options.max_expanded_chunk_bytes / (1024.0 * 1024.0))
+              << "rolling output chunk="
+              << (stream_options.rolling_output_chunk_bytes /
+                  (1024.0 * 1024.0))
               << " MiB, min_rule_id=" << min_rule_id << std::endl;
   }
 
   RollingPathDecodePlan plan = prepare_rolling_path_decode_plan(
       d_encoded_path, d_rules_first, d_rules_second, min_rule_id, num_rules,
       d_lens_final, resolved_traversals_per_chunk,
-      stream_options.max_expanded_chunk_bytes);
+      stream_options.rolling_output_chunk_bytes);
   thrust::device_vector<int32_t> d_chunk_workspace;
 
   std::vector<RollingPathPinnedHostBuffer> host_buffers(num_host_buffers);
@@ -374,7 +375,7 @@ void decompress_paths_gpu_rolling(
     const thrust::device_vector<int32_t> &d_rules_second,
     uint32_t min_rule_id, size_t num_rules,
     const thrust::device_vector<uint32_t> &d_lens_final,
-    uint32_t traversals_per_chunk, size_t max_expanded_chunk_bytes,
+    uint32_t traversals_per_chunk, size_t rolling_output_chunk_bytes,
     std::vector<int32_t> &out_data) {
   const uint32_t resolved_traversals_per_chunk =
       std::max<uint32_t>(1, traversals_per_chunk);
@@ -383,8 +384,8 @@ void decompress_paths_gpu_rolling(
     std::cout << "[GPU Decompress] Expanding path with rolling chunk "
                  "scheduler ("
               << resolved_traversals_per_chunk
-              << " traversals per chunk, max expanded chunk "
-              << (max_expanded_chunk_bytes / (1024.0 * 1024.0))
+              << " traversals per chunk, rolling output chunk "
+              << (rolling_output_chunk_bytes / (1024.0 * 1024.0))
               << " MiB), min_rule_id=" << min_rule_id
               << std::endl;
   }
@@ -393,7 +394,7 @@ void decompress_paths_gpu_rolling(
   RollingPathDecodePlan plan = prepare_rolling_path_decode_plan(
       d_encoded_path, d_rules_first, d_rules_second, min_rule_id, num_rules,
       d_lens_final, resolved_traversals_per_chunk,
-      std::max<size_t>(1, max_expanded_chunk_bytes));
+      std::max<size_t>(1, rolling_output_chunk_bytes));
   const auto prepare_end = Clock::now();
   out_data.resize(static_cast<size_t>(plan.schedule.output_size));
   thrust::device_vector<int32_t> d_chunk_workspace;

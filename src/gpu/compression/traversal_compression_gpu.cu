@@ -16,8 +16,9 @@ GpuTraversalCompressionPath resolve_gpu_traversal_compression_path(
     size_t *resolved_chunk_bytes) {
   const size_t traversal_bytes = paths.data.size() * sizeof(int32_t);
   const size_t chunk_bytes =
-      (options.rolling_chunk_bytes > 0) ? options.rolling_chunk_bytes
-                                        : default_rolling_chunk_bytes();
+      (options.rolling_input_chunk_bytes > 0)
+          ? options.rolling_input_chunk_bytes
+          : default_rolling_chunk_bytes();
   if (resolved_chunk_bytes != nullptr) {
     *resolved_chunk_bytes = chunk_bytes;
   }
@@ -26,8 +27,8 @@ GpuTraversalCompressionPath resolve_gpu_traversal_compression_path(
     std::cerr << "[GPU Scheduler] traversal=" << format_size(traversal_bytes)
               << ", chunk_budget=" << format_size(chunk_bytes)
               << ", requested_chunk="
-              << (options.rolling_chunk_bytes > 0
-                      ? format_size(options.rolling_chunk_bytes)
+              << (options.rolling_input_chunk_bytes > 0
+                      ? format_size(options.rolling_input_chunk_bytes)
                       : std::string("default"))
               << ", policy="
               << (options.force_rolling_scheduler

@@ -8,11 +8,12 @@
 
 namespace gpu_decompression {
 
-constexpr size_t kDefaultMaxExpandedChunkBytes = 1024ull * 1024ull * 1024ull;
+constexpr size_t kDefaultRollingOutputChunkBytes =
+    1024ull * 1024ull * 1024ull;
 
 struct GpuDecompressionOptions {
   uint32_t traversals_per_chunk = 4096;
-  size_t max_expanded_chunk_bytes = kDefaultMaxExpandedChunkBytes;
+  size_t rolling_output_chunk_bytes = kDefaultRollingOutputChunkBytes;
   bool use_legacy_full_decompression = false;
 };
 

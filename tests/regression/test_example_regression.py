@@ -147,7 +147,7 @@ def gpu_compress_options_legacy():
 def gpu_compress_options_rolling(args):
   options = gfa_lib.GpuCompressionOptions()
   options.force_rolling_scheduler = True
-  options.rolling_chunk_bytes = args.gpu_rolling_chunk_bytes
+  options.rolling_input_chunk_bytes = args.gpu_rolling_chunk_bytes
   return options
 
 

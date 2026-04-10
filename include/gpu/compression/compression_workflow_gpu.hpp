@@ -10,7 +10,7 @@
 namespace gpu_compression {
 
 struct GpuCompressionOptions {
-  size_t rolling_chunk_bytes = 0;
+  size_t rolling_input_chunk_bytes = 0;
   bool force_rolling_scheduler = false;
   bool force_full_device_legacy = false;
 };

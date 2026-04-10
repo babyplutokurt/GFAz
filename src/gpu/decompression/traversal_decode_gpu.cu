@@ -109,7 +109,7 @@ std::vector<int32_t> decompress_gpu_traversal_materialized(
         payload.d_encoded, rulebook.d_rules_first, rulebook.d_rules_second,
         rulebook.min_rule_id, rulebook.num_rules, payload.d_final_lengths,
         std::max<uint32_t>(1, options.traversals_per_chunk),
-        std::max<size_t>(1, options.max_expanded_chunk_bytes), result);
+        std::max<size_t>(1, options.rolling_output_chunk_bytes), result);
   }
 
   if (stats != nullptr) {

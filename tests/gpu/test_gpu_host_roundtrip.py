@@ -96,7 +96,9 @@ def main():
     comp_opts = gfac.GpuCompressionOptions()
     comp_opts.force_rolling_scheduler = True
     if args.chunk_GB is not None:
-        comp_opts.rolling_chunk_bytes = int(args.chunk_GB * 1024 * 1024 * 1024)
+        comp_opts.rolling_input_chunk_bytes = int(
+            args.chunk_GB * 1024 * 1024 * 1024
+        )
     compressed = gfac.compress_gpu_graph(gpu_graph_original, args.rounds, comp_opts)
     t_compress_end = time.perf_counter()
 

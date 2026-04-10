@@ -33,7 +33,7 @@ struct RollingPathDecodePlan {
 
 gpu_codec::RollingDecodeSchedule build_passthrough_decode_schedule(
     const thrust::device_vector<uint32_t> &d_lens_final, size_t encoded_size,
-    uint32_t traversals_per_chunk, size_t max_expanded_chunk_bytes);
+    uint32_t traversals_per_chunk, size_t rolling_output_chunk_bytes);
 
 RollingPathDecodePlan prepare_rolling_path_decode_plan(
     const thrust::device_vector<int32_t> &d_encoded_path,
@@ -41,7 +41,7 @@ RollingPathDecodePlan prepare_rolling_path_decode_plan(
     const thrust::device_vector<int32_t> &d_rules_second,
     uint32_t min_rule_id, size_t num_rules,
     const thrust::device_vector<uint32_t> &d_lens_final,
-    uint32_t traversals_per_chunk, size_t max_expanded_chunk_bytes);
+    uint32_t traversals_per_chunk, size_t rolling_output_chunk_bytes);
 
 RollingPathChunkMetadata describe_rolling_path_chunk(
     const RollingPathDecodePlan &plan, size_t chunk_index);

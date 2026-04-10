@@ -32,7 +32,7 @@ struct FinalExpansionSizeOp {
 
 gpu_codec::RollingDecodeSchedule build_passthrough_decode_schedule(
     const thrust::device_vector<uint32_t> &d_lens_final, size_t encoded_size,
-    uint32_t traversals_per_chunk, size_t max_expanded_chunk_bytes) {
+    uint32_t traversals_per_chunk, size_t rolling_output_chunk_bytes) {
   gpu_codec::RollingDecodeSchedule schedule;
   const uint32_t num_segs_final = static_cast<uint32_t>(d_lens_final.size());
   if (num_segs_final == 0) {
@@ -65,7 +65,7 @@ gpu_codec::RollingDecodeSchedule build_passthrough_decode_schedule(
     if (i - current_seg_begin >= traversals_per_chunk) {
       split = true;
     }
-    if (size_so_far >= static_cast<int64_t>(max_expanded_chunk_bytes) &&
+    if (size_so_far >= static_cast<int64_t>(rolling_output_chunk_bytes) &&
         i > current_seg_begin) {
       split = true;
     }
@@ -95,7 +95,7 @@ RollingPathDecodePlan prepare_rolling_path_decode_plan(
     const thrust::device_vector<int32_t> &d_rules_second,
     uint32_t min_rule_id, size_t num_rules,
     const thrust::device_vector<uint32_t> &d_lens_final,
-    uint32_t traversals_per_chunk, size_t max_expanded_chunk_bytes) {
+    uint32_t traversals_per_chunk, size_t rolling_output_chunk_bytes) {
   RollingPathDecodePlan plan;
   plan.min_rule_id = min_rule_id;
   plan.max_rule_id = min_rule_id + static_cast<uint32_t>(num_rules);
@@ -105,7 +105,7 @@ RollingPathDecodePlan prepare_rolling_path_decode_plan(
   if (num_rules == 0 || d_encoded_path.empty()) {
     plan.schedule = build_passthrough_decode_schedule(
         d_lens_final, d_encoded_path.size(), traversals_per_chunk,
-        max_expanded_chunk_bytes);
+        rolling_output_chunk_bytes);
     plan.d_offs_final = thrust::device_vector<uint64_t>(
         plan.schedule.expanded_offsets.begin(),
         plan.schedule.expanded_offsets.end());
@@ -141,7 +141,7 @@ RollingPathDecodePlan prepare_rolling_path_decode_plan(
 
   plan.schedule = gpu_codec::build_rolling_decode_schedule(
       plan.d_output_offsets, d_lens_final, d_encoded_path.size(), output_size,
-      traversals_per_chunk, max_expanded_chunk_bytes);
+      traversals_per_chunk, rolling_output_chunk_bytes);
   plan.d_offs_final = thrust::device_vector<uint64_t>(
       plan.schedule.expanded_offsets.begin(),
       plan.schedule.expanded_offsets.end());

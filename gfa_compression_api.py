@@ -186,7 +186,7 @@ class GFACompressor:
         start_time = time.perf_counter()
         options = gfa_lib.GpuCompressionOptions()
         if chunk_bytes is not None:
-            options.rolling_chunk_bytes = chunk_bytes
+            options.rolling_input_chunk_bytes = chunk_bytes
         options.force_rolling_scheduler = force_rolling
         options.force_full_device_legacy = force_legacy
         
