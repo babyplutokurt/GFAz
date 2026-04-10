@@ -137,25 +137,35 @@ set(GFA_CORE_SOURCES
   src/io/gfa_writer.cpp
   src/io/gfa_write_utils.cpp
   src/workflows/compression_utils.cpp
-  src/gpu/gfa_graph_gpu.cpp
-  src/gpu/path_chunk_planner.cpp
+  # GPU backend core + host-side helpers
+  src/gpu/core/gfa_graph_gpu.cpp
+  src/gpu/core/path_chunk_planner.cpp
+  src/gpu/io/gfa_writer_gpu_direct.cpp
 )
 
 set(GFA_CUDA_SOURCES
-  src/gpu/codec_gpu.cu
-  src/gpu/compression_workflow_gpu.cu
-  src/gpu/path_compression_gpu_legacy.cu
-  src/gpu/path_compression_gpu_rolling.cu
-  src/gpu/path_rulebook_gpu.cu
-  src/gpu/path_rule_remap_gpu.cu
-  src/gpu/path_expand_gpu.cu
-  src/gpu/metadata_codec_gpu.cu
-  src/gpu/decompression_workflow_gpu.cu
-  src/gpu/path_decompression_gpu_plan.cu
-  src/gpu/path_decompression_gpu_legacy.cu
-  src/gpu/path_decompression_gpu_rolling.cu
-  src/gpu/gfa_writer_gpu.cu
-  src/gpu/serialization_gpu.cpp
+  # GPU backend core
+  src/gpu/core/codec_gpu.cu
+  src/gpu/core/serialization_gpu.cpp
+
+  # GPU compression pipeline
+  src/gpu/compression/compression_workflow_gpu.cu
+  src/gpu/compression/path_compression_gpu_legacy.cu
+  src/gpu/compression/path_compression_gpu_rolling.cu
+  src/gpu/compression/path_rulebook_gpu.cu
+  src/gpu/compression/path_rule_remap_gpu.cu
+  src/gpu/compression/metadata_codec_gpu.cu
+
+  # GPU decompression pipeline
+  src/gpu/decompression/decompression_workflow_gpu.cu
+  src/gpu/decompression/decompression_primitives_gpu.cu
+  src/gpu/decompression/path_decompression_gpu_plan.cu
+  src/gpu/decompression/path_decompression_gpu_legacy.cu
+  src/gpu/decompression/path_decompression_gpu_rolling.cu
+  src/gpu/decompression/path_expand_gpu.cu
+
+  # GPU direct writer
+  src/gpu/io/gfa_writer_gpu.cu
 )
 
 function(configure_gfa_target target_name)

@@ -20,10 +20,10 @@
 #include "utils/runtime_utils.hpp"
 
 #ifdef ENABLE_CUDA
-#include "gpu/compression_workflow_gpu.hpp"
-#include "gpu/decompression_workflow_gpu.hpp"
-#include "gpu/gfa_graph_gpu.hpp"
-#include "gpu/gfa_writer_gpu.hpp"
+#include "gpu/compression/compression_workflow_gpu.hpp"
+#include "gpu/decompression/decompression_workflow_gpu.hpp"
+#include "gpu/core/gfa_graph_gpu.hpp"
+#include "gpu/io/gfa_writer_gpu.hpp"
 
 #endif
 

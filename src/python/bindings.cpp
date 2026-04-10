@@ -9,17 +9,17 @@
 #include "workflows/extraction_workflow.hpp"
 #include "io/gfa_parser.hpp"
 #include "io/gfa_writer.hpp"
-#include "gpu/gfa_graph_gpu.hpp"
+#include "gpu/core/gfa_graph_gpu.hpp"
 #include "codec/serialization.hpp"
 #include <iostream>
 #include <stack>
 
 #ifdef ENABLE_CUDA
-#include "gpu/codec_gpu.cuh"
-#include "gpu/compression_workflow_gpu.hpp"
-#include "gpu/decompression_workflow_gpu.hpp"
-#include "gpu/serialization_gpu.hpp"
-#include "gpu/gfa_writer_gpu.hpp"
+#include "gpu/core/codec_gpu.cuh"
+#include "gpu/compression/compression_workflow_gpu.hpp"
+#include "gpu/decompression/decompression_workflow_gpu.hpp"
+#include "gpu/core/serialization_gpu.hpp"
+#include "gpu/io/gfa_writer_gpu.hpp"
 
 #endif
 
