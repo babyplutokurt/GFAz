@@ -12,8 +12,11 @@
 #include <thrust/scan.h>
 #include <thrust/transform_reduce.h>
 
+#include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #define CUDA_CHECK(call)                                                       \
   do {                                                                         \
@@ -26,6 +29,144 @@
   } while (0)
 
 namespace gpu_codec {
+
+namespace {
+
+struct HostExpandedRulebook {
+  std::vector<int64_t> rule_sizes;
+  std::vector<int64_t> rule_offsets;
+  std::vector<int32_t> expanded_rules;
+};
+
+inline uint32_t symbol_abs_id(int32_t value) {
+  return static_cast<uint32_t>(value >= 0 ? value : -value);
+}
+
+HostExpandedRulebook build_expanded_rulebook_host(
+    const thrust::device_vector<int32_t> &d_rules_first,
+    const thrust::device_vector<int32_t> &d_rules_second, uint32_t min_rule_id) {
+  const size_t num_rules =
+      std::min(d_rules_first.size(), d_rules_second.size());
+  HostExpandedRulebook result;
+  result.rule_sizes.resize(num_rules, 0);
+  result.rule_offsets.resize(num_rules, 0);
+  if (num_rules == 0) {
+    return result;
+  }
+
+  std::vector<int32_t> h_rules_first(num_rules);
+  std::vector<int32_t> h_rules_second(num_rules);
+  thrust::copy(d_rules_first.begin(),
+               d_rules_first.begin() + static_cast<std::ptrdiff_t>(num_rules),
+               h_rules_first.begin());
+  thrust::copy(d_rules_second.begin(),
+               d_rules_second.begin() + static_cast<std::ptrdiff_t>(num_rules),
+               h_rules_second.begin());
+
+  const uint32_t max_rule_id = min_rule_id + static_cast<uint32_t>(num_rules);
+
+  auto child_size = [&](int32_t symbol, size_t rule_idx) -> int64_t {
+    const uint32_t abs_symbol = symbol_abs_id(symbol);
+    if (abs_symbol < min_rule_id || abs_symbol >= max_rule_id) {
+      return 1;
+    }
+
+    const size_t child_idx = static_cast<size_t>(abs_symbol - min_rule_id);
+    if (child_idx >= rule_idx) {
+      throw std::runtime_error(
+          "GPU rule expansion error: encountered non-topological rule dependency");
+    }
+    return result.rule_sizes[child_idx];
+  };
+
+  int64_t total_expanded_size = 0;
+  for (size_t rule_idx = 0; rule_idx < num_rules; ++rule_idx) {
+    const int64_t size_a = child_size(h_rules_first[rule_idx], rule_idx);
+    const int64_t size_b = child_size(h_rules_second[rule_idx], rule_idx);
+    if (size_a > std::numeric_limits<int64_t>::max() - size_b ||
+        total_expanded_size >
+            std::numeric_limits<int64_t>::max() - (size_a + size_b)) {
+      throw std::runtime_error(
+          "GPU rule expansion error: expanded rulebook exceeds int64 capacity");
+    }
+
+    result.rule_sizes[rule_idx] = size_a + size_b;
+    result.rule_offsets[rule_idx] = total_expanded_size;
+    total_expanded_size += result.rule_sizes[rule_idx];
+  }
+
+  if (total_expanded_size < 0) {
+    throw std::runtime_error(
+        "GPU rule expansion error: invalid negative expanded rulebook size");
+  }
+
+  result.expanded_rules.resize(static_cast<size_t>(total_expanded_size));
+
+  auto append_symbol = [&](size_t rule_idx, int32_t symbol,
+                           size_t &write_pos) {
+    const uint32_t abs_symbol = symbol_abs_id(symbol);
+    if (abs_symbol < min_rule_id || abs_symbol >= max_rule_id) {
+      result.expanded_rules[write_pos++] = symbol;
+      return;
+    }
+
+    const size_t child_idx = static_cast<size_t>(abs_symbol - min_rule_id);
+    if (child_idx >= rule_idx) {
+      throw std::runtime_error(
+          "GPU rule expansion error: encountered non-topological rule dependency");
+    }
+
+    const size_t child_offset =
+        static_cast<size_t>(result.rule_offsets[child_idx]);
+    const size_t child_size_sz =
+        static_cast<size_t>(result.rule_sizes[child_idx]);
+    if (symbol >= 0) {
+      std::copy(result.expanded_rules.begin() +
+                    static_cast<std::ptrdiff_t>(child_offset),
+                result.expanded_rules.begin() +
+                    static_cast<std::ptrdiff_t>(child_offset + child_size_sz),
+                result.expanded_rules.begin() +
+                    static_cast<std::ptrdiff_t>(write_pos));
+      write_pos += child_size_sz;
+      return;
+    }
+
+    for (size_t i = 0; i < child_size_sz; ++i) {
+      result.expanded_rules[write_pos + i] =
+          -result.expanded_rules[child_offset + child_size_sz - 1 - i];
+    }
+    write_pos += child_size_sz;
+  };
+
+  for (size_t rule_idx = 0; rule_idx < num_rules; ++rule_idx) {
+    size_t write_pos = static_cast<size_t>(result.rule_offsets[rule_idx]);
+    append_symbol(rule_idx, h_rules_first[rule_idx], write_pos);
+    append_symbol(rule_idx, h_rules_second[rule_idx], write_pos);
+  }
+
+  return result;
+}
+
+void fill_device_expanded_rulebook(
+    const HostExpandedRulebook &host_rulebook,
+    thrust::device_vector<int64_t> *d_rule_sizes,
+    thrust::device_vector<int64_t> *d_rule_offsets,
+    thrust::device_vector<int32_t> *d_expanded_rules) {
+  if (d_rule_sizes != nullptr) {
+    d_rule_sizes->assign(host_rulebook.rule_sizes.begin(),
+                         host_rulebook.rule_sizes.end());
+  }
+  if (d_rule_offsets != nullptr) {
+    d_rule_offsets->assign(host_rulebook.rule_offsets.begin(),
+                           host_rulebook.rule_offsets.end());
+  }
+  if (d_expanded_rules != nullptr) {
+    d_expanded_rules->assign(host_rulebook.expanded_rules.begin(),
+                             host_rulebook.expanded_rules.end());
+  }
+}
+
+} // namespace
 
 struct ExpansionSizeOp_Deprecated {
   uint32_t min_rule_id;
@@ -141,102 +282,25 @@ thrust::device_vector<int32_t> expand_path_device_vec_iterative(
   return std::move(*d_current);
 }
 
-static constexpr int EXPANSION_STACK_CAPACITY = 256;
-
-__global__ void compute_rule_final_sizes_kernel(
-    const int32_t *__restrict__ d_rules_first,
-    const int32_t *__restrict__ d_rules_second,
-    int64_t *__restrict__ d_rule_sizes,
-    size_t num_rules, uint32_t min_rule_id) {
-  size_t rule_idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (rule_idx >= num_rules) {
-    return;
-  }
-
-  int32_t stack[EXPANSION_STACK_CAPACITY];
-  int stack_ptr = 0;
-  int64_t final_size = 0;
-
-  stack[stack_ptr++] = d_rules_first[rule_idx];
-  stack[stack_ptr++] = d_rules_second[rule_idx];
-
-  while (stack_ptr > 0) {
-    int32_t val = stack[--stack_ptr];
-    uint32_t abs_val = static_cast<uint32_t>(val >= 0 ? val : -val);
-
-    if (abs_val >= min_rule_id && abs_val < min_rule_id + num_rules) {
-      uint32_t child_idx = abs_val - min_rule_id;
-      if (stack_ptr + 2 <= EXPANSION_STACK_CAPACITY) {
-        stack[stack_ptr++] = d_rules_first[child_idx];
-        stack[stack_ptr++] = d_rules_second[child_idx];
-      } else {
-        final_size++;
-      }
-    } else {
-      final_size++;
-    }
-  }
-
-  d_rule_sizes[rule_idx] = final_size;
-}
-
 void compute_rule_final_sizes_device_vec(
     const thrust::device_vector<int32_t> &d_rules_first,
     const thrust::device_vector<int32_t> &d_rules_second,
     thrust::device_vector<int64_t> &d_rule_sizes, uint32_t min_rule_id) {
-  const size_t num_rules = d_rule_sizes.size();
-  if (num_rules == 0) {
-    return;
-  }
-
-  const int threads = 256;
-  const int blocks = (num_rules + threads - 1) / threads;
-  compute_rule_final_sizes_kernel<<<blocks, threads>>>(
-      thrust::raw_pointer_cast(d_rules_first.data()),
-      thrust::raw_pointer_cast(d_rules_second.data()),
-      thrust::raw_pointer_cast(d_rule_sizes.data()), num_rules, min_rule_id);
-  CUDA_CHECK(cudaGetLastError());
+  HostExpandedRulebook host_rulebook =
+      build_expanded_rulebook_host(d_rules_first, d_rules_second, min_rule_id);
+  fill_device_expanded_rulebook(host_rulebook, &d_rule_sizes, nullptr, nullptr);
 }
 
-__global__ void expand_rules_to_buffer_kernel(
-    const int32_t *__restrict__ d_rules_first,
-    const int32_t *__restrict__ d_rules_second,
-    const int64_t *__restrict__ d_rule_offsets,
-    int32_t *__restrict__ d_expanded_rules,
-    size_t num_rules, uint32_t min_rule_id) {
-  size_t rule_idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (rule_idx >= num_rules) {
-    return;
-  }
-
-  int64_t write_pos = d_rule_offsets[rule_idx];
-  int32_t stack[EXPANSION_STACK_CAPACITY];
-  int stack_ptr = 0;
-
-  stack[stack_ptr++] = d_rules_second[rule_idx];
-  stack[stack_ptr++] = d_rules_first[rule_idx];
-
-  while (stack_ptr > 0) {
-    int32_t val = stack[--stack_ptr];
-    uint32_t abs_val = static_cast<uint32_t>(val >= 0 ? val : -val);
-
-    if (abs_val >= min_rule_id && abs_val < min_rule_id + num_rules) {
-      uint32_t child_idx = abs_val - min_rule_id;
-      if (stack_ptr + 2 <= EXPANSION_STACK_CAPACITY) {
-        if (val >= 0) {
-          stack[stack_ptr++] = d_rules_second[child_idx];
-          stack[stack_ptr++] = d_rules_first[child_idx];
-        } else {
-          stack[stack_ptr++] = -d_rules_first[child_idx];
-          stack[stack_ptr++] = -d_rules_second[child_idx];
-        }
-      } else {
-        d_expanded_rules[write_pos++] = val;
-      }
-    } else {
-      d_expanded_rules[write_pos++] = val;
-    }
-  }
+void prepare_expanded_rules_device_vec(
+    const thrust::device_vector<int32_t> &d_rules_first,
+    const thrust::device_vector<int32_t> &d_rules_second,
+    thrust::device_vector<int64_t> &d_rule_sizes,
+    thrust::device_vector<int64_t> &d_rule_offsets,
+    thrust::device_vector<int32_t> &d_expanded_rules, uint32_t min_rule_id) {
+  HostExpandedRulebook host_rulebook =
+      build_expanded_rulebook_host(d_rules_first, d_rules_second, min_rule_id);
+  fill_device_expanded_rulebook(host_rulebook, &d_rule_sizes, &d_rule_offsets,
+                                &d_expanded_rules);
 }
 
 void expand_rules_to_buffer_device_vec(
@@ -244,20 +308,24 @@ void expand_rules_to_buffer_device_vec(
     const thrust::device_vector<int32_t> &d_rules_second,
     const thrust::device_vector<int64_t> &d_rule_offsets,
     thrust::device_vector<int32_t> &d_expanded_rules, uint32_t min_rule_id) {
-  const size_t num_rules = d_rule_offsets.size();
-  if (num_rules == 0) {
-    return;
+  HostExpandedRulebook host_rulebook =
+      build_expanded_rulebook_host(d_rules_first, d_rules_second, min_rule_id);
+
+  if (host_rulebook.rule_offsets.size() != d_rule_offsets.size()) {
+    throw std::runtime_error(
+        "GPU rule expansion error: rule offset count mismatch");
   }
 
-  const int threads = 256;
-  const int blocks = (num_rules + threads - 1) / threads;
-  expand_rules_to_buffer_kernel<<<blocks, threads>>>(
-      thrust::raw_pointer_cast(d_rules_first.data()),
-      thrust::raw_pointer_cast(d_rules_second.data()),
-      thrust::raw_pointer_cast(d_rule_offsets.data()),
-      thrust::raw_pointer_cast(d_expanded_rules.data()), num_rules,
-      min_rule_id);
-  CUDA_CHECK(cudaGetLastError());
+  std::vector<int64_t> expected_offsets(d_rule_offsets.size());
+  thrust::copy(d_rule_offsets.begin(), d_rule_offsets.end(),
+               expected_offsets.begin());
+  if (expected_offsets != host_rulebook.rule_offsets) {
+    throw std::runtime_error(
+        "GPU rule expansion error: caller provided inconsistent rule offsets");
+  }
+
+  fill_device_expanded_rulebook(host_rulebook, nullptr, nullptr,
+                                &d_expanded_rules);
 }
 
 struct FinalExpansionSizeOp {
@@ -329,32 +397,12 @@ expand_path_device_vec(const thrust::device_vector<int32_t> &d_encoded_path,
   const uint32_t max_rule_id = min_rule_id + static_cast<uint32_t>(num_rules);
   const int threads = 256;
 
-  thrust::device_vector<int64_t> d_rule_sizes(num_rules);
-  {
-    int blocks = (num_rules + threads - 1) / threads;
-    compute_rule_final_sizes_kernel<<<blocks, threads>>>(
-        thrust::raw_pointer_cast(d_rules_first.data()),
-        thrust::raw_pointer_cast(d_rules_second.data()),
-        thrust::raw_pointer_cast(d_rule_sizes.data()), num_rules, min_rule_id);
-    CUDA_CHECK(cudaGetLastError());
-  }
-
-  thrust::device_vector<int64_t> d_rule_offsets(num_rules);
-  thrust::exclusive_scan(d_rule_sizes.begin(), d_rule_sizes.end(),
-                         d_rule_offsets.begin());
-
-  int64_t total_expanded_size = d_rule_offsets.back() + d_rule_sizes.back();
-  thrust::device_vector<int32_t> d_expanded_rules(total_expanded_size);
-  {
-    int blocks = (num_rules + threads - 1) / threads;
-    expand_rules_to_buffer_kernel<<<blocks, threads>>>(
-        thrust::raw_pointer_cast(d_rules_first.data()),
-        thrust::raw_pointer_cast(d_rules_second.data()),
-        thrust::raw_pointer_cast(d_rule_offsets.data()),
-        thrust::raw_pointer_cast(d_expanded_rules.data()), num_rules,
-        min_rule_id);
-    CUDA_CHECK(cudaGetLastError());
-  }
+  thrust::device_vector<int64_t> d_rule_sizes;
+  thrust::device_vector<int64_t> d_rule_offsets;
+  thrust::device_vector<int32_t> d_expanded_rules;
+  prepare_expanded_rules_device_vec(d_rules_first, d_rules_second, d_rule_sizes,
+                                    d_rule_offsets, d_expanded_rules,
+                                    min_rule_id);
 
   size_t num_elements = d_encoded_path.size();
   int blocks = (num_elements + threads - 1) / threads;
@@ -574,34 +622,13 @@ void rolling_expand_and_inverse_delta_decode(
     std::vector<int32_t> &h_result_data,
     uint32_t traversals_per_chunk) {
   const uint32_t max_rule_id = min_rule_id + static_cast<uint32_t>(num_rules);
-  const int threads = 256;
 
-  thrust::device_vector<int64_t> d_rule_sizes(num_rules);
-  {
-    int blocks = (num_rules + threads - 1) / threads;
-    compute_rule_final_sizes_kernel<<<blocks, threads>>>(
-        thrust::raw_pointer_cast(d_rules_first.data()),
-        thrust::raw_pointer_cast(d_rules_second.data()),
-        thrust::raw_pointer_cast(d_rule_sizes.data()), num_rules, min_rule_id);
-    CUDA_CHECK(cudaGetLastError());
-  }
-
-  thrust::device_vector<int64_t> d_rule_offsets(num_rules);
-  thrust::exclusive_scan(d_rule_sizes.begin(), d_rule_sizes.end(),
-                         d_rule_offsets.begin());
-
-  int64_t total_expanded_size = d_rule_offsets.back() + d_rule_sizes.back();
-  thrust::device_vector<int32_t> d_expanded_rules(total_expanded_size);
-  {
-    int blocks = (num_rules + threads - 1) / threads;
-    expand_rules_to_buffer_kernel<<<blocks, threads>>>(
-        thrust::raw_pointer_cast(d_rules_first.data()),
-        thrust::raw_pointer_cast(d_rules_second.data()),
-        thrust::raw_pointer_cast(d_rule_offsets.data()),
-        thrust::raw_pointer_cast(d_expanded_rules.data()), num_rules,
-        min_rule_id);
-    CUDA_CHECK(cudaGetLastError());
-  }
+  thrust::device_vector<int64_t> d_rule_sizes;
+  thrust::device_vector<int64_t> d_rule_offsets;
+  thrust::device_vector<int32_t> d_expanded_rules;
+  prepare_expanded_rules_device_vec(d_rules_first, d_rules_second, d_rule_sizes,
+                                    d_rule_offsets, d_expanded_rules,
+                                    min_rule_id);
 
   size_t num_elements = d_encoded_path.size();
   FinalExpansionSizeOp size_op(thrust::raw_pointer_cast(d_rule_sizes.data()),

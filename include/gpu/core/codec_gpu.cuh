@@ -274,6 +274,14 @@ void compute_rule_final_sizes_device_vec(
     thrust::device_vector<int64_t>& d_rule_sizes,
     uint32_t min_rule_id);
 
+void prepare_expanded_rules_device_vec(
+    const thrust::device_vector<int32_t>& d_rules_first,
+    const thrust::device_vector<int32_t>& d_rules_second,
+    thrust::device_vector<int64_t>& d_rule_sizes,
+    thrust::device_vector<int64_t>& d_rule_offsets,
+    thrust::device_vector<int32_t>& d_expanded_rules,
+    uint32_t min_rule_id);
+
 void expand_rules_to_buffer_device_vec(
     const thrust::device_vector<int32_t>& d_rules_first,
     const thrust::device_vector<int32_t>& d_rules_second,

@@ -112,19 +112,8 @@ RollingPathDecodePlan prepare_rolling_path_decode_plan(
     return plan;
   }
 
-  plan.d_rule_sizes.resize(num_rules);
-  gpu_codec::compute_rule_final_sizes_device_vec(
-      d_rules_first, d_rules_second, plan.d_rule_sizes, min_rule_id);
-
-  plan.d_rule_offsets.resize(num_rules);
-  thrust::exclusive_scan(plan.d_rule_sizes.begin(), plan.d_rule_sizes.end(),
-                         plan.d_rule_offsets.begin());
-
-  const int64_t total_expanded_size =
-      plan.d_rule_offsets.back() + plan.d_rule_sizes.back();
-  plan.d_expanded_rules.resize(total_expanded_size);
-  gpu_codec::expand_rules_to_buffer_device_vec(
-      d_rules_first, d_rules_second, plan.d_rule_offsets,
+  gpu_codec::prepare_expanded_rules_device_vec(
+      d_rules_first, d_rules_second, plan.d_rule_sizes, plan.d_rule_offsets,
       plan.d_expanded_rules, min_rule_id);
 
   plan.d_output_offsets.resize(d_encoded_path.size());
