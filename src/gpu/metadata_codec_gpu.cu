@@ -2,9 +2,13 @@
 #include "gpu/compression_workflow_gpu_internal.hpp"
 #include "gpu/metadata_codec_gpu.hpp"
 
+#include "utils/runtime_utils.hpp"
+
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <string>
@@ -15,13 +19,22 @@ namespace gpu_compression {
 
 namespace {
 
+using Clock = std::chrono::high_resolution_clock;
+using gfz::runtime_utils::elapsed_ms;
+
 std::string flattened_to_string(const FlattenedStrings &flat) {
   return std::string(flat.data.begin(), flat.data.end());
 }
 
+bool verbose_block_debug_enabled() {
+  const char *env = std::getenv("GFAZ_GPU_BLOCK_DEBUG");
+  return env && *env != '\0' && std::string(env) != "0";
+}
+
 void print_compression_stats(const char *label, size_t original_size,
                              size_t compressed_size) {
-  if (!compression_debug_enabled() || original_size == 0) {
+  if (!compression_debug_enabled() || !verbose_block_debug_enabled() ||
+      original_size == 0) {
     return;
   }
 
@@ -30,6 +43,66 @@ void print_compression_stats(const char *label, size_t original_size,
   std::cout << "  [Zstd] " << label << ": " << original_size << " -> "
             << compressed_size << " bytes (" << std::fixed
             << std::setprecision(1) << ratio << "% reduction)" << std::endl;
+}
+
+size_t optional_columns_original_size(
+    const std::vector<OptionalFieldColumn_gpu> &columns) {
+  size_t total = 0;
+  for (const auto &col : columns) {
+    switch (col.type) {
+    case 'i':
+      total += col.int_values.size() * sizeof(int64_t);
+      break;
+    case 'f':
+      total += col.float_values.size() * sizeof(float);
+      break;
+    case 'A':
+      total += col.char_values.size() * sizeof(char);
+      break;
+    case 'Z':
+    case 'J':
+    case 'H':
+      total += col.strings.data.size() * sizeof(char);
+      total += col.strings.lengths.size() * sizeof(uint32_t);
+      break;
+    case 'B':
+      total += col.b_subtypes.size() * sizeof(char);
+      total += col.b_lengths.size() * sizeof(uint32_t);
+      total += col.b_data.size() * sizeof(uint8_t);
+      break;
+    default:
+      break;
+    }
+  }
+  return total;
+}
+
+size_t optional_columns_compressed_size(
+    const std::vector<CompressedOptionalFieldColumn> &columns) {
+  size_t total = 0;
+  for (const auto &col : columns) {
+    total += col.int_values_zstd.payload.size();
+    total += col.float_values_zstd.payload.size();
+    total += col.char_values_zstd.payload.size();
+    total += col.strings_zstd.payload.size();
+    total += col.string_lengths_zstd.payload.size();
+    total += col.b_subtypes_zstd.payload.size();
+    total += col.b_lengths_zstd.payload.size();
+    total += col.b_concat_bytes_zstd.payload.size();
+  }
+  return total;
+}
+
+void add_stage_debug(
+    GpuMetadataCompressionDebugInfo *debug_info, const std::string &label,
+    const std::string &codec_label, double time_ms, size_t original_bytes,
+    size_t compressed_bytes) {
+  if (debug_info == nullptr) {
+    return;
+  }
+
+  debug_info->stages.push_back(GpuMetadataCompressionStageDebugInfo{
+      label, codec_label, time_ms, original_bytes, compressed_bytes});
 }
 
 ZstdCompressedBlock compress_bytes_gpu(const std::vector<uint8_t> &input,
@@ -203,30 +276,36 @@ compress_int32_device_gpu(const thrust::device_vector<int32_t> &d_input,
 }
 
 void compress_graph_metadata_gpu(const GfaGraph_gpu &gpu_graph,
-                                 CompressedData &data) {
-  if (compression_debug_enabled()) {
-    std::cout
-        << "[GPU Compression] Using shared CPU Zstd for metadata compression"
-        << std::endl;
-  }
+                                 CompressedData &data,
+                                 GpuMetadataCompressionDebugInfo *debug_info) {
+  const auto metadata_start = Clock::now();
 
+  auto stage_start = Clock::now();
   compress_flattened_strings_gpu(gpu_graph.path_names, data.names_zstd,
                                  data.name_lengths_zstd, "path_names",
                                  "name_lengths");
   compress_flattened_strings_gpu(gpu_graph.path_overlaps, data.overlaps_zstd,
                                  data.overlap_lengths_zstd, "path_overlaps",
                                  "overlap_lengths");
+  add_stage_debug(debug_info, "compress path metadata", "ZSTD",
+                  elapsed_ms(stage_start, Clock::now()),
+                  gpu_graph.path_names.data.size() +
+                      gpu_graph.path_names.lengths.size() * sizeof(uint32_t) +
+                      gpu_graph.path_overlaps.data.size() +
+                      gpu_graph.path_overlaps.lengths.size() *
+                          sizeof(uint32_t),
+                  data.names_zstd.payload.size() +
+                      data.name_lengths_zstd.payload.size() +
+                      data.overlaps_zstd.payload.size() +
+                      data.overlap_lengths_zstd.payload.size());
 
   if (gpu_graph.num_walks > 0) {
-    if (compression_debug_enabled()) {
-      std::cout << "[GPU Compression] Compressing walk metadata ("
-                << gpu_graph.num_walks << " walks)" << std::endl;
-    }
-
+    stage_start = Clock::now();
     compress_flattened_strings_gpu(gpu_graph.walk_sample_ids,
                                    data.walk_sample_ids_zstd,
                                    data.walk_sample_id_lengths_zstd,
-                                   "walk_sample_ids", "walk_sample_id_lengths");
+                                   "walk_sample_ids",
+                                   "walk_sample_id_lengths");
 
     data.walk_hap_indices_zstd =
         compress_uint32_gpu(gpu_graph.walk_hap_indices, "walk_hap_indices");
@@ -239,16 +318,32 @@ void compress_graph_metadata_gpu(const GfaGraph_gpu &gpu_graph,
         compress_varint_int64_gpu(gpu_graph.walk_seq_starts, "walk_seq_starts");
     data.walk_seq_ends_zstd =
         compress_varint_int64_gpu(gpu_graph.walk_seq_ends, "walk_seq_ends");
+    add_stage_debug(debug_info, "compress walk metadata", "ZSTD+varint",
+                    elapsed_ms(stage_start, Clock::now()),
+                    gpu_graph.walk_sample_ids.data.size() +
+                        gpu_graph.walk_sample_ids.lengths.size() *
+                            sizeof(uint32_t) +
+                        gpu_graph.walk_hap_indices.size() * sizeof(uint32_t) +
+                        gpu_graph.walk_seq_ids.data.size() +
+                        gpu_graph.walk_seq_ids.lengths.size() *
+                            sizeof(uint32_t) +
+                        gpu_graph.walk_seq_starts.size() * sizeof(int64_t) +
+                        gpu_graph.walk_seq_ends.size() * sizeof(int64_t),
+                    data.walk_sample_ids_zstd.payload.size() +
+                        data.walk_sample_id_lengths_zstd.payload.size() +
+                        data.walk_hap_indices_zstd.payload.size() +
+                        data.walk_seq_ids_zstd.payload.size() +
+                        data.walk_seq_id_lengths_zstd.payload.size() +
+                        data.walk_seq_starts_zstd.payload.size() +
+                        data.walk_seq_ends_zstd.payload.size());
   }
 
+  stage_start = Clock::now();
   compress_segment_sequences_gpu(gpu_graph.node_sequences,
                                  data.segment_sequences_zstd,
                                  data.segment_seq_lengths_zstd);
 
   data.header_line = gpu_graph.header_line;
-
-  compress_optional_columns_gpu(gpu_graph.segment_optional_fields,
-                                data.segment_optional_fields_zstd, "segment");
 
   data.num_links = gpu_graph.link_from_ids.size();
   data.link_from_ids_zstd = compress_delta_varint_uint32_gpu(
@@ -263,18 +358,46 @@ void compress_graph_metadata_gpu(const GfaGraph_gpu &gpu_graph,
       compress_uint32_gpu(gpu_graph.link_overlap_nums, "link_overlap_nums");
   data.link_overlap_ops_zstd =
       compress_char_gpu(gpu_graph.link_overlap_ops, "link_overlap_ops");
+  add_stage_debug(debug_info, "compress segment/link fields", "mixed",
+                  elapsed_ms(stage_start, Clock::now()),
+                  gpu_graph.node_sequences.data.size() +
+                      std::max<size_t>(gpu_graph.node_sequences.lengths.size(),
+                                       1) *
+                          sizeof(uint32_t) +
+                      gpu_graph.link_from_ids.size() * sizeof(uint32_t) +
+                      gpu_graph.link_to_ids.size() * sizeof(uint32_t) +
+                      gpu_graph.link_from_orients.size() * sizeof(char) +
+                      gpu_graph.link_to_orients.size() * sizeof(char) +
+                      gpu_graph.link_overlap_nums.size() * sizeof(uint32_t) +
+                      gpu_graph.link_overlap_ops.size() * sizeof(char),
+                  data.segment_sequences_zstd.payload.size() +
+                      data.segment_seq_lengths_zstd.payload.size() +
+                      data.link_from_ids_zstd.payload.size() +
+                      data.link_to_ids_zstd.payload.size() +
+                      data.link_from_orients_zstd.payload.size() +
+                      data.link_to_orients_zstd.payload.size() +
+                      data.link_overlap_nums_zstd.payload.size() +
+                      data.link_overlap_ops_zstd.payload.size());
 
+  stage_start = Clock::now();
+  compress_optional_columns_gpu(gpu_graph.segment_optional_fields,
+                                data.segment_optional_fields_zstd, "segment");
   compress_optional_columns_gpu(gpu_graph.link_optional_fields,
                                 data.link_optional_fields_zstd, "link");
+  add_stage_debug(debug_info, "compress optional fields", "mixed",
+                  elapsed_ms(stage_start, Clock::now()),
+                  optional_columns_original_size(
+                      gpu_graph.segment_optional_fields) +
+                      optional_columns_original_size(
+                          gpu_graph.link_optional_fields),
+                  optional_columns_compressed_size(
+                      data.segment_optional_fields_zstd) +
+                      optional_columns_compressed_size(
+                          data.link_optional_fields_zstd));
 
   if (!gpu_graph.jump_from_ids.empty()) {
+    stage_start = Clock::now();
     data.num_jumps = gpu_graph.jump_from_ids.size();
-
-    if (compression_debug_enabled()) {
-      std::cout << "[GPU Compression] Compressing J-lines (" << data.num_jumps
-                << " jumps)" << std::endl;
-    }
-
     data.jump_from_ids_zstd = compress_delta_varint_uint32_gpu(
         gpu_graph.jump_from_ids, "jump_from_ids");
     data.jump_to_ids_zstd =
@@ -291,16 +414,31 @@ void compress_graph_metadata_gpu(const GfaGraph_gpu &gpu_graph,
     compress_flattened_strings_gpu(
         gpu_graph.jump_rest_fields, data.jump_rest_fields_zstd,
         data.jump_rest_lengths_zstd, "jump_rest_fields", "jump_rest_lengths");
+    add_stage_debug(debug_info, "compress jump fields", "mixed",
+                    elapsed_ms(stage_start, Clock::now()),
+                    gpu_graph.jump_from_ids.size() * sizeof(uint32_t) +
+                        gpu_graph.jump_to_ids.size() * sizeof(uint32_t) +
+                        gpu_graph.jump_from_orients.size() * sizeof(char) +
+                        gpu_graph.jump_to_orients.size() * sizeof(char) +
+                        gpu_graph.jump_distances.data.size() +
+                        gpu_graph.jump_distances.lengths.size() *
+                            sizeof(uint32_t) +
+                        gpu_graph.jump_rest_fields.data.size() +
+                        gpu_graph.jump_rest_fields.lengths.size() *
+                            sizeof(uint32_t),
+                    data.jump_from_ids_zstd.payload.size() +
+                        data.jump_to_ids_zstd.payload.size() +
+                        data.jump_from_orients_zstd.payload.size() +
+                        data.jump_to_orients_zstd.payload.size() +
+                        data.jump_distances_zstd.payload.size() +
+                        data.jump_distance_lengths_zstd.payload.size() +
+                        data.jump_rest_fields_zstd.payload.size() +
+                        data.jump_rest_lengths_zstd.payload.size());
   }
 
   if (!gpu_graph.containment_container_ids.empty()) {
+    stage_start = Clock::now();
     data.num_containments = gpu_graph.containment_container_ids.size();
-
-    if (compression_debug_enabled()) {
-      std::cout << "[GPU Compression] Compressing C-lines ("
-                << data.num_containments << " containments)" << std::endl;
-    }
-
     data.containment_container_ids_zstd = compress_delta_varint_uint32_gpu(
         gpu_graph.containment_container_ids, "containment_container_ids");
     data.containment_contained_ids_zstd = compress_delta_varint_uint32_gpu(
@@ -322,6 +460,37 @@ void compress_graph_metadata_gpu(const GfaGraph_gpu &gpu_graph,
         gpu_graph.containment_rest_fields, data.containment_rest_fields_zstd,
         data.containment_rest_lengths_zstd, "containment_rest_fields",
         "containment_rest_lengths");
+    add_stage_debug(debug_info, "compress containment fields", "mixed",
+                    elapsed_ms(stage_start, Clock::now()),
+                    gpu_graph.containment_container_ids.size() *
+                            sizeof(uint32_t) +
+                        gpu_graph.containment_contained_ids.size() *
+                            sizeof(uint32_t) +
+                        gpu_graph.containment_container_orients.size() *
+                            sizeof(char) +
+                        gpu_graph.containment_contained_orients.size() *
+                            sizeof(char) +
+                        gpu_graph.containment_positions.size() *
+                            sizeof(uint32_t) +
+                        gpu_graph.containment_overlaps.data.size() +
+                        gpu_graph.containment_overlaps.lengths.size() *
+                            sizeof(uint32_t) +
+                        gpu_graph.containment_rest_fields.data.size() +
+                        gpu_graph.containment_rest_fields.lengths.size() *
+                            sizeof(uint32_t),
+                    data.containment_container_ids_zstd.payload.size() +
+                        data.containment_contained_ids_zstd.payload.size() +
+                        data.containment_container_orients_zstd.payload.size() +
+                        data.containment_contained_orients_zstd.payload.size() +
+                        data.containment_positions_zstd.payload.size() +
+                        data.containment_overlaps_zstd.payload.size() +
+                        data.containment_overlap_lengths_zstd.payload.size() +
+                        data.containment_rest_fields_zstd.payload.size() +
+                        data.containment_rest_lengths_zstd.payload.size());
+  }
+
+  if (debug_info != nullptr) {
+    debug_info->total_ms = elapsed_ms(metadata_start, Clock::now());
   }
 }
 

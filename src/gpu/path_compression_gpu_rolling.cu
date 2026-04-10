@@ -4,7 +4,10 @@
 #include "gpu/path_compression_gpu_rolling.hpp"
 
 #include "codec/codec.hpp"
+#include "utils/runtime_utils.hpp"
+
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -19,6 +22,9 @@
 namespace gpu_compression {
 
 namespace {
+
+using Clock = std::chrono::high_resolution_clock;
+using gfz::runtime_utils::elapsed_ms;
 
 void finalize_traversal_columns(CompressedData &data,
                                 const std::vector<int32_t> &encoded,
@@ -101,15 +107,6 @@ void build_chunk_offsets(const std::vector<uint32_t> &lengths,
   d_chunk_offsets.resize(h_chunk_lengths.size());
 
   const ChunkOffsetBuildMode mode = chunk_offset_build_mode();
-  if (scheduler_debug_enabled()) {
-    std::cerr << "[GPU Scheduler] " << phase_label << " chunk[" << chunk_idx
-              << "] offset_mode="
-              << (mode == ChunkOffsetBuildMode::kGpuOnly
-                      ? "gpu"
-                      : (mode == ChunkOffsetBuildMode::kCpuOnly ? "cpu"
-                                                                : "fallback"))
-              << ", lengths_size=" << h_chunk_lengths.size() << std::endl;
-  }
 
   if (mode == ChunkOffsetBuildMode::kCpuOnly) {
     // These per-chunk prefix sums are tiny, so a host-side fallback is cheap
@@ -141,32 +138,33 @@ void print_chunk_summary(const std::vector<TraversalChunk> &chunks,
     return;
   }
 
+  size_t min_nodes = 0;
+  size_t max_nodes = 0;
+  size_t total_nodes = 0;
+  size_t min_segs = 0;
+  size_t max_segs = 0;
+  size_t total_segs = 0;
+  if (!chunks.empty()) {
+    min_nodes = max_nodes = chunks.front().num_nodes();
+    min_segs = max_segs = chunks.front().num_segments();
+  }
+  for (const auto &chunk : chunks) {
+    min_nodes = std::min(min_nodes, chunk.num_nodes());
+    max_nodes = std::max(max_nodes, chunk.num_nodes());
+    total_nodes += chunk.num_nodes();
+    min_segs = std::min(min_segs, chunk.num_segments());
+    max_segs = std::max(max_segs, chunk.num_segments());
+    total_segs += chunk.num_segments();
+  }
+
   std::cerr << "[GPU Scheduler] " << label
-            << ": target_chunk_nodes=" << target_chunk_nodes
-            << ", num_chunks=" << chunks.size() << std::endl;
-
-  const size_t limit = std::min<size_t>(chunks.size(), 4);
-  for (size_t i = 0; i < limit; ++i) {
-    const auto &chunk = chunks[i];
-    std::cerr << "  chunk[" << i << "] segs=" << chunk.num_segments()
-              << " nodes=" << chunk.num_nodes()
-              << " segment_range=[" << chunk.segment_begin << ", "
-              << chunk.segment_end << ")"
-              << " node_range=[" << chunk.node_begin << ", "
-              << chunk.node_end << ")" << std::endl;
-  }
-
-  if (chunks.size() > limit) {
-    const auto &last = chunks.back();
-    std::cerr << "  ..."
-              << "\n  chunk[" << (chunks.size() - 1)
-              << "] segs=" << last.num_segments()
-              << " nodes=" << last.num_nodes()
-              << " segment_range=[" << last.segment_begin << ", "
-              << last.segment_end << ")"
-              << " node_range=[" << last.node_begin << ", " << last.node_end
-              << ")" << std::endl;
-  }
+            << ": chunks=" << chunks.size()
+            << ", target_nodes=" << target_chunk_nodes
+            << ", nodes[min/avg/max]=" << min_nodes << "/"
+            << (chunks.empty() ? 0 : total_nodes / chunks.size()) << "/"
+            << max_nodes << ", traversals[min/avg/max]=" << min_segs << "/"
+            << (chunks.empty() ? 0 : total_segs / chunks.size()) << "/"
+            << max_segs << std::endl;
 }
 
 void sync_rolling_stage(const char *stage_label, int round_idx,
@@ -232,58 +230,20 @@ void delta_encode_chunks_on_gpu(std::vector<int32_t> &data,
       continue;
     }
 
-    if (scheduler_debug_enabled()) {
-      std::cerr << "[GPU Scheduler] delta-encode chunk[" << chunk_idx
-                << "] segs=" << chunk.num_segments()
-                << " nodes=" << chunk.num_nodes()
-                << " segment_range=[" << chunk.segment_begin << ", "
-                << chunk.segment_end << ")"
-                << " node_range=[" << chunk.node_begin << ", "
-                << chunk.node_end << ")" << std::endl;
-    }
-
     d_chunk_data.resize(chunk.num_nodes());
     thrust::copy(data.begin() + static_cast<std::ptrdiff_t>(chunk.node_begin),
                  data.begin() + static_cast<std::ptrdiff_t>(chunk.node_end),
                  d_chunk_data.begin());
-
-    if (scheduler_debug_enabled()) {
-      cudaError_t copy_err = cudaPeekAtLastError();
-      std::cerr << "[GPU Scheduler] delta-encode chunk[" << chunk_idx
-                << "] after copies cuda_status=" << cudaGetErrorString(copy_err)
-                << std::endl;
-    }
-
-    if (scheduler_debug_enabled()) {
-      std::cerr << "[GPU Scheduler] delta-encode chunk[" << chunk_idx
-                << "] before offset build" << std::endl;
-    }
     build_chunk_offsets(lengths, chunk, chunk_idx, "delta-encode",
                         d_chunk_lengths,
                         d_chunk_offsets);
-    if (scheduler_debug_enabled()) {
-      cudaError_t scan_err = cudaPeekAtLastError();
-      std::cerr << "[GPU Scheduler] delta-encode chunk[" << chunk_idx
-                << "] after offset build cuda_status="
-                << cudaGetErrorString(scan_err) << std::endl;
-    }
 
     d_is_first.resize(d_chunk_data.size());
     d_is_last.resize(d_chunk_data.size());
-    if (scheduler_debug_enabled()) {
-      std::cerr << "[GPU Scheduler] delta-encode chunk[" << chunk_idx
-                << "] before boundary mask build" << std::endl;
-    }
     gpu_codec::compute_boundary_masks(d_chunk_offsets,
                                       static_cast<uint32_t>(chunk.num_segments()),
                                       d_chunk_data.size(), d_is_first,
                                       d_is_last);
-    if (scheduler_debug_enabled()) {
-      cudaError_t mask_err = cudaPeekAtLastError();
-      std::cerr << "[GPU Scheduler] delta-encode chunk[" << chunk_idx
-                << "] after boundary mask build cuda_status="
-                << cudaGetErrorString(mask_err) << std::endl;
-    }
     gpu_codec::segmented_delta_encode_device_vec(d_chunk_data, d_is_first);
     sync_rolling_stage("delta_encode", -1, chunk_idx);
 
@@ -365,8 +325,23 @@ void collapse_histogram_levels(
 CompressedData run_path_compression_gpu_rolling(const FlattenedPaths &paths,
                                                 uint32_t num_paths,
                                                 int num_rounds,
-                                                size_t chunk_bytes) {
+                                                size_t chunk_bytes,
+                                                GpuPathCompressionDebugInfo
+                                                    *debug_info) {
   CompressedData result;
+  const auto total_start = Clock::now();
+
+  if (debug_info != nullptr) {
+    debug_info->mode_label = "rolling scheduler";
+    debug_info->traversal_bytes = paths.data.size() * sizeof(int32_t);
+    debug_info->num_traversals = paths.lengths.size();
+    debug_info->chunk_bytes = chunk_bytes;
+    const size_t path_count = std::min<size_t>(num_paths, paths.lengths.size());
+    for (size_t i = 0; i < path_count; ++i)
+      debug_info->original_paths += paths.lengths[i];
+    for (size_t i = path_count; i < paths.lengths.size(); ++i)
+      debug_info->original_walks += paths.lengths[i];
+  }
 
   if (paths.data.empty()) {
     const size_t path_count = std::min<size_t>(num_paths, paths.lengths.size());
@@ -377,18 +352,25 @@ CompressedData run_path_compression_gpu_rolling(const FlattenedPaths &paths,
                                             static_cast<std::ptrdiff_t>(path_count),
                                         paths.lengths.end());
     result.walk_lengths = result.original_walk_lengths;
+    if (debug_info != nullptr) {
+      debug_info->total_ms = elapsed_ms(total_start, Clock::now());
+    }
     return result;
   }
 
   std::vector<int32_t> current_data = paths.data;
   std::vector<uint32_t> current_lengths = paths.lengths;
-  const uint32_t num_segments = static_cast<uint32_t>(current_lengths.size());
   const size_t target_chunk_nodes =
       std::max<size_t>(1, chunk_bytes / sizeof(int32_t));
 
+  auto stage_start = Clock::now();
   auto chunks = build_traversal_chunks(current_lengths, target_chunk_nodes);
   print_chunk_summary(chunks, target_chunk_nodes, "initial rolling plan");
   delta_encode_chunks_on_gpu(current_data, current_lengths, chunks);
+  if (debug_info != nullptr) {
+    debug_info->delta_ms = elapsed_ms(stage_start, Clock::now());
+    debug_info->initial_chunk_count = chunks.size();
+  }
 
   uint32_t start_id = find_max_abs_host(paths.data) + 1;
   uint32_t delta_max = find_max_abs_host(current_data);
@@ -435,10 +417,14 @@ CompressedData run_path_compression_gpu_rolling(const FlattenedPaths &paths,
     if (round_idx == 0) {
       print_chunk_summary(chunks, target_chunk_nodes, "round 0 rolling plan");
     }
+    GpuGrammarRoundDebugInfo round_debug;
+    round_debug.round = round_idx + 1;
+    round_debug.chunk_count = chunks.size();
 
     std::vector<HistogramLevel> histogram_levels;
     histogram_levels.reserve(8);
 
+    stage_start = Clock::now();
     for (size_t chunk_idx = 0; chunk_idx < chunks.size(); ++chunk_idx) {
       const auto &chunk = chunks[chunk_idx];
       if (chunk.num_nodes() < 2) {
@@ -480,11 +466,14 @@ CompressedData run_path_compression_gpu_rolling(const FlattenedPaths &paths,
     gpu_codec::filter_rules_by_count_device_vec(d_merged_keys, d_merged_counts,
                                                 2, d_round_rules);
     sync_rolling_stage("filter_rules_by_count", round_idx);
+    round_debug.count_ms = elapsed_ms(stage_start, Clock::now());
 
     if (d_round_rules.empty()) {
       break;
     }
+    round_debug.rules_found = d_round_rules.size();
 
+    stage_start = Clock::now();
     void *table_ptr =
         gpu_codec::create_rule_table_gpu_from_device(d_round_rules,
                                                      next_start_id);
@@ -536,7 +525,9 @@ CompressedData run_path_compression_gpu_rolling(const FlattenedPaths &paths,
 
     gpu_codec::free_rule_table_gpu(table_ptr);
     sync_rolling_stage("free_rule_table", round_idx);
+    round_debug.apply_ms = elapsed_ms(stage_start, Clock::now());
 
+    stage_start = Clock::now();
     current_data = std::move(next_data);
     current_lengths = std::move(next_lengths);
 
@@ -555,6 +546,7 @@ CompressedData run_path_compression_gpu_rolling(const FlattenedPaths &paths,
 
     uint32_t num_rules_after_compact =
         static_cast<uint32_t>(d_round_rules.size());
+    round_debug.rules_used = num_rules_after_compact;
     if (num_rules_after_compact == 0) {
       break;
     }
@@ -586,6 +578,7 @@ CompressedData run_path_compression_gpu_rolling(const FlattenedPaths &paths,
                    current_data.begin() +
                        static_cast<std::ptrdiff_t>(chunk.node_begin));
     }
+    round_debug.remap_ms = elapsed_ms(stage_start, Clock::now());
 
     result.layer_rule_ranges.push_back(
         LayerRuleRange{2, next_start_id, next_start_id + num_rules_after_compact,
@@ -597,11 +590,24 @@ CompressedData run_path_compression_gpu_rolling(const FlattenedPaths &paths,
     all_rules.insert(all_rules.end(), h_round_rules.begin(),
                      h_round_rules.end());
     next_start_id += num_rules_after_compact;
+    if (debug_info != nullptr) {
+      debug_info->rounds.push_back(round_debug);
+    }
   }
 
+  stage_start = Clock::now();
   finalize_traversal_columns(result, current_data, current_lengths, paths.lengths,
                              num_paths);
+  if (debug_info != nullptr) {
+    debug_info->traversal_zstd_ms = elapsed_ms(stage_start, Clock::now());
+    const size_t path_count = std::min<size_t>(num_paths, current_lengths.size());
+    for (size_t i = 0; i < path_count; ++i)
+      debug_info->encoded_paths += current_lengths[i];
+    for (size_t i = path_count; i < current_lengths.size(); ++i)
+      debug_info->encoded_walks += current_lengths[i];
+  }
 
+  stage_start = Clock::now();
   if (!all_rules.empty()) {
     thrust::device_vector<uint64_t> d_all_rules(all_rules.begin(),
                                                 all_rules.end());
@@ -613,13 +619,9 @@ CompressedData run_path_compression_gpu_rolling(const FlattenedPaths &paths,
     result.rules_second_zstd =
         compress_int32_device_gpu(d_second, "rules_second");
   }
-
-  if (compression_debug_enabled()) {
-    std::cout << "[GPU Compression] Rolling scheduler used for "
-              << paths.total_nodes() * sizeof(int32_t) / (1024.0 * 1024.0)
-              << " MB traversal payload across " << num_segments
-              << " traversals (chunk budget "
-              << chunk_bytes / (1024.0 * 1024.0) << " MB)" << std::endl;
+  if (debug_info != nullptr) {
+    debug_info->rules_zstd_ms = elapsed_ms(stage_start, Clock::now());
+    debug_info->total_ms = elapsed_ms(total_start, Clock::now());
   }
 
   return result;

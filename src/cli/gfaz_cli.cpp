@@ -751,9 +751,11 @@ int do_decompress(int argc, char *argv[]) {
       std::cout << "Stats:" << std::endl;
       std::cout << "  Time: " << std::fixed << std::setprecision(3) << elapsed_s
                 << " s" << std::endl;
-      if (input_size > 0) {
-        const double mib = static_cast<double>(input_size) / (1024.0 * 1024.0);
-        const double mibps = (elapsed_s > 0.0) ? (mib / elapsed_s) : 0.0;
+      if (input_size > 0 || output_size > 0) {
+        const double output_mib =
+            static_cast<double>(output_size) / (1024.0 * 1024.0);
+        const double mibps =
+            (elapsed_s > 0.0) ? (output_mib / elapsed_s) : 0.0;
         std::cout << "  Input: " << format_size(input_size) << std::endl;
         std::cout << "  Output: " << format_size(output_size) << std::endl;
         std::cout << "  Throughput: " << std::fixed << std::setprecision(2)

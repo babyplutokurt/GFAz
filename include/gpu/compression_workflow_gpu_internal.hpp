@@ -26,12 +26,16 @@ compress_int32_device_gpu(const thrust::device_vector<int32_t> &d_input,
 
 CompressedData run_path_compression_gpu_full_device(const FlattenedPaths &paths,
                                                     uint32_t num_paths,
-                                                    int num_rounds);
+                                                    int num_rounds,
+                                                    GpuPathCompressionDebugInfo
+                                                        *debug_info = nullptr);
 
 CompressedData run_path_compression_gpu_rolling(const FlattenedPaths &paths,
                                                 uint32_t num_paths,
                                                 int num_rounds,
-                                                size_t chunk_bytes);
+                                                size_t chunk_bytes,
+                                                GpuPathCompressionDebugInfo
+                                                    *debug_info = nullptr);
 
 } // namespace gpu_compression
 

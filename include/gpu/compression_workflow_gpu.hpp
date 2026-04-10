@@ -15,6 +15,47 @@ struct GpuCompressionOptions {
   bool force_full_device_legacy = false;
 };
 
+struct GpuGrammarRoundDebugInfo {
+  int round = 0;
+  size_t chunk_count = 0;
+  size_t rules_found = 0;
+  size_t rules_used = 0;
+  double count_ms = 0;
+  double apply_ms = 0;
+  double remap_ms = 0;
+};
+
+struct GpuPathCompressionDebugInfo {
+  std::string mode_label;
+  size_t traversal_bytes = 0;
+  size_t num_traversals = 0;
+  size_t chunk_bytes = 0;
+  size_t initial_chunk_count = 0;
+  double host_to_device_ms = 0;
+  double delta_ms = 0;
+  double traversal_zstd_ms = 0;
+  double rules_zstd_ms = 0;
+  double total_ms = 0;
+  size_t original_paths = 0;
+  size_t encoded_paths = 0;
+  size_t original_walks = 0;
+  size_t encoded_walks = 0;
+  std::vector<GpuGrammarRoundDebugInfo> rounds;
+};
+
+struct GpuMetadataCompressionStageDebugInfo {
+  std::string label;
+  std::string codec_label;
+  double time_ms = 0;
+  size_t original_bytes = 0;
+  size_t compressed_bytes = 0;
+};
+
+struct GpuMetadataCompressionDebugInfo {
+  std::vector<GpuMetadataCompressionStageDebugInfo> stages;
+  double total_ms = 0;
+};
+
 /**
  * GPU path compression.
  *
@@ -32,7 +73,8 @@ struct GpuCompressionOptions {
  */
 CompressedData run_path_compression_gpu(
     const FlattenedPaths &paths, uint32_t num_paths, int num_rounds,
-    GpuCompressionOptions options = {});
+    GpuCompressionOptions options = {},
+    GpuPathCompressionDebugInfo *debug_info = nullptr);
 
 /**
  * High-level GPU compression entry point (parse + compress).

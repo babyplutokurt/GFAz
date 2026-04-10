@@ -38,7 +38,7 @@ namespace gpu_codec {
 namespace {
 
 bool codec_sched_debug_enabled() {
-  const char *env = std::getenv("GFAZ_GPU_SCHED_DEBUG");
+  const char *env = std::getenv("GFAZ_GPU_CODEC_DEBUG");
   return env && *env != '\0' && std::string(env) != "0";
 }
 
