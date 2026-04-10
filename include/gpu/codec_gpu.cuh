@@ -315,7 +315,8 @@ RollingDecodeSchedule build_rolling_decode_schedule(
     const thrust::device_vector<uint32_t>& d_lens_final,
     size_t encoded_size,
     int64_t output_size,
-    uint32_t traversals_per_chunk);
+    uint32_t traversals_per_chunk,
+    size_t max_expanded_chunk_bytes);
 
 /**
  * @deprecated Use expand_path_device_vec instead.

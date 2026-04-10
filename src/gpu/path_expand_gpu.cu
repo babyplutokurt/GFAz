@@ -1,4 +1,5 @@
 #include "gpu/codec_gpu.cuh"
+#include "gpu/decompression_workflow_gpu.hpp"
 
 #include <cuda_runtime.h>
 
@@ -496,7 +497,8 @@ void expand_and_inverse_decode_chunk_device(
 RollingDecodeSchedule build_rolling_decode_schedule(
     const thrust::device_vector<int64_t> &d_output_offsets,
     const thrust::device_vector<uint32_t> &d_lens_final, size_t encoded_size,
-    int64_t output_size, uint32_t traversals_per_chunk) {
+    int64_t output_size, uint32_t traversals_per_chunk,
+    size_t max_expanded_chunk_bytes) {
   RollingDecodeSchedule schedule;
   const uint32_t num_segs_final = static_cast<uint32_t>(d_lens_final.size());
   if (num_segs_final == 0) {
@@ -533,7 +535,8 @@ RollingDecodeSchedule build_rolling_decode_schedule(
     if (i - current_seg_begin >= traversals_per_chunk) {
       split = true;
     }
-    if (size_so_far >= 32 * 1024 * 1024 && i > current_seg_begin) {
+    if (size_so_far >= static_cast<int64_t>(max_expanded_chunk_bytes) &&
+        i > current_seg_begin) {
       split = true;
     }
     if (i + 1 == num_segs_final) {
@@ -616,7 +619,7 @@ void rolling_expand_and_inverse_delta_decode(
 
   const RollingDecodeSchedule schedule = build_rolling_decode_schedule(
       d_output_offsets, d_lens_final, d_encoded_path.size(), output_size,
-      traversals_per_chunk);
+      traversals_per_chunk, gpu_decompression::kDefaultMaxExpandedChunkBytes);
 
   thrust::device_vector<uint64_t> d_offs_final(schedule.expanded_offsets.begin(),
                                                schedule.expanded_offsets.end());

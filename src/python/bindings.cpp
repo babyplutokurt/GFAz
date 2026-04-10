@@ -843,6 +843,9 @@ PYBIND11_MODULE(gfa_compression, m) {
       .def_readwrite(
           "traversals_per_chunk",
           &gpu_decompression::GpuDecompressionOptions::traversals_per_chunk)
+      .def_readwrite("max_expanded_chunk_bytes",
+                     &gpu_decompression::GpuDecompressionOptions::
+                         max_expanded_chunk_bytes)
       .def_readwrite("use_legacy_full_decompression",
                      &gpu_decompression::GpuDecompressionOptions::
                          use_legacy_full_decompression);

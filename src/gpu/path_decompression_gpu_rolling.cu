@@ -93,7 +93,7 @@ struct FinalExpansionSizeOp {
 
 gpu_codec::RollingDecodeSchedule build_passthrough_schedule(
     const thrust::device_vector<uint32_t> &d_lens_final, size_t encoded_size,
-    uint32_t traversals_per_chunk) {
+    uint32_t traversals_per_chunk, size_t max_expanded_chunk_bytes) {
   gpu_codec::RollingDecodeSchedule schedule;
   const uint32_t num_segs_final = static_cast<uint32_t>(d_lens_final.size());
   if (num_segs_final == 0) {
@@ -126,7 +126,8 @@ gpu_codec::RollingDecodeSchedule build_passthrough_schedule(
     if (i - current_seg_begin >= traversals_per_chunk) {
       split = true;
     }
-    if (size_so_far >= 32 * 1024 * 1024 && i > current_seg_begin) {
+    if (size_so_far >= static_cast<int64_t>(max_expanded_chunk_bytes) &&
+        i > current_seg_begin) {
       split = true;
     }
     if (i + 1 == num_segs_final) {
@@ -171,7 +172,7 @@ RollingPathDecodeContext prepare_rolling_path_decode(
     const thrust::device_vector<int32_t> &d_rules_second,
     uint32_t min_rule_id, size_t num_rules,
     const thrust::device_vector<uint32_t> &d_lens_final,
-    uint32_t traversals_per_chunk) {
+    uint32_t traversals_per_chunk, size_t max_expanded_chunk_bytes) {
   RollingPathDecodeContext context;
   context.min_rule_id = min_rule_id;
   context.max_rule_id = min_rule_id + static_cast<uint32_t>(num_rules);
@@ -180,7 +181,8 @@ RollingPathDecodeContext prepare_rolling_path_decode(
 
   if (num_rules == 0 || d_encoded_path.empty()) {
     context.schedule = build_passthrough_schedule(
-        d_lens_final, d_encoded_path.size(), traversals_per_chunk);
+        d_lens_final, d_encoded_path.size(), traversals_per_chunk,
+        max_expanded_chunk_bytes);
     context.d_offs_final = thrust::device_vector<uint64_t>(
         context.schedule.expanded_offsets.begin(),
         context.schedule.expanded_offsets.end());
@@ -216,7 +218,7 @@ RollingPathDecodeContext prepare_rolling_path_decode(
 
   context.schedule = gpu_codec::build_rolling_decode_schedule(
       context.d_output_offsets, d_lens_final, d_encoded_path.size(),
-      output_size, traversals_per_chunk);
+      output_size, traversals_per_chunk, max_expanded_chunk_bytes);
   context.d_offs_final = thrust::device_vector<uint64_t>(
       context.schedule.expanded_offsets.begin(),
       context.schedule.expanded_offsets.end());
@@ -387,12 +389,15 @@ void stream_decompress_paths_gpu_rolling(
     std::cout << "[GPU Decompress] Streaming rolling path chunks with "
               << num_host_buffers << " pinned host buffers ("
               << resolved_traversals_per_chunk << " traversals per chunk), "
-              << "min_rule_id=" << min_rule_id << std::endl;
+              << "max expanded chunk="
+              << (stream_options.max_expanded_chunk_bytes / (1024.0 * 1024.0))
+              << " MiB, min_rule_id=" << min_rule_id << std::endl;
   }
 
   RollingPathDecodeContext context = prepare_rolling_path_decode(
       d_encoded_path, d_rules_first, d_rules_second, min_rule_id, num_rules,
-      d_lens_final, resolved_traversals_per_chunk);
+      d_lens_final, resolved_traversals_per_chunk,
+      stream_options.max_expanded_chunk_bytes);
 
   std::vector<RollingPathPinnedHostBuffer> host_buffers(num_host_buffers);
   ScopedCudaStream copy_stream(cudaStreamNonBlocking);
@@ -522,7 +527,8 @@ void decompress_paths_gpu_rolling(
     const thrust::device_vector<int32_t> &d_rules_second,
     uint32_t min_rule_id, size_t num_rules,
     const thrust::device_vector<uint32_t> &d_lens_final,
-    uint32_t traversals_per_chunk, std::vector<int32_t> &out_data) {
+    uint32_t traversals_per_chunk, size_t max_expanded_chunk_bytes,
+    std::vector<int32_t> &out_data) {
   const uint32_t resolved_traversals_per_chunk =
       std::max<uint32_t>(1, traversals_per_chunk);
 
@@ -530,14 +536,17 @@ void decompress_paths_gpu_rolling(
     std::cout << "[GPU Decompress] Expanding path with rolling chunk "
                  "scheduler ("
               << resolved_traversals_per_chunk
-              << " traversals per chunk), min_rule_id=" << min_rule_id
+              << " traversals per chunk, max expanded chunk "
+              << (max_expanded_chunk_bytes / (1024.0 * 1024.0))
+              << " MiB), min_rule_id=" << min_rule_id
               << std::endl;
   }
 
   const auto prepare_start = Clock::now();
   RollingPathDecodeContext context = prepare_rolling_path_decode(
       d_encoded_path, d_rules_first, d_rules_second, min_rule_id, num_rules,
-      d_lens_final, resolved_traversals_per_chunk);
+      d_lens_final, resolved_traversals_per_chunk,
+      std::max<size_t>(1, max_expanded_chunk_bytes));
   const auto prepare_end = Clock::now();
   out_data.resize(static_cast<size_t>(context.schedule.output_size));
 

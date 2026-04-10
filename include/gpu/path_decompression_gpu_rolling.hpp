@@ -50,6 +50,7 @@ struct RollingPathDecodeContext {
 
 struct RollingPathStreamOptions {
   size_t num_host_buffers = 2;
+  size_t max_expanded_chunk_bytes = kDefaultMaxExpandedChunkBytes;
 };
 
 using RollingPathChunkConsumer =
@@ -61,7 +62,7 @@ RollingPathDecodeContext prepare_rolling_path_decode(
     const thrust::device_vector<int32_t> &d_rules_second,
     uint32_t min_rule_id, size_t num_rules,
     const thrust::device_vector<uint32_t> &d_lens_final,
-    uint32_t traversals_per_chunk);
+    uint32_t traversals_per_chunk, size_t max_expanded_chunk_bytes);
 
 void decode_rolling_path_chunk_to_device(
     const thrust::device_vector<int32_t> &d_encoded_path,
@@ -103,7 +104,8 @@ void decompress_paths_gpu_rolling(
     const thrust::device_vector<int32_t> &d_rules_second,
     uint32_t min_rule_id, size_t num_rules,
     const thrust::device_vector<uint32_t> &d_lens_final,
-    uint32_t traversals_per_chunk, std::vector<int32_t> &out_data);
+    uint32_t traversals_per_chunk, size_t max_expanded_chunk_bytes,
+    std::vector<int32_t> &out_data);
 
 } // namespace gpu_decompression
 

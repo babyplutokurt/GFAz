@@ -83,6 +83,7 @@ std::vector<int32_t> expand_sequence_gpu(
     decompress_paths_gpu_rolling(
         d_encoded, d_rules_first, d_rules_second, min_rule_id, num_rules,
         d_final_lengths, std::max<uint32_t>(1, options.traversals_per_chunk),
+        std::max<size_t>(1, options.max_expanded_chunk_bytes),
         result);
   }
 
