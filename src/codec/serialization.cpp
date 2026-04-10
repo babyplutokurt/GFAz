@@ -268,6 +268,11 @@ CompressedData deserialize_compressed_data(const std::string &input_path) {
   data.rules_second_zstd = read_block(in);
   data.paths_zstd = read_block(in);
   data.delta_round = read_val<int>(in);
+  if (data.delta_round < 1) {
+    std::cerr << "Warning: serialized delta_round=" << data.delta_round
+              << " is invalid, clamping to 1" << std::endl;
+    data.delta_round = 1;
+  }
 
   // Path names and overlaps
   data.names_zstd = read_block(in);
@@ -336,4 +341,3 @@ CompressedData deserialize_compressed_data(const std::string &input_path) {
   GFAZ_LOG("Deserialized from " << input_path);
   return data;
 }
-

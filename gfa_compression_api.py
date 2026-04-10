@@ -37,7 +37,10 @@ class GFACompressor:
         if delta is None:
             env_val = os.environ.get('GFA_COMPRESSION_DELTA_ROUNDS', '')
             delta = int(env_val) if env_val.isdigit() else 1
-        
+        if delta < 1:
+            print(f"Warning: delta_round={delta} is invalid, clamping to 1")
+            delta = 1
+
         return threshold, delta
 
     def compress(self, num_rounds: int = 8, freq_threshold: int = None, delta_round: int = None, num_threads: int = None):

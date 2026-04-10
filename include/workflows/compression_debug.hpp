@@ -41,7 +41,7 @@ struct CompressionPostStepDebugInfo {
 struct CpuCompressionTimingDebugInfo {
   double data_size_mb = 0;
   size_t total_elements = 0;
-  int delta_round = 0;
+  int delta_round = 1;
   double time_delta_ms = 0;
   double time_grammar_ms = 0;
   double rules_size_mb = 0;

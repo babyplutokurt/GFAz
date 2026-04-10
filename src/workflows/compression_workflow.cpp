@@ -211,6 +211,15 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   log_cpu_memory_checkpoint("after parse");
 
   out.header_line = graph.header_line;
+
+  // Delta round must be >= 1: without delta encoding, the max-abs guard
+  // would set next_id = 1 which collides with raw node IDs still in the
+  // path stream, causing silent data corruption during rule expansion.
+  if (delta_round < 1) {
+    std::cerr << "Warning: delta_round=" << delta_round
+              << " is invalid, clamping to 1" << std::endl;
+    delta_round = 1;
+  }
   out.delta_round = delta_round;
 
   graph.node_name_to_id.clear();

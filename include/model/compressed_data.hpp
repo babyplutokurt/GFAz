@@ -42,7 +42,7 @@ struct CompressedData {
   std::vector<LayerRuleRange> layer_rule_ranges;
   ZstdCompressedBlock rules_first_zstd;  // First elements of each 2-mer
   ZstdCompressedBlock rules_second_zstd; // Second elements of each 2-mer
-  int delta_round = 0;
+  int delta_round = 1;
 
   uint32_t min_rule_id() const {
     return layer_rule_ranges.empty() ? 0 : layer_rule_ranges[0].start_id;

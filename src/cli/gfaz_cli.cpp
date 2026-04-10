@@ -334,6 +334,10 @@ int do_compress(int argc, char *argv[]) {
       break;
     case 'd':
       delta_round = std::stoi(optarg);
+      if (delta_round < 1) {
+        std::cerr << "Warning: --delta must be >= 1, clamping to 1" << std::endl;
+        delta_round = 1;
+      }
       break;
     case 't':
       freq_threshold = std::stoi(optarg);
