@@ -285,7 +285,8 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
       Codec::zstd_decompress_int32_vector(data.paths_zstd);
 
   auto t1 = Clock::now();
-  debug_stages.push_back({"decode rule/path blocks", elapsed_ms(t0, t1)});
+  debug_stages.push_back(
+      {"decode compressed rule/path fields", elapsed_ms(t0, t1)});
 
   // =========================================================================
   // Step 2: Decode rules (prefix sum / delta decode)
@@ -304,7 +305,7 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   Codec::delta_decode_int32(rules_second);
 #endif
   t1 = Clock::now();
-  debug_stages.push_back({"delta decode rules", elapsed_ms(t0, t1)});
+  debug_stages.push_back({"delta decode rule columns", elapsed_ms(t0, t1)});
 
   uint32_t min_rule_id = data.min_rule_id();
   size_t num_rules = rules_first.size();
@@ -321,7 +322,7 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   expand_sequences(graph.paths, rules_first, rules_second, min_rule_id,
                    num_rules, data.original_path_lengths);
   t1 = Clock::now();
-  debug_stages.push_back({"expand paths", elapsed_ms(t0, t1)});
+  debug_stages.push_back({"expand path traversals", elapsed_ms(t0, t1)});
 
   // =========================================================================
   // Step 4: Decode paths (prefix sum / inverse delta)
@@ -330,9 +331,9 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   for (int i = 0; i < data.delta_round; ++i)
     Codec::inverse_delta_transform(graph.paths);
   t1 = Clock::now();
-  debug_stages.push_back({"inverse delta paths", elapsed_ms(t0, t1)});
-  log_cpu_decompression_memory_checkpoint("CPU Decompress",
-                                          "after path reconstruction");
+  debug_stages.push_back({"inverse delta traversals", elapsed_ms(t0, t1)});
+  log_cpu_decompression_memory_checkpoint("CPU Legacy",
+                                          "after traversal reconstruction");
 
   // =========================================================================
   // Rest: metadata, walks, segments, links, etc.
@@ -367,13 +368,13 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
                                 rules_second, min_rule_id, num_rules,
                                 data.delta_round, graph.walks.walks);
     t1 = Clock::now();
-    debug_stages.push_back({"expand walks", elapsed_ms(t0, t1)});
+    debug_stages.push_back({"expand walk traversals", elapsed_ms(t0, t1)});
 
     t0 = Clock::now();
     decompress_walk_metadata(data, graph);
     t1 = Clock::now();
     debug_stages.push_back({"decode walk metadata", elapsed_ms(t0, t1)});
-    log_cpu_decompression_memory_checkpoint("CPU Decompress",
+    log_cpu_decompression_memory_checkpoint("CPU Legacy",
                                             "after walk reconstruction");
   }
 
@@ -438,7 +439,7 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
       Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
 #endif
   t1 = Clock::now();
-  debug_stages.push_back({"decode segment/link fields", elapsed_ms(t0, t1)});
+  debug_stages.push_back({"decode segment/link columns", elapsed_ms(t0, t1)});
 
   // Reconstruct segments (index 0 is placeholder for 1-based IDs).
   // CPU .gfaz intentionally restores dense numeric names instead of original
@@ -465,7 +466,7 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
     graph.node_name_to_id[name] = id;
   }
   t1 = Clock::now();
-  debug_stages.push_back({"reconstruct segment table", elapsed_ms(t0, t1)});
+  debug_stages.push_back({"reconstruct in-memory segments", elapsed_ms(t0, t1)});
 
   // Decompress optional fields
   t0 = Clock::now();
@@ -500,7 +501,7 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
         Codec::zstd_decompress_uint32_vector(data.jump_rest_lengths_zstd);
     reconstruct_strings(rest, rest_lens, graph.jumps.rest_fields);
     t1 = Clock::now();
-    debug_stages.push_back({"decode jump fields", elapsed_ms(t0, t1)});
+    debug_stages.push_back({"decode jump columns", elapsed_ms(t0, t1)});
   }
 
   // Decompress C-lines (containments)
@@ -529,18 +530,19 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
         data.containment_rest_lengths_zstd);
     reconstruct_strings(rest, rest_lens, graph.containments.rest_fields);
     t1 = Clock::now();
-    debug_stages.push_back({"decode containment fields", elapsed_ms(t0, t1)});
+    debug_stages.push_back({"decode containment columns", elapsed_ms(t0, t1)});
   }
-  log_cpu_decompression_memory_checkpoint("CPU Decompress",
+  log_cpu_decompression_memory_checkpoint("CPU Legacy",
                                           "after full graph reconstruction");
 
   auto decomp_total_end = Clock::now();
   double decomp_total_ms = elapsed_ms(decomp_total_start, decomp_total_end);
 
   if (gfaz_debug_enabled()) {
-    print_cpu_decompression_summary("CPU Decompress", graph, num_rules,
+    print_cpu_decompression_summary("CPU Legacy", graph, num_rules,
                                     data.delta_round);
-    print_cpu_decompression_timing({"CPU Decompress", "legacy in-memory path",
+    print_cpu_decompression_timing({"CPU Legacy",
+                                    "legacy in-memory reconstruction",
                                     debug_stages, decomp_total_ms});
   }
 }

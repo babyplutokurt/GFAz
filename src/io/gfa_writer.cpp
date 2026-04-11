@@ -514,7 +514,7 @@ void write_gfa_from_compressed_data(const CompressedData &data,
       Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
 #endif
   auto t1 = Clock::now();
-  debug_stages.push_back({"decode core fields", elapsed_ms(t0, t1)});
+  debug_stages.push_back({"decode core columns", elapsed_ms(t0, t1)});
 
   t0 = Clock::now();
   std::vector<OptionalFieldColumn> segment_optional_fields;
@@ -527,7 +527,7 @@ void write_gfa_from_compressed_data(const CompressedData &data,
   for (const auto &c : data.link_optional_fields_zstd)
     link_optional_fields.push_back(decompress_optional_column(c));
   t1 = Clock::now();
-  debug_stages.push_back({"decode optional fields", elapsed_ms(t0, t1)});
+  debug_stages.push_back({"decode optional columns", elapsed_ms(t0, t1)});
 
   std::vector<uint32_t> jump_from_ids;
   std::vector<uint32_t> jump_to_ids;
@@ -579,7 +579,7 @@ void write_gfa_from_compressed_data(const CompressedData &data,
     t1 = Clock::now();
     debug_stages.push_back({"decode containment fields", elapsed_ms(t0, t1)});
   }
-  log_cpu_decompression_memory_checkpoint("CPU Direct Writer",
+  log_cpu_decompression_memory_checkpoint("CPU Direct-Writer",
                                           "after field decode");
 
   t0 = Clock::now();
@@ -592,7 +592,7 @@ void write_gfa_from_compressed_data(const CompressedData &data,
   const SequenceOffsets original_walk_offsets =
       build_offsets(data.original_walk_lengths);
   t1 = Clock::now();
-  debug_stages.push_back({"build offset tables", elapsed_ms(t0, t1)});
+  debug_stages.push_back({"build traversal offsets", elapsed_ms(t0, t1)});
 
   if (!data.header_line.empty())
     out << data.header_line << "\n";
@@ -621,7 +621,7 @@ void write_gfa_from_compressed_data(const CompressedData &data,
     out.write(line.data(), static_cast<std::streamsize>(line.size()));
   }
   t1 = Clock::now();
-  debug_stages.push_back({"write segments", elapsed_ms(t0, t1)});
+  debug_stages.push_back({"stream segments", elapsed_ms(t0, t1)});
 
   t0 = Clock::now();
   for (size_t i = 0; i < link_from_ids.size(); ++i) {
@@ -646,7 +646,7 @@ void write_gfa_from_compressed_data(const CompressedData &data,
     out.write(line.data(), static_cast<std::streamsize>(line.size()));
   }
   t1 = Clock::now();
-  debug_stages.push_back({"write links", elapsed_ms(t0, t1)});
+  debug_stages.push_back({"stream links", elapsed_ms(t0, t1)});
 
   t0 = Clock::now();
   for (size_t i = 0; i < jump_from_ids.size(); ++i) {
@@ -670,7 +670,7 @@ void write_gfa_from_compressed_data(const CompressedData &data,
   }
   t1 = Clock::now();
   if (!jump_from_ids.empty())
-    debug_stages.push_back({"write jumps", elapsed_ms(t0, t1)});
+    debug_stages.push_back({"stream jumps", elapsed_ms(t0, t1)});
 
   t0 = Clock::now();
   for (size_t i = 0; i < containment_container_ids.size(); ++i) {
@@ -697,7 +697,7 @@ void write_gfa_from_compressed_data(const CompressedData &data,
   }
   t1 = Clock::now();
   if (!containment_container_ids.empty())
-    debug_stages.push_back({"write containments", elapsed_ms(t0, t1)});
+    debug_stages.push_back({"stream containments", elapsed_ms(t0, t1)});
 
   const uint32_t min_rule_id = data.min_rule_id();
 
@@ -721,8 +721,8 @@ void write_gfa_from_compressed_data(const CompressedData &data,
                                     name, path.data(), path.size(), overlap);
                               });
   t1 = Clock::now();
-  debug_stages.push_back({"expand+write paths", elapsed_ms(t0, t1)});
-  log_cpu_decompression_memory_checkpoint("CPU Direct Writer",
+  debug_stages.push_back({"expand and stream paths", elapsed_ms(t0, t1)});
+  log_cpu_decompression_memory_checkpoint("CPU Direct-Writer",
                                           "after path streaming");
 
   t0 = Clock::now();
@@ -759,12 +759,12 @@ void write_gfa_from_compressed_data(const CompressedData &data,
                                     seq_end, walk.data(), walk.size());
                               });
   t1 = Clock::now();
-  debug_stages.push_back({"expand+write walks", elapsed_ms(t0, t1)});
-  log_cpu_decompression_memory_checkpoint("CPU Direct Writer",
+  debug_stages.push_back({"expand and stream walks", elapsed_ms(t0, t1)});
+  log_cpu_decompression_memory_checkpoint("CPU Direct-Writer",
                                           "after walk streaming");
 
   out.close();
-  log_cpu_decompression_memory_checkpoint("CPU Direct Writer",
+  log_cpu_decompression_memory_checkpoint("CPU Direct-Writer",
                                           "after output close");
 
   std::ifstream check(output_path, std::ios::binary | std::ios::ate);
@@ -774,9 +774,9 @@ void write_gfa_from_compressed_data(const CompressedData &data,
                                                             << " bytes)");
 
   if (gfaz_debug_enabled()) {
-    print_cpu_decompression_summary("CPU Direct Writer", data);
+    print_cpu_decompression_summary("CPU Direct-Writer", data);
     print_cpu_decompression_timing(
-        {"CPU Direct Writer", "streaming direct-writer path", debug_stages,
+        {"CPU Direct-Writer", "streaming direct-writer path", debug_stages,
          elapsed_ms(writer_total_start, Clock::now())});
   }
 }
