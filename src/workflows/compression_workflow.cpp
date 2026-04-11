@@ -1,10 +1,10 @@
 #include "workflows/compression_workflow.hpp"
 #include "codec/codec.hpp"
-#include "utils/debug_log.hpp"
-#include "io/gfa_parser.hpp"
 #include "grammar/packed_2mer.hpp"
 #include "grammar/path_encoder.hpp"
 #include "grammar/rule_generator.hpp"
+#include "io/gfa_parser.hpp"
+#include "utils/debug_log.hpp"
 #include "workflows/compression_debug.hpp"
 #include "workflows/compression_utils.hpp"
 
@@ -12,8 +12,8 @@
 #include <chrono>
 #include <cstdint>
 
-#include <iostream>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -198,10 +198,9 @@ void initialize_output_metadata(CompressionContext &ctx) {
   for (const auto &w : ctx.graph.walks.walks)
     ctx.out.original_walk_lengths.push_back(static_cast<uint32_t>(w.size()));
 
-  ctx.total_elements =
-      total_node_count(ctx.graph.paths) + total_node_count(ctx.graph.walks.walks);
-  ctx.data_size_mb =
-      ctx.total_elements * sizeof(int32_t) / (1024.0 * 1024.0);
+  ctx.total_elements = total_node_count(ctx.graph.paths) +
+                       total_node_count(ctx.graph.walks.walks);
+  ctx.data_size_mb = ctx.total_elements * sizeof(int32_t) / (1024.0 * 1024.0);
 }
 
 void prepare_id_space_for_traversal_transform(CompressionContext &ctx) {
@@ -219,7 +218,8 @@ double apply_delta_transform(CompressionContext &ctx) {
   const auto start = std::chrono::high_resolution_clock::now();
   ctx.max_abs = 0;
   for (int i = 0; i < ctx.delta_round; ++i) {
-    const uint32_t path_max = Codec::delta_transform_and_max_abs(ctx.graph.paths);
+    const uint32_t path_max =
+        Codec::delta_transform_and_max_abs(ctx.graph.paths);
     const uint32_t walk_max =
         Codec::delta_transform_and_max_abs(ctx.graph.walks.walks);
     ctx.max_abs = std::max(ctx.max_abs, std::max(path_max, walk_max));
@@ -228,8 +228,9 @@ double apply_delta_transform(CompressionContext &ctx) {
 
   if (ctx.max_abs >= ctx.next_id) {
     if (ctx.max_abs == UINT32_MAX) {
-      throw std::overflow_error(std::string(kCompressionErrorPrefix) +
-                                "delta values too large for rule ID assignment");
+      throw std::overflow_error(
+          std::string(kCompressionErrorPrefix) +
+          "delta values too large for rule ID assignment");
     }
     ctx.next_id = ctx.max_abs + 1;
   }
@@ -252,7 +253,6 @@ double run_grammar_stage(CompressionContext &ctx) {
 }
 
 double compress_rule_columns(CompressionContext &ctx) {
-  log_cpu_memory_checkpoint("before rule column encoding");
   const auto start = std::chrono::high_resolution_clock::now();
   std::vector<int32_t> first, second;
   process_rules(ctx.rulebook, ctx.layer_start, ctx.out.layer_rule_ranges, first,
@@ -274,12 +274,10 @@ double compress_rule_columns(CompressionContext &ctx) {
 #endif
 
   const auto end = std::chrono::high_resolution_clock::now();
-  log_cpu_memory_checkpoint("after rule column encoding");
   return elapsed_ms(start, end);
 }
 
 double compress_path_fields(CompressionContext &ctx) {
-  log_cpu_memory_checkpoint("before path compression");
   const auto start = std::chrono::high_resolution_clock::now();
   PathCompressionInput input;
   flatten_traversal_sequences(ctx.graph.paths, input.flat,
@@ -321,12 +319,10 @@ double compress_path_fields(CompressionContext &ctx) {
   release_path_fields(ctx);
 
   const auto end = std::chrono::high_resolution_clock::now();
-  log_cpu_memory_checkpoint("after path compression");
   return elapsed_ms(start, end);
 }
 
 double compress_walk_fields(CompressionContext &ctx) {
-  log_cpu_memory_checkpoint("before walk compression");
   const auto start = std::chrono::high_resolution_clock::now();
   if (!ctx.graph.walks.walks.empty()) {
     WalkCompressionInput input;
@@ -357,15 +353,14 @@ double compress_walk_fields(CompressionContext &ctx) {
   release_walk_fields(ctx);
 
   const auto end = std::chrono::high_resolution_clock::now();
-  log_cpu_memory_checkpoint("after walk compression");
   return elapsed_ms(start, end);
 }
 
 double compress_segment_link_fields(CompressionContext &ctx) {
-  log_cpu_memory_checkpoint("before segment/link compression");
   SegmentCompressionInput segment_input;
   LinkCompressionInput link_input;
-  flatten_segment_sequences(ctx.graph.node_sequences, segment_input.segment_concat,
+  flatten_segment_sequences(ctx.graph.node_sequences,
+                            segment_input.segment_concat,
                             segment_input.segment_lengths, ctx.next_id);
   ctx.num_segments = segment_input.segment_lengths.size();
   link_input.links = &ctx.graph.links;
@@ -426,12 +421,10 @@ double compress_segment_link_fields(CompressionContext &ctx) {
   release_segment_link_fields(ctx);
 
   const auto end = std::chrono::high_resolution_clock::now();
-  log_cpu_memory_checkpoint("after segment/link compression");
   return elapsed_ms(start, end);
 }
 
 double compress_optional_fields(CompressionContext &ctx) {
-  log_cpu_memory_checkpoint("before optional field compression");
   const auto start = std::chrono::high_resolution_clock::now();
   for (const auto &col : ctx.graph.segment_optional_fields)
     ctx.out.segment_optional_fields_zstd.push_back(
@@ -442,12 +435,10 @@ double compress_optional_fields(CompressionContext &ctx) {
   release_optional_fields(ctx);
 
   const auto end = std::chrono::high_resolution_clock::now();
-  log_cpu_memory_checkpoint("after optional field compression");
   return elapsed_ms(start, end);
 }
 
 double compress_jump_fields(CompressionContext &ctx) {
-  log_cpu_memory_checkpoint("before jump compression");
   const auto start = std::chrono::high_resolution_clock::now();
   if (!ctx.graph.jumps.from_ids.empty()) {
     JumpCompressionInput input;
@@ -480,12 +471,10 @@ double compress_jump_fields(CompressionContext &ctx) {
   release_jump_fields(ctx);
 
   const auto end = std::chrono::high_resolution_clock::now();
-  log_cpu_memory_checkpoint("after jump compression");
   return elapsed_ms(start, end);
 }
 
 double compress_containment_fields(CompressionContext &ctx) {
-  log_cpu_memory_checkpoint("before containment compression");
   const auto start = std::chrono::high_resolution_clock::now();
   if (!ctx.graph.containments.container_ids.empty()) {
     ContainmentCompressionInput input;
@@ -520,7 +509,6 @@ double compress_containment_fields(CompressionContext &ctx) {
   release_containment_fields(ctx);
 
   const auto end = std::chrono::high_resolution_clock::now();
-  log_cpu_memory_checkpoint("after containment compression");
   return elapsed_ms(start, end);
 }
 
@@ -669,12 +657,8 @@ static void run_grammar_compression(std::vector<std::vector<NodeId>> &paths,
     const double round_remap_ms = elapsed_ms(t0, t1);
     time_compact_sort_remap_ms += round_remap_ms;
     if (gfaz_debug_enabled()) {
-      print_grammar_round({round + 1,
-                           round_generate_ms,
-                           round_encode_ms,
-                           round_remap_ms,
-                           total_used,
-                           num_rules,
+      print_grammar_round({round + 1, round_generate_ms, round_encode_ms,
+                           round_remap_ms, total_used, num_rules,
                            read_process_memory_snapshot()});
     }
   }
@@ -717,7 +701,7 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
     GfaParser parser;
     ctx.graph = parser.parse(gfa_file_path, num_threads);
   }
-  log_cpu_memory_checkpoint("after parse");
+  log_cpu_memory_checkpoint("[CPU Workflow][Memory] after parse");
 
   // Stage 1: initialize shared output metadata and traversal symbol space.
   initialize_output_metadata(ctx);
@@ -727,8 +711,9 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
 
   // Stage 2: transform traversals and build the grammar rulebook.
   const double time_delta_ms = apply_delta_transform(ctx);
+  log_cpu_memory_checkpoint("[CPU Workflow][Memory] after delta transform");
   const double time_grammar_ms = run_grammar_stage(ctx);
-  log_cpu_memory_checkpoint("after grammar compression");
+  log_cpu_memory_checkpoint("[CPU Workflow][Memory] after grammar compression");
 
   // Debug-only check of traversal reduction after grammar encoding.
   if (gfaz_debug_enabled()) {
@@ -752,19 +737,25 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
 
   // Stage 3: compress the grammar rulebook into compressed rule columns.
   const double time_rule_columns_ms = compress_rule_columns(ctx);
+  log_cpu_memory_checkpoint(
+      "[CPU Entropy][Memory] After rule columns compression");
 
   // Stage 4: compress record-group payloads and metadata columns.
-  auto t_zstd_start = std::chrono::high_resolution_clock::now();
   const double time_paths_ms = compress_path_fields(ctx);
   const double time_walks_ms = compress_walk_fields(ctx);
+  log_cpu_memory_checkpoint(
+      "[CPU Entropy][Memory] After Path/Walk compression");
   const double time_segments_links_ms = compress_segment_link_fields(ctx);
   const double time_optional_fields_ms = compress_optional_fields(ctx);
+  log_cpu_memory_checkpoint(
+      "[CPU Entropy][Memory] After Segment/Link/Optional compression");
   const double time_jumps_ms = compress_jump_fields(ctx);
   const double time_containments_ms = compress_containment_fields(ctx);
-
-  auto t_zstd_end = std::chrono::high_resolution_clock::now();
-  double time_zstd_ms = elapsed_ms(t_zstd_start, t_zstd_end);
-  log_cpu_memory_checkpoint("after all field compression");
+  const double time_entropy_ms = time_rule_columns_ms + time_paths_ms +
+                                 time_walks_ms + time_segments_links_ms +
+                                 time_optional_fields_ms + time_jumps_ms +
+                                 time_containments_ms;
+  log_cpu_memory_checkpoint("[CPU Entropy][Memory] After total entropy coding");
 
   auto compress_total_end = std::chrono::high_resolution_clock::now();
   double compress_total_ms =
@@ -772,10 +763,11 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
 
   // Stage 5: report timing/ratio breakdowns and finalize the output container.
   if (gfaz_debug_enabled()) {
-    double rules_size_mb = rule_count * sizeof(int32_t) * 2 / (1024.0 * 1024.0);
+    const double rules_size_mb =
+        rule_count * sizeof(int32_t) * 2 / (1024.0 * 1024.0);
 
-    std::vector<CompressionPostStepDebugInfo> post_steps = {
-        {"compress rule fields", "delta+ZSTD", time_rule_columns_ms,
+    std::vector<EntropyStepDebugInfo> entropy_steps = {
+        {"compress rule columns", "delta+ZSTD", time_rule_columns_ms,
          collect_rules_ratio(ctx.out)},
         {"compress path fields", "ZSTD", time_paths_ms,
          collect_path_ratio(ctx.out)},
@@ -786,25 +778,19 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
         {"compress optional fields", "mixed", time_optional_fields_ms,
          collect_optional_field_ratio(ctx.out)}};
     if (ctx.out.num_jumps > 0) {
-      post_steps.push_back({"compress jump fields", "mixed", time_jumps_ms,
-                            collect_jump_ratio(ctx.out)});
+      entropy_steps.push_back({"compress jump fields", "mixed", time_jumps_ms,
+                               collect_jump_ratio(ctx.out)});
     }
     if (ctx.out.num_containments > 0) {
-      post_steps.push_back({"compress containment fields", "mixed",
-                            time_containments_ms,
-                            collect_containment_ratio(ctx.out)});
+      entropy_steps.push_back({"compress containment fields", "mixed",
+                               time_containments_ms,
+                               collect_containment_ratio(ctx.out)});
     }
 
-    print_cpu_compression_timing({ctx.data_size_mb,
-                                  ctx.total_elements,
-                                  ctx.delta_round,
-                                  time_delta_ms,
-                                  time_grammar_ms,
-                                  rules_size_mb,
-                                  time_rule_columns_ms,
-                                  std::move(post_steps),
-                                  time_zstd_ms,
-                                  compress_total_ms});
+    print_cpu_compression_timing(
+        {ctx.data_size_mb, ctx.total_elements, ctx.delta_round, time_delta_ms,
+         time_grammar_ms, rules_size_mb, std::move(entropy_steps),
+         time_entropy_ms, compress_total_ms});
   }
 
   print_compression_stats(ctx.out, ctx.num_segments, ctx.show_stats);

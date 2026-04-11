@@ -31,7 +31,7 @@ struct CompressionRatio {
   size_t compressed_bytes = 0;
 };
 
-struct CompressionPostStepDebugInfo {
+struct EntropyStepDebugInfo {
   std::string label;
   std::string codec_label;
   double time_ms = 0;
@@ -45,9 +45,8 @@ struct CpuCompressionTimingDebugInfo {
   double time_delta_ms = 0;
   double time_grammar_ms = 0;
   double rules_size_mb = 0;
-  double time_process_rules_ms = 0;
-  std::vector<CompressionPostStepDebugInfo> post_steps;
-  double field_compression_subtotal_ms = 0;
+  std::vector<EntropyStepDebugInfo> entropy_steps;
+  double time_entropy_ms = 0;
   double total_ms = 0;
 };
 

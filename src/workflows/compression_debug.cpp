@@ -98,7 +98,7 @@ void log_cpu_memory_checkpoint(const std::string &label) {
     return;
 
   const auto snapshot = runtime_utils::read_process_memory_snapshot();
-  std::cerr << "[CPU Compress][Memory] " << label
+  std::cerr << label
             << " | " << format_memory_snapshot(snapshot) << std::endl;
 }
 
@@ -194,40 +194,37 @@ CompressionRatio collect_containment_ratio(const CompressedData &data) {
 }
 
 void print_cpu_compression_timing(const CpuCompressionTimingDebugInfo &info) {
-  int step = 3;
+  int step = 1;
 
   std::cerr << "\n[CPU Compress] === TIMING BREAKDOWN (" << std::fixed
             << std::setprecision(1) << info.data_size_mb << " MB, "
             << info.total_elements << " path+walk elements) ===" << std::endl;
-  std::cerr << "  Pre-processing:" << std::endl;
-  std::cerr << "    1. delta_transform (x" << info.delta_round
+  std::cerr << "  Traversal transform:" << std::endl;
+  std::cerr << "    " << step++ << ". delta_transform (x" << info.delta_round
             << "):         " << std::fixed << std::setprecision(2)
             << info.time_delta_ms << " ms" << std::endl;
   std::cerr << "  Grammar compression:" << std::endl;
-  std::cerr << "    2. run_grammar_compression:      " << std::fixed
+  std::cerr << "    " << step++ << ". run_grammar_compression:      "
+            << std::fixed
             << std::setprecision(2) << info.time_grammar_ms << " ms"
             << std::endl;
-  std::cerr << "  Post-processing:" << std::endl;
-  std::cerr << "    " << step++ << ". encode rules (" << std::fixed
-            << std::setprecision(1) << info.rules_size_mb
-            << " MB): " << std::setprecision(2) << info.time_process_rules_ms
-            << " ms" << std::endl;
+  std::cerr << "  Entropy coding:" << std::endl;
 
-  for (const auto &post_step : info.post_steps) {
-    std::cerr << "    " << step++ << ". " << post_step.label;
-    if (!post_step.codec_label.empty())
-      std::cerr << " (" << post_step.codec_label << ")";
+  for (const auto &entropy_step : info.entropy_steps) {
+    std::cerr << "    " << step++ << ". " << entropy_step.label;
+    if (!entropy_step.codec_label.empty())
+      std::cerr << " (" << entropy_step.codec_label << ")";
     std::cerr << ": " << std::fixed << std::setprecision(2)
-              << post_step.time_ms << " ms";
-    if (post_step.ratio.original_bytes > 0 ||
-        post_step.ratio.compressed_bytes > 0) {
-      std::cerr << " | " << format_ratio(post_step.ratio);
+              << entropy_step.time_ms << " ms";
+    if (entropy_step.ratio.original_bytes > 0 ||
+        entropy_step.ratio.compressed_bytes > 0) {
+      std::cerr << " | " << format_ratio(entropy_step.ratio);
     }
     std::cerr << std::endl;
   }
 
-  std::cerr << "    field compression subtotal:      " << std::fixed
-            << std::setprecision(2) << info.field_compression_subtotal_ms
+  std::cerr << "    entropy coding subtotal:         " << std::fixed
+            << std::setprecision(2) << info.time_entropy_ms
             << " ms" << std::endl;
   std::cerr << "  ─────────────────────────────────" << std::endl;
   std::cerr << "  TOTAL (compress_gfa):              " << std::fixed

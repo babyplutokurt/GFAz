@@ -142,7 +142,153 @@ inline uint32_t parse_overlap_num(std::string_view overlap_view, char &op) {
 } // namespace
 
 using gfz::runtime_utils::format_memory_snapshot;
+using gfz::runtime_utils::format_size;
 using gfz::runtime_utils::read_process_memory_snapshot;
+
+namespace {
+
+template <typename T>
+size_t vector_buffer_bytes(const std::vector<T> &values) {
+  return values.capacity() * sizeof(T);
+}
+
+size_t string_owned_bytes(const std::string &value) {
+  return sizeof(std::string) + value.capacity();
+}
+
+size_t string_vector_owned_bytes(const std::vector<std::string> &values) {
+  size_t bytes = values.capacity() * sizeof(std::string);
+  for (const auto &value : values)
+    bytes += value.capacity();
+  return bytes;
+}
+
+size_t nested_node_vector_bytes(const std::vector<std::vector<NodeId>> &sequences) {
+  size_t bytes = sequences.capacity() * sizeof(std::vector<NodeId>);
+  for (const auto &seq : sequences)
+    bytes += seq.capacity() * sizeof(NodeId);
+  return bytes;
+}
+
+size_t optional_field_column_bytes(const OptionalFieldColumn &col) {
+  return string_owned_bytes(col.tag) + vector_buffer_bytes(col.int_values) +
+         vector_buffer_bytes(col.float_values) +
+         vector_buffer_bytes(col.char_values) +
+         string_owned_bytes(col.concatenated_strings) +
+         vector_buffer_bytes(col.string_lengths) +
+         vector_buffer_bytes(col.b_subtypes) +
+         vector_buffer_bytes(col.b_lengths) +
+         vector_buffer_bytes(col.b_concat_bytes);
+}
+
+size_t optional_field_columns_bytes(
+    const std::vector<OptionalFieldColumn> &cols) {
+  size_t bytes = cols.capacity() * sizeof(OptionalFieldColumn);
+  for (const auto &col : cols)
+    bytes += optional_field_column_bytes(col);
+  return bytes;
+}
+
+size_t segment_bytes(const GfaGraph &graph) {
+  return string_vector_owned_bytes(graph.node_id_to_name) +
+         string_vector_owned_bytes(graph.node_sequences);
+}
+
+size_t path_bytes(const GfaGraph &graph) {
+  return nested_node_vector_bytes(graph.paths) +
+         string_vector_owned_bytes(graph.path_names) +
+         string_vector_owned_bytes(graph.path_overlaps);
+}
+
+size_t walk_bytes(const GfaGraph &graph) {
+  return nested_node_vector_bytes(graph.walks.walks) +
+         string_vector_owned_bytes(graph.walks.sample_ids) +
+         vector_buffer_bytes(graph.walks.hap_indices) +
+         string_vector_owned_bytes(graph.walks.seq_ids) +
+         vector_buffer_bytes(graph.walks.seq_starts) +
+         vector_buffer_bytes(graph.walks.seq_ends);
+}
+
+size_t link_bytes(const GfaGraph &graph) {
+  return vector_buffer_bytes(graph.links.from_ids) +
+         vector_buffer_bytes(graph.links.to_ids) +
+         vector_buffer_bytes(graph.links.from_orients) +
+         vector_buffer_bytes(graph.links.to_orients) +
+         vector_buffer_bytes(graph.links.overlap_nums) +
+         vector_buffer_bytes(graph.links.overlap_ops);
+}
+
+size_t jump_bytes(const GfaGraph &graph) {
+  return vector_buffer_bytes(graph.jumps.from_ids) +
+         vector_buffer_bytes(graph.jumps.from_orients) +
+         vector_buffer_bytes(graph.jumps.to_ids) +
+         vector_buffer_bytes(graph.jumps.to_orients) +
+         string_vector_owned_bytes(graph.jumps.distances) +
+         string_vector_owned_bytes(graph.jumps.rest_fields);
+}
+
+size_t containment_bytes(const GfaGraph &graph) {
+  return vector_buffer_bytes(graph.containments.container_ids) +
+         vector_buffer_bytes(graph.containments.container_orients) +
+         vector_buffer_bytes(graph.containments.contained_ids) +
+         vector_buffer_bytes(graph.containments.contained_orients) +
+         vector_buffer_bytes(graph.containments.positions) +
+         string_vector_owned_bytes(graph.containments.overlaps) +
+         string_vector_owned_bytes(graph.containments.rest_fields);
+}
+
+size_t node_name_map_bytes(const GfaGraph &graph) {
+  // Approximation: bucket array + nodes already accounted for by string storage
+  // in node_id_to_name. The per-entry pair/node overhead is estimated here.
+  constexpr size_t kApproxMapNodeOverhead = sizeof(void *) * 4 + sizeof(uint32_t);
+  return graph.node_name_to_id.bucket_count() * sizeof(void *) +
+         graph.node_name_to_id.size() * kApproxMapNodeOverhead;
+}
+
+void print_graph_memory_breakdown(const GfaGraph &graph) {
+  const size_t segment_data = segment_bytes(graph);
+  const size_t path_data = path_bytes(graph);
+  const size_t walk_data = walk_bytes(graph);
+  const size_t link_data = link_bytes(graph);
+  const size_t jump_data = jump_bytes(graph);
+  const size_t containment_data = containment_bytes(graph);
+  const size_t segment_optional = optional_field_columns_bytes(
+      graph.segment_optional_fields);
+  const size_t link_optional = optional_field_columns_bytes(
+      graph.link_optional_fields);
+  const size_t node_name_map = node_name_map_bytes(graph);
+  const size_t total = segment_data + path_data + walk_data + link_data +
+                       jump_data + containment_data + segment_optional +
+                       link_optional + node_name_map;
+
+  std::cerr << "[GfaParser] approximate graph memory:" << std::endl;
+  std::cerr << "  segments:                 " << format_size(segment_data)
+            << std::endl;
+  std::cerr << "  node_name_to_id map:      " << format_size(node_name_map)
+            << std::endl;
+  std::cerr << "  paths:                    " << format_size(path_data)
+            << std::endl;
+  std::cerr << "  walks:                    " << format_size(walk_data)
+            << std::endl;
+  std::cerr << "  links:                    " << format_size(link_data)
+            << std::endl;
+  std::cerr << "  segment optional fields:  "
+            << format_size(segment_optional) << std::endl;
+  std::cerr << "  link optional fields:     " << format_size(link_optional)
+            << std::endl;
+  if (graph.jumps.size() > 0) {
+    std::cerr << "  jumps:                    " << format_size(jump_data)
+              << std::endl;
+  }
+  if (graph.containments.size() > 0) {
+    std::cerr << "  containments:             "
+              << format_size(containment_data) << std::endl;
+  }
+  std::cerr << "  total tracked:            " << format_size(total)
+            << std::endl;
+}
+
+} // namespace
 
 GfaParser::GfaParser() = default;
 
@@ -442,6 +588,7 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
               << " ms"
               << " | " << format_memory_snapshot(snapshot)
               << std::endl;
+    print_graph_memory_breakdown(graph);
   }
 
   return graph;
