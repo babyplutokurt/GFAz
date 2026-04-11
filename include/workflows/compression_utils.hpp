@@ -18,6 +18,29 @@ void append_string_column(const std::vector<std::string> &values,
                           std::string &concatenated,
                           std::vector<uint32_t> &lengths);
 
+void flatten_traversal_sequences(
+    const std::vector<std::vector<NodeId>> &sequences,
+    std::vector<int32_t> &flattened, std::vector<uint32_t> &lengths);
+
+void flatten_path_metadata(const std::vector<std::vector<NodeId>> &paths,
+                           const std::vector<std::string> &path_names,
+                           const std::vector<std::string> &path_overlaps,
+                           std::string &names_concat,
+                           std::vector<uint32_t> &name_lengths,
+                           std::string &overlaps_concat,
+                           std::vector<uint32_t> &overlap_lengths);
+
+void flatten_walk_string_metadata(const WalkData &walks,
+                                  std::string &sample_ids_concat,
+                                  std::vector<uint32_t> &sample_id_lengths,
+                                  std::string &seq_ids_concat,
+                                  std::vector<uint32_t> &seq_id_lengths);
+
+void flatten_segment_sequences(const std::vector<std::string> &sequences,
+                               std::string &concat,
+                               std::vector<uint32_t> &lengths,
+                               uint32_t max_id);
+
 CompressedOptionalFieldColumn
 compress_optional_column(const OptionalFieldColumn &col);
 

@@ -30,6 +30,502 @@ using namespace gfz::compression_utils;
 using namespace gfz::compression_debug;
 using namespace gfz::runtime_utils;
 
+static void run_grammar_compression(std::vector<std::vector<NodeId>> &paths,
+                                    std::vector<std::vector<NodeId>> &walks,
+                                    uint32_t &next_id, int num_rounds,
+                                    size_t freq_threshold, uint32_t layer_start,
+                                    std::vector<Packed2mer> &rulebook,
+                                    int num_threads);
+
+namespace {
+
+struct CompressionContext {
+  GfaGraph graph;
+  CompressedData out;
+
+  int num_rounds = 0;
+  size_t freq_threshold = 0;
+  int delta_round = 1;
+  int num_threads = 0;
+  bool show_stats = false;
+
+  uint32_t next_id = 0;
+  uint32_t layer_start = 0;
+  uint32_t max_abs = 0;
+  size_t num_segments = 0;
+  size_t total_elements = 0;
+  double data_size_mb = 0;
+
+  std::vector<Packed2mer> rulebook;
+};
+
+struct PathCompressionInput {
+  std::vector<int32_t> flat;
+  std::string names_concat;
+  std::vector<uint32_t> name_lengths;
+  std::string overlaps_concat;
+  std::vector<uint32_t> overlap_lengths;
+};
+
+struct WalkCompressionInput {
+  std::vector<int32_t> flat;
+  std::string sample_ids_concat;
+  std::vector<uint32_t> sample_id_lengths;
+  std::string seq_ids_concat;
+  std::vector<uint32_t> seq_id_lengths;
+};
+
+struct SegmentCompressionInput {
+  std::string segment_concat;
+  std::vector<uint32_t> segment_lengths;
+};
+
+struct LinkCompressionInput {
+  const LinkData *links = nullptr;
+};
+
+struct JumpCompressionInput {
+  std::string distances_concat;
+  std::vector<uint32_t> distance_lengths;
+  std::string rest_fields_concat;
+  std::vector<uint32_t> rest_lengths;
+  const JumpData *jumps = nullptr;
+};
+
+struct ContainmentCompressionInput {
+  std::string overlaps_concat;
+  std::vector<uint32_t> overlap_lengths;
+  std::string rest_fields_concat;
+  std::vector<uint32_t> rest_lengths;
+  const ContainmentData *containments = nullptr;
+};
+
+void release_path_fields(CompressionContext &ctx) {
+  ctx.graph.paths.clear();
+  ctx.graph.paths.shrink_to_fit();
+  ctx.graph.path_names.clear();
+  ctx.graph.path_names.shrink_to_fit();
+  ctx.graph.path_overlaps.clear();
+  ctx.graph.path_overlaps.shrink_to_fit();
+}
+
+void release_walk_fields(CompressionContext &ctx) {
+  ctx.graph.walks.walks.clear();
+  ctx.graph.walks.walks.shrink_to_fit();
+  ctx.graph.walks.sample_ids.clear();
+  ctx.graph.walks.sample_ids.shrink_to_fit();
+  ctx.graph.walks.hap_indices.clear();
+  ctx.graph.walks.hap_indices.shrink_to_fit();
+  ctx.graph.walks.seq_ids.clear();
+  ctx.graph.walks.seq_ids.shrink_to_fit();
+  ctx.graph.walks.seq_starts.clear();
+  ctx.graph.walks.seq_starts.shrink_to_fit();
+  ctx.graph.walks.seq_ends.clear();
+  ctx.graph.walks.seq_ends.shrink_to_fit();
+}
+
+void release_segment_link_fields(CompressionContext &ctx) {
+  ctx.graph.node_sequences.clear();
+  ctx.graph.node_sequences.shrink_to_fit();
+  ctx.graph.links.from_ids.clear();
+  ctx.graph.links.from_ids.shrink_to_fit();
+  ctx.graph.links.to_ids.clear();
+  ctx.graph.links.to_ids.shrink_to_fit();
+  ctx.graph.links.from_orients.clear();
+  ctx.graph.links.from_orients.shrink_to_fit();
+  ctx.graph.links.to_orients.clear();
+  ctx.graph.links.to_orients.shrink_to_fit();
+  ctx.graph.links.overlap_nums.clear();
+  ctx.graph.links.overlap_nums.shrink_to_fit();
+  ctx.graph.links.overlap_ops.clear();
+  ctx.graph.links.overlap_ops.shrink_to_fit();
+}
+
+void release_optional_fields(CompressionContext &ctx) {
+  ctx.graph.segment_optional_fields.clear();
+  ctx.graph.segment_optional_fields.shrink_to_fit();
+  ctx.graph.link_optional_fields.clear();
+  ctx.graph.link_optional_fields.shrink_to_fit();
+}
+
+void release_jump_fields(CompressionContext &ctx) {
+  ctx.graph.jumps.from_ids.clear();
+  ctx.graph.jumps.from_ids.shrink_to_fit();
+  ctx.graph.jumps.from_orients.clear();
+  ctx.graph.jumps.from_orients.shrink_to_fit();
+  ctx.graph.jumps.to_ids.clear();
+  ctx.graph.jumps.to_ids.shrink_to_fit();
+  ctx.graph.jumps.to_orients.clear();
+  ctx.graph.jumps.to_orients.shrink_to_fit();
+  ctx.graph.jumps.distances.clear();
+  ctx.graph.jumps.distances.shrink_to_fit();
+  ctx.graph.jumps.rest_fields.clear();
+  ctx.graph.jumps.rest_fields.shrink_to_fit();
+}
+
+void release_containment_fields(CompressionContext &ctx) {
+  ctx.graph.containments.container_ids.clear();
+  ctx.graph.containments.container_ids.shrink_to_fit();
+  ctx.graph.containments.container_orients.clear();
+  ctx.graph.containments.container_orients.shrink_to_fit();
+  ctx.graph.containments.contained_ids.clear();
+  ctx.graph.containments.contained_ids.shrink_to_fit();
+  ctx.graph.containments.contained_orients.clear();
+  ctx.graph.containments.contained_orients.shrink_to_fit();
+  ctx.graph.containments.positions.clear();
+  ctx.graph.containments.positions.shrink_to_fit();
+  ctx.graph.containments.overlaps.clear();
+  ctx.graph.containments.overlaps.shrink_to_fit();
+  ctx.graph.containments.rest_fields.clear();
+  ctx.graph.containments.rest_fields.shrink_to_fit();
+}
+
+void initialize_output_metadata(CompressionContext &ctx) {
+  ctx.out.header_line = ctx.graph.header_line;
+
+  // Delta round must be >= 1: without delta encoding, the max-abs guard
+  // would set next_id = 1 which collides with raw node IDs still in the
+  // path stream, causing silent data corruption during rule expansion.
+  if (ctx.delta_round < 1) {
+    std::cerr << "Warning: delta_round=" << ctx.delta_round
+              << " is invalid, clamping to 1" << std::endl;
+    ctx.delta_round = 1;
+  }
+  ctx.out.delta_round = ctx.delta_round;
+
+  for (const auto &p : ctx.graph.paths)
+    ctx.out.original_path_lengths.push_back(static_cast<uint32_t>(p.size()));
+  for (const auto &w : ctx.graph.walks.walks)
+    ctx.out.original_walk_lengths.push_back(static_cast<uint32_t>(w.size()));
+
+  ctx.total_elements =
+      total_node_count(ctx.graph.paths) + total_node_count(ctx.graph.walks.walks);
+  ctx.data_size_mb =
+      ctx.total_elements * sizeof(int32_t) / (1024.0 * 1024.0);
+}
+
+void prepare_id_space_for_traversal_transform(CompressionContext &ctx) {
+  // Rule IDs must be disjoint from the post-delta traversal symbol space.
+  // Seed next_id from the maximum absolute delta-domain symbol instead of the
+  // parser's name metadata, which is not needed beyond parsing.
+  ctx.graph.node_name_to_id.clear();
+  ctx.graph.node_name_to_id.rehash(0);
+  ctx.graph.node_id_to_name.clear();
+  ctx.graph.node_id_to_name.shrink_to_fit();
+  ctx.next_id = 0;
+}
+
+double apply_delta_transform(CompressionContext &ctx) {
+  const auto start = std::chrono::high_resolution_clock::now();
+  ctx.max_abs = 0;
+  for (int i = 0; i < ctx.delta_round; ++i) {
+    const uint32_t path_max = Codec::delta_transform_and_max_abs(ctx.graph.paths);
+    const uint32_t walk_max =
+        Codec::delta_transform_and_max_abs(ctx.graph.walks.walks);
+    ctx.max_abs = std::max(ctx.max_abs, std::max(path_max, walk_max));
+  }
+  const auto end = std::chrono::high_resolution_clock::now();
+
+  if (ctx.max_abs >= ctx.next_id) {
+    if (ctx.max_abs == UINT32_MAX) {
+      throw std::overflow_error(std::string(kCompressionErrorPrefix) +
+                                "delta values too large for rule ID assignment");
+    }
+    ctx.next_id = ctx.max_abs + 1;
+  }
+
+  return elapsed_ms(start, end);
+}
+
+double run_grammar_stage(CompressionContext &ctx) {
+  ctx.layer_start = ctx.next_id;
+  const auto start = std::chrono::high_resolution_clock::now();
+  run_grammar_compression(ctx.graph.paths, ctx.graph.walks.walks, ctx.next_id,
+                          ctx.num_rounds, ctx.freq_threshold, ctx.layer_start,
+                          ctx.rulebook, ctx.num_threads);
+  const auto end = std::chrono::high_resolution_clock::now();
+
+  const uint32_t rule_count = ctx.next_id - ctx.layer_start;
+  ctx.out.layer_rule_ranges.push_back(
+      LayerRuleRange{2, ctx.layer_start, ctx.next_id, 0, rule_count * 2});
+  return elapsed_ms(start, end);
+}
+
+double compress_rule_columns(CompressionContext &ctx) {
+  log_cpu_memory_checkpoint("before rule column encoding");
+  const auto start = std::chrono::high_resolution_clock::now();
+  std::vector<int32_t> first, second;
+  process_rules(ctx.rulebook, ctx.layer_start, ctx.out.layer_rule_ranges, first,
+                second);
+  ctx.rulebook.clear();
+  ctx.rulebook.shrink_to_fit();
+
+#ifdef _OPENMP
+#pragma omp parallel sections
+  {
+#pragma omp section
+    ctx.out.rules_first_zstd = Codec::zstd_compress_int32_vector(first);
+#pragma omp section
+    ctx.out.rules_second_zstd = Codec::zstd_compress_int32_vector(second);
+  }
+#else
+  ctx.out.rules_first_zstd = Codec::zstd_compress_int32_vector(first);
+  ctx.out.rules_second_zstd = Codec::zstd_compress_int32_vector(second);
+#endif
+
+  const auto end = std::chrono::high_resolution_clock::now();
+  log_cpu_memory_checkpoint("after rule column encoding");
+  return elapsed_ms(start, end);
+}
+
+double compress_path_fields(CompressionContext &ctx) {
+  log_cpu_memory_checkpoint("before path compression");
+  const auto start = std::chrono::high_resolution_clock::now();
+  PathCompressionInput input;
+  flatten_traversal_sequences(ctx.graph.paths, input.flat,
+                              ctx.out.sequence_lengths);
+  flatten_path_metadata(ctx.graph.paths, ctx.graph.path_names,
+                        ctx.graph.path_overlaps, input.names_concat,
+                        input.name_lengths, input.overlaps_concat,
+                        input.overlap_lengths);
+
+#ifdef _OPENMP
+#pragma omp parallel sections
+  {
+#pragma omp section
+    ctx.out.paths_zstd = Codec::zstd_compress_int32_vector(input.flat);
+#pragma omp section
+    {
+      ctx.out.names_zstd = Codec::zstd_compress_string(input.names_concat);
+      ctx.out.name_lengths_zstd =
+          Codec::zstd_compress_uint32_vector(input.name_lengths);
+    }
+#pragma omp section
+    {
+      ctx.out.overlaps_zstd =
+          Codec::zstd_compress_string(input.overlaps_concat);
+      ctx.out.overlap_lengths_zstd =
+          Codec::zstd_compress_uint32_vector(input.overlap_lengths);
+    }
+  }
+#else
+  ctx.out.paths_zstd = Codec::zstd_compress_int32_vector(input.flat);
+  ctx.out.names_zstd = Codec::zstd_compress_string(input.names_concat);
+  ctx.out.name_lengths_zstd =
+      Codec::zstd_compress_uint32_vector(input.name_lengths);
+  ctx.out.overlaps_zstd = Codec::zstd_compress_string(input.overlaps_concat);
+  ctx.out.overlap_lengths_zstd =
+      Codec::zstd_compress_uint32_vector(input.overlap_lengths);
+#endif
+
+  release_path_fields(ctx);
+
+  const auto end = std::chrono::high_resolution_clock::now();
+  log_cpu_memory_checkpoint("after path compression");
+  return elapsed_ms(start, end);
+}
+
+double compress_walk_fields(CompressionContext &ctx) {
+  log_cpu_memory_checkpoint("before walk compression");
+  const auto start = std::chrono::high_resolution_clock::now();
+  if (!ctx.graph.walks.walks.empty()) {
+    WalkCompressionInput input;
+    flatten_traversal_sequences(ctx.graph.walks.walks, input.flat,
+                                ctx.out.walk_lengths);
+    ctx.out.walks_zstd = Codec::zstd_compress_int32_vector(input.flat);
+
+    flatten_walk_string_metadata(ctx.graph.walks, input.sample_ids_concat,
+                                 input.sample_id_lengths, input.seq_ids_concat,
+                                 input.seq_id_lengths);
+
+    ctx.out.walk_sample_ids_zstd =
+        Codec::zstd_compress_string(input.sample_ids_concat);
+    ctx.out.walk_sample_id_lengths_zstd =
+        Codec::zstd_compress_uint32_vector(input.sample_id_lengths);
+    ctx.out.walk_hap_indices_zstd =
+        Codec::zstd_compress_uint32_vector(ctx.graph.walks.hap_indices);
+    ctx.out.walk_seq_ids_zstd =
+        Codec::zstd_compress_string(input.seq_ids_concat);
+    ctx.out.walk_seq_id_lengths_zstd =
+        Codec::zstd_compress_uint32_vector(input.seq_id_lengths);
+    ctx.out.walk_seq_starts_zstd =
+        Codec::compress_varint_int64(ctx.graph.walks.seq_starts);
+    ctx.out.walk_seq_ends_zstd =
+        Codec::compress_varint_int64(ctx.graph.walks.seq_ends);
+  }
+
+  release_walk_fields(ctx);
+
+  const auto end = std::chrono::high_resolution_clock::now();
+  log_cpu_memory_checkpoint("after walk compression");
+  return elapsed_ms(start, end);
+}
+
+double compress_segment_link_fields(CompressionContext &ctx) {
+  log_cpu_memory_checkpoint("before segment/link compression");
+  SegmentCompressionInput segment_input;
+  LinkCompressionInput link_input;
+  flatten_segment_sequences(ctx.graph.node_sequences, segment_input.segment_concat,
+                            segment_input.segment_lengths, ctx.next_id);
+  ctx.num_segments = segment_input.segment_lengths.size();
+  link_input.links = &ctx.graph.links;
+  ctx.out.num_links = link_input.links->from_ids.size();
+
+  const auto start = std::chrono::high_resolution_clock::now();
+#ifdef _OPENMP
+#pragma omp parallel sections
+  {
+#pragma omp section
+    {
+      ctx.out.segment_sequences_zstd =
+          Codec::zstd_compress_string(segment_input.segment_concat);
+      ctx.out.segment_seq_lengths_zstd =
+          Codec::zstd_compress_uint32_vector(segment_input.segment_lengths);
+    }
+#pragma omp section
+    {
+      ctx.out.link_from_ids_zstd =
+          Codec::compress_delta_varint_uint32(link_input.links->from_ids);
+      ctx.out.link_to_ids_zstd =
+          Codec::compress_delta_varint_uint32(link_input.links->to_ids);
+    }
+#pragma omp section
+    {
+      ctx.out.link_from_orients_zstd =
+          Codec::compress_orientations(link_input.links->from_orients);
+      ctx.out.link_to_orients_zstd =
+          Codec::compress_orientations(link_input.links->to_orients);
+    }
+#pragma omp section
+    {
+      ctx.out.link_overlap_nums_zstd =
+          Codec::zstd_compress_uint32_vector(link_input.links->overlap_nums);
+      ctx.out.link_overlap_ops_zstd =
+          Codec::zstd_compress_char_vector(link_input.links->overlap_ops);
+    }
+  }
+#else
+  ctx.out.segment_sequences_zstd =
+      Codec::zstd_compress_string(segment_input.segment_concat);
+  ctx.out.segment_seq_lengths_zstd =
+      Codec::zstd_compress_uint32_vector(segment_input.segment_lengths);
+  ctx.out.link_from_ids_zstd =
+      Codec::compress_delta_varint_uint32(link_input.links->from_ids);
+  ctx.out.link_to_ids_zstd =
+      Codec::compress_delta_varint_uint32(link_input.links->to_ids);
+  ctx.out.link_from_orients_zstd =
+      Codec::compress_orientations(link_input.links->from_orients);
+  ctx.out.link_to_orients_zstd =
+      Codec::compress_orientations(link_input.links->to_orients);
+  ctx.out.link_overlap_nums_zstd =
+      Codec::zstd_compress_uint32_vector(link_input.links->overlap_nums);
+  ctx.out.link_overlap_ops_zstd =
+      Codec::zstd_compress_char_vector(link_input.links->overlap_ops);
+#endif
+
+  release_segment_link_fields(ctx);
+
+  const auto end = std::chrono::high_resolution_clock::now();
+  log_cpu_memory_checkpoint("after segment/link compression");
+  return elapsed_ms(start, end);
+}
+
+double compress_optional_fields(CompressionContext &ctx) {
+  log_cpu_memory_checkpoint("before optional field compression");
+  const auto start = std::chrono::high_resolution_clock::now();
+  for (const auto &col : ctx.graph.segment_optional_fields)
+    ctx.out.segment_optional_fields_zstd.push_back(
+        compress_optional_column(col));
+  for (const auto &col : ctx.graph.link_optional_fields)
+    ctx.out.link_optional_fields_zstd.push_back(compress_optional_column(col));
+
+  release_optional_fields(ctx);
+
+  const auto end = std::chrono::high_resolution_clock::now();
+  log_cpu_memory_checkpoint("after optional field compression");
+  return elapsed_ms(start, end);
+}
+
+double compress_jump_fields(CompressionContext &ctx) {
+  log_cpu_memory_checkpoint("before jump compression");
+  const auto start = std::chrono::high_resolution_clock::now();
+  if (!ctx.graph.jumps.from_ids.empty()) {
+    JumpCompressionInput input;
+    input.jumps = &ctx.graph.jumps;
+    append_string_column(input.jumps->distances, input.distances_concat,
+                         input.distance_lengths);
+    append_string_column(input.jumps->rest_fields, input.rest_fields_concat,
+                         input.rest_lengths);
+
+    ctx.out.num_jumps = ctx.graph.jumps.size();
+
+    ctx.out.jump_from_ids_zstd =
+        Codec::compress_delta_varint_uint32(input.jumps->from_ids);
+    ctx.out.jump_to_ids_zstd =
+        Codec::compress_delta_varint_uint32(input.jumps->to_ids);
+    ctx.out.jump_from_orients_zstd =
+        Codec::compress_orientations(input.jumps->from_orients);
+    ctx.out.jump_to_orients_zstd =
+        Codec::compress_orientations(input.jumps->to_orients);
+    ctx.out.jump_distances_zstd =
+        Codec::zstd_compress_string(input.distances_concat);
+    ctx.out.jump_distance_lengths_zstd =
+        Codec::zstd_compress_uint32_vector(input.distance_lengths);
+    ctx.out.jump_rest_fields_zstd =
+        Codec::zstd_compress_string(input.rest_fields_concat);
+    ctx.out.jump_rest_lengths_zstd =
+        Codec::zstd_compress_uint32_vector(input.rest_lengths);
+  }
+
+  release_jump_fields(ctx);
+
+  const auto end = std::chrono::high_resolution_clock::now();
+  log_cpu_memory_checkpoint("after jump compression");
+  return elapsed_ms(start, end);
+}
+
+double compress_containment_fields(CompressionContext &ctx) {
+  log_cpu_memory_checkpoint("before containment compression");
+  const auto start = std::chrono::high_resolution_clock::now();
+  if (!ctx.graph.containments.container_ids.empty()) {
+    ContainmentCompressionInput input;
+    input.containments = &ctx.graph.containments;
+    append_string_column(input.containments->overlaps, input.overlaps_concat,
+                         input.overlap_lengths);
+    append_string_column(input.containments->rest_fields,
+                         input.rest_fields_concat, input.rest_lengths);
+
+    ctx.out.num_containments = ctx.graph.containments.size();
+
+    ctx.out.containment_container_ids_zstd =
+        Codec::compress_delta_varint_uint32(input.containments->container_ids);
+    ctx.out.containment_contained_ids_zstd =
+        Codec::compress_delta_varint_uint32(input.containments->contained_ids);
+    ctx.out.containment_container_orients_zstd =
+        Codec::compress_orientations(input.containments->container_orients);
+    ctx.out.containment_contained_orients_zstd =
+        Codec::compress_orientations(input.containments->contained_orients);
+    ctx.out.containment_positions_zstd =
+        Codec::zstd_compress_uint32_vector(input.containments->positions);
+    ctx.out.containment_overlaps_zstd =
+        Codec::zstd_compress_string(input.overlaps_concat);
+    ctx.out.containment_overlap_lengths_zstd =
+        Codec::zstd_compress_uint32_vector(input.overlap_lengths);
+    ctx.out.containment_rest_fields_zstd =
+        Codec::zstd_compress_string(input.rest_fields_concat);
+    ctx.out.containment_rest_lengths_zstd =
+        Codec::zstd_compress_uint32_vector(input.rest_lengths);
+  }
+
+  release_containment_fields(ctx);
+
+  const auto end = std::chrono::high_resolution_clock::now();
+  log_cpu_memory_checkpoint("after containment compression");
+  return elapsed_ms(start, end);
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Grammar compression core
 // ---------------------------------------------------------------------------
@@ -200,400 +696,71 @@ static void run_grammar_compression(std::vector<std::vector<NodeId>> &paths,
 CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
                             size_t freq_threshold, int delta_round,
                             int num_threads, bool show_stats) {
+  // CPU compression pipeline:
+  // 1. Parse the input GFA into GfaGraph.
+  // 2. Initialize output metadata and establish the traversal ID space.
+  // 3. Apply delta encoding to paths and walks.
+  // 4. Run multi-round 2-mer grammar compression over traversals.
+  // 5. Encode the rulebook into compressed rule columns.
+  // 6. Compress each record group into CompressedData field blocks:
+  //    P, W, S, L, optional fields, J, and C.
+  // 7. Emit compression stats and return the finalized container.
   ScopedOMPThreads omp_scope(num_threads);
-  CompressedData out;
+  CompressionContext ctx;
+  ctx.num_rounds = num_rounds;
+  ctx.freq_threshold = freq_threshold;
+  ctx.delta_round = delta_round;
+  ctx.num_threads = num_threads;
+  ctx.show_stats = show_stats;
 
-  GfaGraph graph;
   {
     GfaParser parser;
-    graph = parser.parse(gfa_file_path, num_threads);
+    ctx.graph = parser.parse(gfa_file_path, num_threads);
   }
   log_cpu_memory_checkpoint("after parse");
 
-  out.header_line = graph.header_line;
-
-  // Delta round must be >= 1: without delta encoding, the max-abs guard
-  // would set next_id = 1 which collides with raw node IDs still in the
-  // path stream, causing silent data corruption during rule expansion.
-  if (delta_round < 1) {
-    std::cerr << "Warning: delta_round=" << delta_round
-              << " is invalid, clamping to 1" << std::endl;
-    delta_round = 1;
-  }
-  out.delta_round = delta_round;
-
-  graph.node_name_to_id.clear();
-  graph.node_name_to_id.rehash(0);
-  graph.node_id_to_name.clear();
-  graph.node_id_to_name.shrink_to_fit();
-
-  // Store original lengths before any transformation (for exact allocation on
-  // decompression)
-  for (const auto &p : graph.paths)
-    out.original_path_lengths.push_back(static_cast<uint32_t>(p.size()));
-  for (const auto &w : graph.walks.walks)
-    out.original_walk_lengths.push_back(static_cast<uint32_t>(w.size()));
-
-  uint32_t next_id = graph.node_id_to_name.size();
-
-  // Compute total traversal size for throughput calculation
-  const size_t total_elements =
-      total_node_count(graph.paths) + total_node_count(graph.walks.walks);
-  double data_size_mb = total_elements * sizeof(int32_t) / (1024.0 * 1024.0);
+  // Stage 1: initialize shared output metadata and traversal symbol space.
+  initialize_output_metadata(ctx);
+  prepare_id_space_for_traversal_transform(ctx);
 
   auto compress_total_start = std::chrono::high_resolution_clock::now();
 
-  // Delta encoding with max value tracking to prevent ID collision
-  auto t_delta_start = std::chrono::high_resolution_clock::now();
-  uint32_t max_abs = 0;
-  for (int i = 0; i < delta_round; ++i) {
-    uint32_t path_max = Codec::delta_transform_and_max_abs(graph.paths);
-    uint32_t walk_max = Codec::delta_transform_and_max_abs(graph.walks.walks);
-    max_abs = std::max(max_abs, std::max(path_max, walk_max));
-  }
-  auto t_delta_end = std::chrono::high_resolution_clock::now();
-  double time_delta_ms = elapsed_ms(t_delta_start, t_delta_end);
-
-  if (max_abs >= next_id) {
-    if (max_abs == UINT32_MAX)
-      throw std::overflow_error(
-          std::string(kCompressionErrorPrefix) +
-          "delta values too large for rule ID assignment");
-    next_id = max_abs + 1;
-  }
-
-  // Grammar compression
-  uint32_t layer_start = next_id;
-  std::vector<Packed2mer> rulebook;
-
-  auto t_grammar_start = std::chrono::high_resolution_clock::now();
-  run_grammar_compression(graph.paths, graph.walks.walks, next_id, num_rounds,
-                          freq_threshold, layer_start, rulebook, num_threads);
-  auto t_grammar_end = std::chrono::high_resolution_clock::now();
-  double time_grammar_ms = elapsed_ms(t_grammar_start, t_grammar_end);
+  // Stage 2: transform traversals and build the grammar rulebook.
+  const double time_delta_ms = apply_delta_transform(ctx);
+  const double time_grammar_ms = run_grammar_stage(ctx);
   log_cpu_memory_checkpoint("after grammar compression");
 
-  // Print path/walk length comparison: original vs encoded
+  // Debug-only check of traversal reduction after grammar encoding.
   if (gfaz_debug_enabled()) {
     size_t original_path_len = 0, original_walk_len = 0;
     size_t encoded_path_len = 0, encoded_walk_len = 0;
 
-    for (const auto &len : out.original_path_lengths)
+    for (const auto &len : ctx.out.original_path_lengths)
       original_path_len += len;
-    for (const auto &len : out.original_walk_lengths)
+    for (const auto &len : ctx.out.original_walk_lengths)
       original_walk_len += len;
-    for (const auto &p : graph.paths)
+    for (const auto &p : ctx.graph.paths)
       encoded_path_len += p.size();
-    for (const auto &w : graph.walks.walks)
+    for (const auto &w : ctx.graph.walks.walks)
       encoded_walk_len += w.size();
 
     print_traversal_reduction({original_path_len, encoded_path_len,
                                original_walk_len, encoded_walk_len});
   }
 
-  uint32_t rule_count = next_id - layer_start;
-  out.layer_rule_ranges.push_back(
-      LayerRuleRange{2, layer_start, next_id, 0, rule_count * 2});
+  const uint32_t rule_count = ctx.next_id - ctx.layer_start;
 
-  // Split rules and delta encode
-  auto t_process_rules_start = std::chrono::high_resolution_clock::now();
-  std::vector<int32_t> first, second;
-  process_rules(rulebook, layer_start, out.layer_rule_ranges, first, second);
-  rulebook.clear();
-  rulebook.shrink_to_fit();
-  auto t_process_rules_end = std::chrono::high_resolution_clock::now();
-  double time_process_rules_ms =
-      elapsed_ms(t_process_rules_start, t_process_rules_end);
+  // Stage 3: compress the grammar rulebook into compressed rule columns.
+  const double time_rule_columns_ms = compress_rule_columns(ctx);
 
-  // ZSTD compress rules
-  auto t_zstd_rules_start = std::chrono::high_resolution_clock::now();
-  {
-#ifdef _OPENMP
-#pragma omp parallel sections
-    {
-#pragma omp section
-      out.rules_first_zstd = Codec::zstd_compress_int32_vector(first);
-#pragma omp section
-      out.rules_second_zstd = Codec::zstd_compress_int32_vector(second);
-    }
-#else
-    out.rules_first_zstd = Codec::zstd_compress_int32_vector(first);
-    out.rules_second_zstd = Codec::zstd_compress_int32_vector(second);
-#endif
-  }
-  auto t_zstd_rules_end = std::chrono::high_resolution_clock::now();
-  double time_zstd_rules_ms = elapsed_ms(t_zstd_rules_start, t_zstd_rules_end);
-
-  // Compress paths
+  // Stage 4: compress record-group payloads and metadata columns.
   auto t_zstd_start = std::chrono::high_resolution_clock::now();
-  double time_paths_ms = 0;
-  double time_walks_ms = 0;
-  double time_segments_links_ms = 0;
-  double time_optional_fields_ms = 0;
-  double time_jumps_ms = 0;
-  double time_containments_ms = 0;
-  {
-    const auto t_paths_start = std::chrono::high_resolution_clock::now();
-    std::vector<int32_t> flat;
-    std::string names, overlaps;
-    std::vector<uint32_t> name_lens, overlap_lens;
-
-    flatten_paths(graph.paths, graph.path_names, graph.path_overlaps, flat,
-                  out.sequence_lengths, names, name_lens, overlaps,
-                  overlap_lens);
-
-#ifdef _OPENMP
-#pragma omp parallel sections
-    {
-#pragma omp section
-      out.paths_zstd = Codec::zstd_compress_int32_vector(flat);
-#pragma omp section
-      {
-        out.names_zstd = Codec::zstd_compress_string(names);
-        out.name_lengths_zstd = Codec::zstd_compress_uint32_vector(name_lens);
-      }
-#pragma omp section
-      {
-        out.overlaps_zstd = Codec::zstd_compress_string(overlaps);
-        out.overlap_lengths_zstd =
-            Codec::zstd_compress_uint32_vector(overlap_lens);
-      }
-    }
-#else
-    out.paths_zstd = Codec::zstd_compress_int32_vector(flat);
-    out.names_zstd = Codec::zstd_compress_string(names);
-    out.name_lengths_zstd = Codec::zstd_compress_uint32_vector(name_lens);
-    out.overlaps_zstd = Codec::zstd_compress_string(overlaps);
-    out.overlap_lengths_zstd = Codec::zstd_compress_uint32_vector(overlap_lens);
-#endif
-    const auto t_paths_end = std::chrono::high_resolution_clock::now();
-    time_paths_ms = elapsed_ms(t_paths_start, t_paths_end);
-  }
-  graph.paths.clear();
-  graph.paths.shrink_to_fit();
-  graph.path_names.clear();
-  graph.path_names.shrink_to_fit();
-  graph.path_overlaps.clear();
-  graph.path_overlaps.shrink_to_fit();
-
-  // Compress walks
-  const auto t_walks_start = std::chrono::high_resolution_clock::now();
-  if (!graph.walks.walks.empty()) {
-    std::vector<int32_t> flat;
-    flatten_walks(graph.walks.walks, flat, out.walk_lengths);
-    out.walks_zstd = Codec::zstd_compress_int32_vector(flat);
-
-    std::string sample_ids, seq_ids;
-    std::vector<uint32_t> sample_lens, seq_lens;
-    append_string_column(graph.walks.sample_ids, sample_ids, sample_lens);
-    append_string_column(graph.walks.seq_ids, seq_ids, seq_lens);
-
-    out.walk_sample_ids_zstd = Codec::zstd_compress_string(sample_ids);
-    out.walk_sample_id_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(sample_lens);
-    out.walk_hap_indices_zstd =
-        Codec::zstd_compress_uint32_vector(graph.walks.hap_indices);
-    out.walk_seq_ids_zstd = Codec::zstd_compress_string(seq_ids);
-    out.walk_seq_id_lengths_zstd = Codec::zstd_compress_uint32_vector(seq_lens);
-    out.walk_seq_starts_zstd =
-        Codec::compress_varint_int64(graph.walks.seq_starts);
-    out.walk_seq_ends_zstd = Codec::compress_varint_int64(graph.walks.seq_ends);
-  }
-  const auto t_walks_end = std::chrono::high_resolution_clock::now();
-  time_walks_ms = elapsed_ms(t_walks_start, t_walks_end);
-  graph.walks.walks.clear();
-  graph.walks.walks.shrink_to_fit();
-  graph.walks.sample_ids.clear();
-  graph.walks.sample_ids.shrink_to_fit();
-  graph.walks.hap_indices.clear();
-  graph.walks.hap_indices.shrink_to_fit();
-  graph.walks.seq_ids.clear();
-  graph.walks.seq_ids.shrink_to_fit();
-  graph.walks.seq_starts.clear();
-  graph.walks.seq_starts.shrink_to_fit();
-  graph.walks.seq_ends.clear();
-  graph.walks.seq_ends.shrink_to_fit();
-
-  // Compress segments
-  std::string seg_concat;
-  std::vector<uint32_t> seg_lens;
-  flatten_segments(graph.node_sequences, seg_concat, seg_lens, next_id);
-  size_t num_segments = seg_lens.size();
-
-  // Compress links
-  const auto &links = graph.links;
-  out.num_links = links.from_ids.size();
-
-  const auto t_segments_links_start = std::chrono::high_resolution_clock::now();
-#ifdef _OPENMP
-#pragma omp parallel sections
-  {
-#pragma omp section
-    {
-      out.segment_sequences_zstd = Codec::zstd_compress_string(seg_concat);
-      out.segment_seq_lengths_zstd =
-          Codec::zstd_compress_uint32_vector(seg_lens);
-    }
-#pragma omp section
-    {
-      out.link_from_ids_zstd =
-          Codec::compress_delta_varint_uint32(links.from_ids);
-      out.link_to_ids_zstd = Codec::compress_delta_varint_uint32(links.to_ids);
-    }
-#pragma omp section
-    {
-      out.link_from_orients_zstd =
-          Codec::compress_orientations(links.from_orients);
-      out.link_to_orients_zstd = Codec::compress_orientations(links.to_orients);
-    }
-#pragma omp section
-    {
-      out.link_overlap_nums_zstd =
-          Codec::zstd_compress_uint32_vector(links.overlap_nums);
-      out.link_overlap_ops_zstd =
-          Codec::zstd_compress_char_vector(links.overlap_ops);
-    }
-  }
-#else
-  out.segment_sequences_zstd = Codec::zstd_compress_string(seg_concat);
-  out.segment_seq_lengths_zstd = Codec::zstd_compress_uint32_vector(seg_lens);
-  out.link_from_ids_zstd = Codec::compress_delta_varint_uint32(links.from_ids);
-  out.link_to_ids_zstd = Codec::compress_delta_varint_uint32(links.to_ids);
-  out.link_from_orients_zstd = Codec::compress_orientations(links.from_orients);
-  out.link_to_orients_zstd = Codec::compress_orientations(links.to_orients);
-  out.link_overlap_nums_zstd =
-      Codec::zstd_compress_uint32_vector(links.overlap_nums);
-  out.link_overlap_ops_zstd =
-      Codec::zstd_compress_char_vector(links.overlap_ops);
-#endif
-  const auto t_segments_links_end = std::chrono::high_resolution_clock::now();
-  time_segments_links_ms =
-      elapsed_ms(t_segments_links_start, t_segments_links_end);
-  graph.node_sequences.clear();
-  graph.node_sequences.shrink_to_fit();
-  graph.links.from_ids.clear();
-  graph.links.from_ids.shrink_to_fit();
-  graph.links.to_ids.clear();
-  graph.links.to_ids.shrink_to_fit();
-  graph.links.from_orients.clear();
-  graph.links.from_orients.shrink_to_fit();
-  graph.links.to_orients.clear();
-  graph.links.to_orients.shrink_to_fit();
-  graph.links.overlap_nums.clear();
-  graph.links.overlap_nums.shrink_to_fit();
-  graph.links.overlap_ops.clear();
-  graph.links.overlap_ops.shrink_to_fit();
-
-  // Compress optional fields
-  const auto t_optional_fields_start = std::chrono::high_resolution_clock::now();
-  for (const auto &col : graph.segment_optional_fields)
-    out.segment_optional_fields_zstd.push_back(compress_optional_column(col));
-
-  for (const auto &col : graph.link_optional_fields)
-    out.link_optional_fields_zstd.push_back(compress_optional_column(col));
-  const auto t_optional_fields_end = std::chrono::high_resolution_clock::now();
-  time_optional_fields_ms =
-      elapsed_ms(t_optional_fields_start, t_optional_fields_end);
-  graph.segment_optional_fields.clear();
-  graph.segment_optional_fields.shrink_to_fit();
-  graph.link_optional_fields.clear();
-  graph.link_optional_fields.shrink_to_fit();
-
-  // Compress J-lines (jumps)
-  const auto t_jumps_start = std::chrono::high_resolution_clock::now();
-  if (!graph.jumps.from_ids.empty()) {
-    out.num_jumps = graph.jumps.size();
-
-    std::string dists_concat, rest_concat;
-    std::vector<uint32_t> dist_lens, rest_lens;
-    for (const auto &d : graph.jumps.distances) {
-      dists_concat += d;
-      dist_lens.push_back(static_cast<uint32_t>(d.size()));
-    }
-    for (const auto &r : graph.jumps.rest_fields) {
-      rest_concat += r;
-      rest_lens.push_back(static_cast<uint32_t>(r.size()));
-    }
-
-    out.jump_from_ids_zstd =
-        Codec::compress_delta_varint_uint32(graph.jumps.from_ids);
-    out.jump_to_ids_zstd =
-        Codec::compress_delta_varint_uint32(graph.jumps.to_ids);
-    out.jump_from_orients_zstd =
-        Codec::compress_orientations(graph.jumps.from_orients);
-    out.jump_to_orients_zstd =
-        Codec::compress_orientations(graph.jumps.to_orients);
-    out.jump_distances_zstd = Codec::zstd_compress_string(dists_concat);
-    out.jump_distance_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(dist_lens);
-    out.jump_rest_fields_zstd = Codec::zstd_compress_string(rest_concat);
-    out.jump_rest_lengths_zstd = Codec::zstd_compress_uint32_vector(rest_lens);
-  }
-  const auto t_jumps_end = std::chrono::high_resolution_clock::now();
-  time_jumps_ms = elapsed_ms(t_jumps_start, t_jumps_end);
-  graph.jumps.from_ids.clear();
-  graph.jumps.from_ids.shrink_to_fit();
-  graph.jumps.from_orients.clear();
-  graph.jumps.from_orients.shrink_to_fit();
-  graph.jumps.to_ids.clear();
-  graph.jumps.to_ids.shrink_to_fit();
-  graph.jumps.to_orients.clear();
-  graph.jumps.to_orients.shrink_to_fit();
-  graph.jumps.distances.clear();
-  graph.jumps.distances.shrink_to_fit();
-  graph.jumps.rest_fields.clear();
-  graph.jumps.rest_fields.shrink_to_fit();
-
-  // Compress C-lines (containments)
-  const auto t_containments_start = std::chrono::high_resolution_clock::now();
-  if (!graph.containments.container_ids.empty()) {
-    out.num_containments = graph.containments.size();
-
-    std::string overlaps_concat, rest_concat;
-    std::vector<uint32_t> overlap_lens, rest_lens;
-    for (const auto &o : graph.containments.overlaps) {
-      overlaps_concat += o;
-      overlap_lens.push_back(static_cast<uint32_t>(o.size()));
-    }
-    for (const auto &r : graph.containments.rest_fields) {
-      rest_concat += r;
-      rest_lens.push_back(static_cast<uint32_t>(r.size()));
-    }
-
-    out.containment_container_ids_zstd =
-        Codec::compress_delta_varint_uint32(graph.containments.container_ids);
-    out.containment_contained_ids_zstd =
-        Codec::compress_delta_varint_uint32(graph.containments.contained_ids);
-    out.containment_container_orients_zstd =
-        Codec::compress_orientations(graph.containments.container_orients);
-    out.containment_contained_orients_zstd =
-        Codec::compress_orientations(graph.containments.contained_orients);
-    out.containment_positions_zstd =
-        Codec::zstd_compress_uint32_vector(graph.containments.positions);
-    out.containment_overlaps_zstd =
-        Codec::zstd_compress_string(overlaps_concat);
-    out.containment_overlap_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(overlap_lens);
-    out.containment_rest_fields_zstd = Codec::zstd_compress_string(rest_concat);
-    out.containment_rest_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(rest_lens);
-  }
-  const auto t_containments_end = std::chrono::high_resolution_clock::now();
-  time_containments_ms = elapsed_ms(t_containments_start, t_containments_end);
-  graph.containments.container_ids.clear();
-  graph.containments.container_ids.shrink_to_fit();
-  graph.containments.container_orients.clear();
-  graph.containments.container_orients.shrink_to_fit();
-  graph.containments.contained_ids.clear();
-  graph.containments.contained_ids.shrink_to_fit();
-  graph.containments.contained_orients.clear();
-  graph.containments.contained_orients.shrink_to_fit();
-  graph.containments.positions.clear();
-  graph.containments.positions.shrink_to_fit();
-  graph.containments.overlaps.clear();
-  graph.containments.overlaps.shrink_to_fit();
-  graph.containments.rest_fields.clear();
-  graph.containments.rest_fields.shrink_to_fit();
+  const double time_paths_ms = compress_path_fields(ctx);
+  const double time_walks_ms = compress_walk_fields(ctx);
+  const double time_segments_links_ms = compress_segment_link_fields(ctx);
+  const double time_optional_fields_ms = compress_optional_fields(ctx);
+  const double time_jumps_ms = compress_jump_fields(ctx);
+  const double time_containments_ms = compress_containment_fields(ctx);
 
   auto t_zstd_end = std::chrono::high_resolution_clock::now();
   double time_zstd_ms = elapsed_ms(t_zstd_start, t_zstd_end);
@@ -603,42 +770,44 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
   double compress_total_ms =
       elapsed_ms(compress_total_start, compress_total_end);
 
+  // Stage 5: report timing/ratio breakdowns and finalize the output container.
   if (gfaz_debug_enabled()) {
     double rules_size_mb = rule_count * sizeof(int32_t) * 2 / (1024.0 * 1024.0);
 
     std::vector<CompressionPostStepDebugInfo> post_steps = {
-        {"compress rule fields", "ZSTD", time_zstd_rules_ms,
-         collect_rules_ratio(out)},
-        {"compress path fields", "ZSTD", time_paths_ms, collect_path_ratio(out)},
+        {"compress rule fields", "delta+ZSTD", time_rule_columns_ms,
+         collect_rules_ratio(ctx.out)},
+        {"compress path fields", "ZSTD", time_paths_ms,
+         collect_path_ratio(ctx.out)},
         {"compress walk fields", "ZSTD+varint", time_walks_ms,
-         collect_walk_ratio(out)},
+         collect_walk_ratio(ctx.out)},
         {"compress segment/link fields", "mixed", time_segments_links_ms,
-         collect_segment_link_ratio(out)},
+         collect_segment_link_ratio(ctx.out)},
         {"compress optional fields", "mixed", time_optional_fields_ms,
-         collect_optional_field_ratio(out)}};
-    if (out.num_jumps > 0) {
+         collect_optional_field_ratio(ctx.out)}};
+    if (ctx.out.num_jumps > 0) {
       post_steps.push_back({"compress jump fields", "mixed", time_jumps_ms,
-                            collect_jump_ratio(out)});
+                            collect_jump_ratio(ctx.out)});
     }
-    if (out.num_containments > 0) {
+    if (ctx.out.num_containments > 0) {
       post_steps.push_back({"compress containment fields", "mixed",
                             time_containments_ms,
-                            collect_containment_ratio(out)});
+                            collect_containment_ratio(ctx.out)});
     }
 
-    print_cpu_compression_timing({data_size_mb,
-                                  total_elements,
-                                  delta_round,
+    print_cpu_compression_timing({ctx.data_size_mb,
+                                  ctx.total_elements,
+                                  ctx.delta_round,
                                   time_delta_ms,
                                   time_grammar_ms,
                                   rules_size_mb,
-                                  time_process_rules_ms,
+                                  time_rule_columns_ms,
                                   std::move(post_steps),
                                   time_zstd_ms,
                                   compress_total_ms});
   }
 
-  print_compression_stats(out, num_segments, show_stats);
+  print_compression_stats(ctx.out, ctx.num_segments, ctx.show_stats);
 
-  return out;
+  return ctx.out;
 }

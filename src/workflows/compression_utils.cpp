@@ -20,11 +20,83 @@ size_t total_node_count(const std::vector<std::vector<NodeId>> &sequences) {
 void append_string_column(const std::vector<std::string> &values,
                           std::string &concatenated,
                           std::vector<uint32_t> &lengths) {
+  size_t total_bytes = 0;
+  for (const auto &value : values)
+    total_bytes += value.size();
+
   concatenated.clear();
+  concatenated.reserve(total_bytes);
   lengths.clear();
+  lengths.reserve(values.size());
+
   for (const auto &value : values) {
     concatenated += value;
     lengths.push_back(static_cast<uint32_t>(value.size()));
+  }
+}
+
+void flatten_traversal_sequences(
+    const std::vector<std::vector<NodeId>> &sequences,
+    std::vector<int32_t> &flattened, std::vector<uint32_t> &lengths) {
+  const size_t total = total_node_count(sequences);
+
+  flattened.clear();
+  flattened.resize(total);
+  lengths.clear();
+  lengths.reserve(sequences.size());
+
+  size_t offset = 0;
+  for (const auto &sequence : sequences) {
+    lengths.push_back(static_cast<uint32_t>(sequence.size()));
+    for (NodeId node : sequence)
+      flattened[offset++] = node;
+  }
+}
+
+void flatten_path_metadata(const std::vector<std::vector<NodeId>> &paths,
+                           const std::vector<std::string> &path_names,
+                           const std::vector<std::string> &path_overlaps,
+                           std::string &names_concat,
+                           std::vector<uint32_t> &name_lengths,
+                           std::string &overlaps_concat,
+                           std::vector<uint32_t> &overlap_lengths) {
+  if (path_names.size() != paths.size() || path_overlaps.size() != paths.size())
+    throw std::runtime_error(
+        std::string(kCompressionErrorPrefix) +
+        "invalid path metadata (names/overlaps count does not match paths)");
+
+  append_string_column(path_names, names_concat, name_lengths);
+  append_string_column(path_overlaps, overlaps_concat, overlap_lengths);
+}
+
+void flatten_walk_string_metadata(const WalkData &walks,
+                                  std::string &sample_ids_concat,
+                                  std::vector<uint32_t> &sample_id_lengths,
+                                  std::string &seq_ids_concat,
+                                  std::vector<uint32_t> &seq_id_lengths) {
+  append_string_column(walks.sample_ids, sample_ids_concat, sample_id_lengths);
+  append_string_column(walks.seq_ids, seq_ids_concat, seq_id_lengths);
+}
+
+void flatten_segment_sequences(const std::vector<std::string> &sequences,
+                               std::string &concat,
+                               std::vector<uint32_t> &lengths,
+                               uint32_t max_id) {
+  size_t total_bytes = 0;
+  size_t count = 0;
+  for (size_t i = 1; i < sequences.size() && i < max_id; ++i) {
+    total_bytes += sequences[i].size();
+    ++count;
+  }
+
+  concat.clear();
+  concat.reserve(total_bytes);
+  lengths.clear();
+  lengths.reserve(count);
+
+  for (size_t i = 1; i < sequences.size() && i < max_id; ++i) {
+    concat += sequences[i];
+    lengths.push_back(static_cast<uint32_t>(sequences[i].size()));
   }
 }
 
@@ -79,39 +151,15 @@ void flatten_paths(const std::vector<std::vector<NodeId>> &paths,
                    std::vector<uint32_t> &name_lengths,
                    std::string &overlaps_concat,
                    std::vector<uint32_t> &overlap_lengths) {
-  if (path_names.size() != paths.size() || path_overlaps.size() != paths.size())
-    throw std::runtime_error(
-        std::string(kCompressionErrorPrefix) +
-        "invalid path metadata (names/overlaps count does not match paths)");
-
-  const size_t total = total_node_count(paths);
-
-  flattened.clear();
-  flattened.resize(total);
-  lengths.clear();
-
-  append_string_column(path_names, names_concat, name_lengths);
-  append_string_column(path_overlaps, overlaps_concat, overlap_lengths);
-
-  size_t offset = 0;
-  for (size_t i = 0; i < paths.size(); ++i) {
-    const auto &path = paths[i];
-    lengths.push_back(static_cast<uint32_t>(path.size()));
-
-    for (NodeId node : path)
-      flattened[offset++] = node;
-  }
+  flatten_path_metadata(paths, path_names, path_overlaps, names_concat,
+                        name_lengths, overlaps_concat, overlap_lengths);
+  flatten_traversal_sequences(paths, flattened, lengths);
 }
 
 void flatten_segments(const std::vector<std::string> &sequences,
                       std::string &concat, std::vector<uint32_t> &lengths,
                       uint32_t max_id) {
-  concat.clear();
-  lengths.clear();
-  for (size_t i = 1; i < sequences.size() && i < max_id; ++i) {
-    concat += sequences[i];
-    lengths.push_back(static_cast<uint32_t>(sequences[i].size()));
-  }
+  flatten_segment_sequences(sequences, concat, lengths, max_id);
 }
 
 void process_rules(const std::vector<Packed2mer> &rulebook,
@@ -147,16 +195,7 @@ void process_rules(const std::vector<Packed2mer> &rulebook,
 void flatten_walks(const std::vector<std::vector<NodeId>> &walks,
                    std::vector<int32_t> &flattened,
                    std::vector<uint32_t> &lengths) {
-  flattened.clear();
-  flattened.reserve(total_node_count(walks));
-  lengths.clear();
-  lengths.reserve(walks.size());
-
-  for (const auto &walk : walks) {
-    lengths.push_back(static_cast<uint32_t>(walk.size()));
-    for (NodeId node : walk)
-      flattened.push_back(node);
-  }
+  flatten_traversal_sequences(walks, flattened, lengths);
 }
 
 void remap_rule_ids(std::vector<std::vector<NodeId>> &sequences,
