@@ -234,7 +234,15 @@ endif()
 
 if(BUILD_CLI)
   # CLI executable
-  add_executable(gfaz src/cli/gfaz_cli.cpp)
+  add_executable(gfaz
+    src/cli/gfaz_cli.cpp
+    src/cli/common.cpp
+    src/cli/compress_command.cpp
+    src/cli/decompress_command.cpp
+    src/cli/extract_path_command.cpp
+    src/cli/extract_walk_command.cpp
+    src/cli/add_haplotypes_command.cpp
+  )
   set_target_properties(gfaz PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/bin"
   )
