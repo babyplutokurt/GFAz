@@ -4,9 +4,9 @@
 #include "utils/threading_utils.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
@@ -14,9 +14,9 @@
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
-#include <stdexcept>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -147,8 +147,7 @@ using gfz::runtime_utils::read_process_memory_snapshot;
 
 namespace {
 
-template <typename T>
-size_t vector_buffer_bytes(const std::vector<T> &values) {
+template <typename T> size_t vector_buffer_bytes(const std::vector<T> &values) {
   return values.capacity() * sizeof(T);
 }
 
@@ -163,7 +162,8 @@ size_t string_vector_owned_bytes(const std::vector<std::string> &values) {
   return bytes;
 }
 
-size_t nested_node_vector_bytes(const std::vector<std::vector<NodeId>> &sequences) {
+size_t
+nested_node_vector_bytes(const std::vector<std::vector<NodeId>> &sequences) {
   size_t bytes = sequences.capacity() * sizeof(std::vector<NodeId>);
   for (const auto &seq : sequences)
     bytes += seq.capacity() * sizeof(NodeId);
@@ -181,8 +181,8 @@ size_t optional_field_column_bytes(const OptionalFieldColumn &col) {
          vector_buffer_bytes(col.b_concat_bytes);
 }
 
-size_t optional_field_columns_bytes(
-    const std::vector<OptionalFieldColumn> &cols) {
+size_t
+optional_field_columns_bytes(const std::vector<OptionalFieldColumn> &cols) {
   size_t bytes = cols.capacity() * sizeof(OptionalFieldColumn);
   for (const auto &col : cols)
     bytes += optional_field_column_bytes(col);
@@ -240,7 +240,8 @@ size_t containment_bytes(const GfaGraph &graph) {
 size_t node_name_map_bytes(const GfaGraph &graph) {
   // Approximation: bucket array + nodes already accounted for by string storage
   // in node_id_to_name. The per-entry pair/node overhead is estimated here.
-  constexpr size_t kApproxMapNodeOverhead = sizeof(void *) * 4 + sizeof(uint32_t);
+  constexpr size_t kApproxMapNodeOverhead =
+      sizeof(void *) * 4 + sizeof(uint32_t);
   return graph.node_name_to_id.bucket_count() * sizeof(void *) +
          graph.node_name_to_id.size() * kApproxMapNodeOverhead;
 }
@@ -252,10 +253,10 @@ void print_graph_memory_breakdown(const GfaGraph &graph) {
   const size_t link_data = link_bytes(graph);
   const size_t jump_data = jump_bytes(graph);
   const size_t containment_data = containment_bytes(graph);
-  const size_t segment_optional = optional_field_columns_bytes(
-      graph.segment_optional_fields);
-  const size_t link_optional = optional_field_columns_bytes(
-      graph.link_optional_fields);
+  const size_t segment_optional =
+      optional_field_columns_bytes(graph.segment_optional_fields);
+  const size_t link_optional =
+      optional_field_columns_bytes(graph.link_optional_fields);
   const size_t node_name_map = node_name_map_bytes(graph);
   const size_t total = segment_data + path_data + walk_data + link_data +
                        jump_data + containment_data + segment_optional +
@@ -272,8 +273,8 @@ void print_graph_memory_breakdown(const GfaGraph &graph) {
             << std::endl;
   std::cerr << "  links:                    " << format_size(link_data)
             << std::endl;
-  std::cerr << "  segment optional fields:  "
-            << format_size(segment_optional) << std::endl;
+  std::cerr << "  segment optional fields:  " << format_size(segment_optional)
+            << std::endl;
   std::cerr << "  link optional fields:     " << format_size(link_optional)
             << std::endl;
   if (graph.jumps.size() > 0) {
@@ -281,8 +282,8 @@ void print_graph_memory_breakdown(const GfaGraph &graph) {
               << std::endl;
   }
   if (graph.containments.size() > 0) {
-    std::cerr << "  containments:             "
-              << format_size(containment_data) << std::endl;
+    std::cerr << "  containments:             " << format_size(containment_data)
+              << std::endl;
   }
   std::cerr << "  total tracked:            " << format_size(total)
             << std::endl;
@@ -325,8 +326,7 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
     const auto snapshot = read_process_memory_snapshot();
     std::cerr << "[GfaParser] " << label << ": " << std::fixed
               << std::setprecision(2) << phase_ms << " ms"
-              << " | " << format_memory_snapshot(snapshot)
-              << std::endl;
+              << " | " << format_memory_snapshot(snapshot) << std::endl;
   };
 
   // Index 0 is a placeholder to support 1-based node IDs.
@@ -405,7 +405,6 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
 
   graph.node_id_to_name.reserve(num_segments_hint_ + 1);
   graph.node_sequences.reserve(num_segments_hint_ + 1);
-  graph.node_name_to_id.reserve(num_segments_hint_);
   node_name_lookup_.reserve(num_segments_hint_);
 
   graph.links.from_ids.reserve(num_links_hint_);
@@ -430,7 +429,8 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   graph.containments.overlaps.reserve(c_offsets.size());
   graph.containments.rest_fields.reserve(c_offsets.size());
   log_phase("reserve");
-  // Phase 1: Parse S-lines (sequential - must populate node_name_to_id first)
+  // Phase 1: Parse S-lines (sequential - must populate parser-local name lookup
+  // first)
   for (const auto &off : s_offsets) {
     std::string_view line(mmap_data + off.offset, off.length);
     parse_s_line(line, graph);
@@ -545,7 +545,8 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   w_offsets.shrink_to_fit();
   log_phase("parse P/W-lines");
 
-  // Phase 4: Parse J/C lines (after S-lines, so node_name_to_id is populated)
+  // Phase 4: Parse J/C lines (after S-lines, so the parser-local name lookup is
+  // populated)
   for (const auto &off : j_offsets) {
     std::string_view line(mmap_data + off.offset, off.length);
     parse_j_line(line, graph);
@@ -586,8 +587,7 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
     }
     std::cerr << ", time=" << std::fixed << std::setprecision(2) << parse_ms
               << " ms"
-              << " | " << format_memory_snapshot(snapshot)
-              << std::endl;
+              << " | " << format_memory_snapshot(snapshot) << std::endl;
     print_graph_memory_breakdown(graph);
   }
 
@@ -615,7 +615,10 @@ void GfaParser::parse_s_line(std::string_view line, GfaGraph &graph) {
     }
 
     std::string node_name(node_name_view);
-    graph.node_name_to_id[node_name] = new_id;
+    // Compression does not use graph.node_name_to_id after parse, and name
+    // resolution during parsing already goes through node_name_lookup_.
+    // Leave graph.node_name_to_id empty for now so we can measure the effect of
+    // skipping this duplicate map population.
     graph.node_id_to_name.push_back(node_name);
     graph.node_sequences.emplace_back(sequence_view);
     node_name_lookup_.emplace(graph.node_id_to_name.back(), new_id);
@@ -824,10 +827,10 @@ void GfaParser::parse_segment_field(std::string_view field,
   size_t col_index = it->second.second;
 
   if (type != expected_type) {
-    throw std::runtime_error("Type mismatch for tag '" + graph.segment_optional_fields[col_index].tag +
-                             "': expected '" +
-                             std::string(1, expected_type) + "', got '" +
-                             std::string(1, type) + "'");
+    throw std::runtime_error("Type mismatch for tag '" +
+                             graph.segment_optional_fields[col_index].tag +
+                             "': expected '" + std::string(1, expected_type) +
+                             "', got '" + std::string(1, type) + "'");
   }
 
   OptionalFieldColumn &col = graph.segment_optional_fields[col_index];
@@ -986,8 +989,9 @@ void GfaParser::parse_link_field(std::string_view field, size_t link_index,
     }
     graph.link_optional_fields.push_back(col);
 
-    GFAZ_LOG("Discovered link optional field: "
-             << col.tag << " (type: " << type << ") at link index " << link_index);
+    GFAZ_LOG("Discovered link optional field: " << col.tag << " (type: " << type
+                                                << ") at link index "
+                                                << link_index);
 
     it = link_field_meta_.find(tag_key);
   }
