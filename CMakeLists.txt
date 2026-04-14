@@ -142,13 +142,14 @@ set(GFA_CORE_SOURCES
   src/io/gfa_writer.cpp
   src/io/gfa_write_utils.cpp
   src/workflows/compression_utils.cpp
+)
+
+set(GFA_CUDA_SOURCES
   # GPU backend core + host-side helpers
   src/gpu/core/gfa_graph_gpu.cpp
   src/gpu/core/path_chunk_planner.cpp
   src/gpu/io/gfa_writer_gpu_direct.cpp
-)
 
-set(GFA_CUDA_SOURCES
   # GPU backend core
   src/gpu/core/codec_gpu.cu
   src/gpu/core/serialization_gpu.cpp
