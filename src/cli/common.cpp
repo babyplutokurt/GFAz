@@ -87,7 +87,7 @@ OPTIONS (compress):
     -r, --rounds <N>        Number of compression rounds (default: 8)
     -d, --delta <N>         Delta encoding rounds (default: 1)
     -t, --threshold <N>     Frequency threshold (default: 2)
-    -j, --threads <N>       Number of threads (default: 0 = auto)
+    -j, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP
     -g, --gpu               Use GPU backend (if available)
     --gpu-rolling-input-chunk-mb <N>
                             Rolling GPU input chunk size in MiB
@@ -98,7 +98,7 @@ OPTIONS (compress):
     -h, --help              Show this help message
 
 OPTIONS (decompress):
-    -j, --threads <N>       Number of threads (default: 0 = auto)
+    -j, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP
     -l, --legacy            Use the legacy CPU path:
                              CompressedData -> GfaGraph -> write_gfa
     -g, --gpu               Use GPU backend (if available)
@@ -143,7 +143,7 @@ USAGE:
     gfaz extract-path [OPTIONS] <input.gfaz> <path_name> [path_name ...]
 
 OPTIONS:
-    -j, --threads <N>       Number of threads (default: 0 = auto)
+    -j, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP
     -h, --help              Show this help message
 
 OUTPUT:
@@ -166,7 +166,7 @@ USAGE:
                       [<sample_id> <hap_index> <seq_id> <seq_start> <seq_end> ...]
 
 OPTIONS:
-    -j, --threads <N>       Number of threads (default: 0 = auto)
+    -j, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP
     -h, --help              Show this help message
 
 OUTPUT:
@@ -190,7 +190,7 @@ USAGE:
     gfaz add-haplotypes [OPTIONS] <input.gfaz> <paths_or_walks.gfa> [output.gfaz]
 
 OPTIONS:
-    -j, --threads <N>       Number of threads (default: 0 = auto)
+    -j, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP
     -h, --help              Show this help message
 
 BEHAVIOR:
@@ -217,7 +217,7 @@ OPTIONS:
     -r, --rounds <N>        Number of compression rounds (default: 8)
     -d, --delta <N>         Delta encoding rounds (default: 1)
     -t, --threshold <N>     Frequency threshold (default: 2)
-    -j, --threads <N>       Number of threads (default: 0 = auto)
+    -j, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP
     -g, --gpu               Use GPU backend (if available)
     --gpu-rolling-input-chunk-mb <N>
                             Rolling GPU input chunk size in MiB

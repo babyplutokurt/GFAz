@@ -14,6 +14,9 @@ inline int resolve_omp_thread_count(int num_threads) {
   if (num_threads > 0) {
     return num_threads;
   }
+  if (num_threads < 0) {
+    return std::max(1, omp_get_max_threads());
+  }
 
   // User override for this project.
   if (const char *env = std::getenv("GFAZ_NUM_THREADS")) {
@@ -49,10 +52,12 @@ class ScopedOMPThreads {
 public:
   explicit ScopedOMPThreads(int num_threads) : set_(false), resolved_threads_(1) {
 #ifdef _OPENMP
-    resolved_threads_ = resolve_omp_thread_count(num_threads);
-    if (resolved_threads_ > 0) {
-      original_threads_ = omp_get_max_threads();
-      if (original_threads_ != resolved_threads_) {
+    original_threads_ = omp_get_max_threads();
+    if (num_threads < 0) {
+      resolved_threads_ = std::max(1, original_threads_);
+    } else {
+      resolved_threads_ = resolve_omp_thread_count(num_threads);
+      if (resolved_threads_ > 0 && original_threads_ != resolved_threads_) {
         omp_set_num_threads(resolved_threads_);
         set_ = true;
       }
@@ -77,4 +82,3 @@ private:
 };
 
 #endif
-

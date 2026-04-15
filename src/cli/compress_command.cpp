@@ -170,6 +170,9 @@ int do_compress(int argc, char *argv[]) {
   if (num_threads == 0) {
     std::cout << "Threads: auto (" << resolve_omp_thread_count(0) << ")"
               << std::endl;
+  } else if (num_threads < 0) {
+    std::cout << "Threads: inherit OpenMP (" << resolve_omp_thread_count(-1)
+              << ")" << std::endl;
   } else {
     std::cout << "Threads: " << num_threads << std::endl;
   }
