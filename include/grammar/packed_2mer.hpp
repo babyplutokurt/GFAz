@@ -16,12 +16,12 @@ inline Packed2mer pack_2mer(int32_t first, int32_t second) {
     return (static_cast<int64_t>(first) << 32) | static_cast<uint32_t>(second);
 }
 
-// Unpack the first NodeId (high 32 bits)
+// Unpack the first gfaz::NodeId (high 32 bits)
 inline int32_t unpack_first(Packed2mer packed) {
     return static_cast<int32_t>(packed >> 32);
 }
 
-// Unpack the second NodeId (low 32 bits)
+// Unpack the second gfaz::NodeId (low 32 bits)
 inline int32_t unpack_second(Packed2mer packed) {
     return static_cast<int32_t>(packed);  // Truncates to low 32 bits
 }

@@ -17,15 +17,15 @@ struct WalkLookupKey {
 };
 
 std::vector<std::string>
-extract_path_lines_by_name(const CompressedData &data,
+extract_path_lines_by_name(const gfaz::CompressedData &data,
                            const std::vector<std::string> &path_names,
                            int num_threads = 0);
 
-std::string extract_path_line_by_name(const CompressedData &data,
+std::string extract_path_line_by_name(const gfaz::CompressedData &data,
                                       const std::string &path_name,
                                       int num_threads = 0);
 
-std::string extract_walk_line(const CompressedData &data,
+std::string extract_walk_line(const gfaz::CompressedData &data,
                               const std::string &sample_id,
                               uint32_t hap_index,
                               const std::string &seq_id,
@@ -34,16 +34,16 @@ std::string extract_walk_line(const CompressedData &data,
                               int num_threads = 0);
 
 std::vector<std::string>
-extract_walk_lines(const CompressedData &data,
+extract_walk_lines(const gfaz::CompressedData &data,
                    const std::vector<WalkLookupKey> &walk_keys,
                    int num_threads = 0);
 
 std::vector<std::string>
-extract_walk_lines_by_name(const CompressedData &data,
+extract_walk_lines_by_name(const gfaz::CompressedData &data,
                            const std::vector<std::string> &walk_names,
                            int num_threads = 0);
 
-std::string extract_walk_line_by_name(const CompressedData &data,
+std::string extract_walk_line_by_name(const gfaz::CompressedData &data,
                                       const std::string &walk_name,
                                       int num_threads = 0);
 

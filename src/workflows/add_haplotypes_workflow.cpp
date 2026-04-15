@@ -23,10 +23,10 @@
       "Add-haplotypes workflow error: ";
 
   struct AppendInput {
-    std::vector<std::vector<NodeId>> paths;
+    std::vector<std::vector<gfaz::NodeId>> paths;
     std::vector<std::string> path_names;
     std::vector<std::string> path_overlaps;
-    WalkData walks;
+    gfaz::WalkData walks;
     bool has_paths = false;
     bool has_walks = false;
   };
@@ -111,7 +111,7 @@
     return parsed;
   }
 
-  NodeId parse_numeric_node(std::string_view value, char orientation,
+  gfaz::NodeId parse_numeric_node(std::string_view value, char orientation,
                             const char *context) {
     const uint32_t node_id = parse_uint32(value, context);
     if (node_id == 0) {
@@ -119,8 +119,8 @@
                                context + " must be 1-based and non-zero");
     }
     return (orientation == '-' || orientation == '<')
-               ? -static_cast<NodeId>(node_id)
-               : static_cast<NodeId>(node_id);
+               ? -static_cast<gfaz::NodeId>(node_id)
+               : static_cast<gfaz::NodeId>(node_id);
   }
 
   void parse_path_line(std::string_view line, AppendInput & out) {
@@ -136,7 +136,7 @@
                                "P-line path name is empty");
     }
 
-    std::vector<NodeId> path;
+    std::vector<gfaz::NodeId> path;
     size_t node_start = 0;
     for (size_t i = 0; i <= nodes_str.size(); ++i) {
       if (i == nodes_str.size() || nodes_str[i] == ',') {
@@ -188,7 +188,7 @@
                                "W-line sample_id is empty");
     }
 
-    std::vector<NodeId> walk;
+    std::vector<gfaz::NodeId> walk;
     size_t walk_pos = 0;
     while (walk_pos < walk_str.size()) {
       const char orientation = walk_str[walk_pos];
@@ -302,11 +302,11 @@
   }
 
   std::vector<std::string> decompress_string_column(
-      const ZstdCompressedBlock &strings_zstd,
-      const ZstdCompressedBlock &lengths_zstd) {
+      const gfaz::ZstdCompressedBlock &strings_zstd,
+      const gfaz::ZstdCompressedBlock &lengths_zstd) {
     std::vector<std::string> out;
-    reconstruct_strings(Codec::zstd_decompress_string(strings_zstd),
-                        Codec::zstd_decompress_uint32_vector(lengths_zstd),
+    reconstruct_strings(gfaz::Codec::zstd_decompress_string(strings_zstd),
+                        gfaz::Codec::zstd_decompress_uint32_vector(lengths_zstd),
                         out);
     return out;
   }
@@ -323,18 +323,18 @@
   }
 
   std::pair<std::vector<int32_t>, std::vector<int32_t>> decode_rules(
-      const CompressedData &data) {
+      const gfaz::CompressedData &data) {
     std::vector<int32_t> first =
-        Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
+        gfaz::Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
     std::vector<int32_t> second =
-        Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
-    Codec::delta_decode_int32(first);
-    Codec::delta_decode_int32(second);
+        gfaz::Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
+    gfaz::Codec::delta_decode_int32(first);
+    gfaz::Codec::delta_decode_int32(second);
     return {std::move(first), std::move(second)};
   }
 
   std::vector<CompressionRules2Mer> build_layered_rules(
-      const CompressedData &data, const std::vector<int32_t> &rules_first,
+      const gfaz::CompressedData &data, const std::vector<int32_t> &rules_first,
       const std::vector<int32_t> &rules_second) {
     std::vector<CompressionRules2Mer> layers;
     layers.reserve(data.layer_rule_ranges.size());
@@ -369,7 +369,7 @@
   }
 
   void encode_with_existing_rules(
-      std::vector<std::vector<NodeId>> & sequences,
+      std::vector<std::vector<gfaz::NodeId>> & sequences,
       const std::vector<CompressionRules2Mer> &layers) {
     PathEncoder encoder;
     for (const auto &layer : layers) {
@@ -417,7 +417,7 @@
       const std::vector<uint32_t> &existing_hap_indices,
       const std::vector<std::string> &existing_seq_ids,
       const std::vector<int64_t> &existing_seq_starts,
-      const std::vector<int64_t> &existing_seq_ends, const WalkData &incoming) {
+      const std::vector<int64_t> &existing_seq_ends, const gfaz::WalkData &incoming) {
     std::unordered_set<std::string> seen;
     seen.reserve(existing_sample_ids.size() + incoming.sample_ids.size());
 
@@ -444,12 +444,12 @@
     }
   }
 
-  void apply_delta_and_validate(std::vector<std::vector<NodeId>> & sequences,
+  void apply_delta_and_validate(std::vector<std::vector<gfaz::NodeId>> & sequences,
                                 int delta_round, uint32_t min_rule_id,
                                 bool has_rule_region) {
     uint32_t max_abs = 0;
     for (int i = 0; i < delta_round; ++i) {
-      const uint32_t round_max = Codec::delta_transform_and_max_abs(sequences);
+      const uint32_t round_max = gfaz::Codec::delta_transform_and_max_abs(sequences);
       if (round_max > max_abs)
         max_abs = round_max;
     }
@@ -464,7 +464,7 @@
     }
   }
 
-  void append_paths(CompressedData & data, const AppendInput &input,
+  void append_paths(gfaz::CompressedData & data, const AppendInput &input,
                     const std::vector<CompressionRules2Mer> &layers) {
     std::vector<std::string> existing_names =
         decompress_string_column(data.names_zstd, data.name_lengths_zstd);
@@ -473,9 +473,9 @@
     std::vector<std::string> existing_overlaps =
         decompress_string_column(data.overlaps_zstd, data.overlap_lengths_zstd);
     std::vector<int32_t> flat =
-        Codec::zstd_decompress_int32_vector(data.paths_zstd);
+        gfaz::Codec::zstd_decompress_int32_vector(data.paths_zstd);
 
-    std::vector<std::vector<NodeId>> appended_paths = input.paths;
+    std::vector<std::vector<gfaz::NodeId>> appended_paths = input.paths;
     data.original_path_lengths.reserve(data.original_path_lengths.size() +
                                        appended_paths.size());
     for (const auto &path : appended_paths)
@@ -502,32 +502,32 @@
     append_string_column(existing_names, names_concat, name_lengths);
     append_string_column(existing_overlaps, overlaps_concat, overlap_lengths);
 
-    data.paths_zstd = Codec::zstd_compress_int32_vector(flat);
-    data.names_zstd = Codec::zstd_compress_string(names_concat);
-    data.name_lengths_zstd = Codec::zstd_compress_uint32_vector(name_lengths);
-    data.overlaps_zstd = Codec::zstd_compress_string(overlaps_concat);
+    data.paths_zstd = gfaz::Codec::zstd_compress_int32_vector(flat);
+    data.names_zstd = gfaz::Codec::zstd_compress_string(names_concat);
+    data.name_lengths_zstd = gfaz::Codec::zstd_compress_uint32_vector(name_lengths);
+    data.overlaps_zstd = gfaz::Codec::zstd_compress_string(overlaps_concat);
     data.overlap_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(overlap_lengths);
+        gfaz::Codec::zstd_compress_uint32_vector(overlap_lengths);
   }
 
-  void append_walks(CompressedData & data, const AppendInput &input,
+  void append_walks(gfaz::CompressedData & data, const AppendInput &input,
                     const std::vector<CompressionRules2Mer> &layers) {
     std::vector<std::string> existing_sample_ids = decompress_string_column(
         data.walk_sample_ids_zstd, data.walk_sample_id_lengths_zstd);
     std::vector<uint32_t> hap_indices =
-        Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
+        gfaz::Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
     std::vector<std::string> seq_ids = decompress_string_column(
         data.walk_seq_ids_zstd, data.walk_seq_id_lengths_zstd);
-    std::vector<int64_t> seq_starts = Codec::decompress_varint_int64(
+    std::vector<int64_t> seq_starts = gfaz::Codec::decompress_varint_int64(
         data.walk_seq_starts_zstd, data.walk_lengths.size());
-    std::vector<int64_t> seq_ends = Codec::decompress_varint_int64(
+    std::vector<int64_t> seq_ends = gfaz::Codec::decompress_varint_int64(
         data.walk_seq_ends_zstd, data.walk_lengths.size());
     validate_unique_walk_keys(existing_sample_ids, hap_indices, seq_ids,
                               seq_starts, seq_ends, input.walks);
     std::vector<int32_t> flat =
-        Codec::zstd_decompress_int32_vector(data.walks_zstd);
+        gfaz::Codec::zstd_decompress_int32_vector(data.walks_zstd);
 
-    std::vector<std::vector<NodeId>> appended_walks = input.walks.walks;
+    std::vector<std::vector<gfaz::NodeId>> appended_walks = input.walks.walks;
     data.original_walk_lengths.reserve(data.original_walk_lengths.size() +
                                        appended_walks.size());
     for (const auto &walk : appended_walks)
@@ -561,22 +561,22 @@
                          sample_id_lengths);
     append_string_column(seq_ids, seq_ids_concat, seq_id_lengths);
 
-    data.walks_zstd = Codec::zstd_compress_int32_vector(flat);
-    data.walk_sample_ids_zstd = Codec::zstd_compress_string(sample_ids_concat);
+    data.walks_zstd = gfaz::Codec::zstd_compress_int32_vector(flat);
+    data.walk_sample_ids_zstd = gfaz::Codec::zstd_compress_string(sample_ids_concat);
     data.walk_sample_id_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(sample_id_lengths);
+        gfaz::Codec::zstd_compress_uint32_vector(sample_id_lengths);
     data.walk_hap_indices_zstd =
-        Codec::zstd_compress_uint32_vector(hap_indices);
-    data.walk_seq_ids_zstd = Codec::zstd_compress_string(seq_ids_concat);
+        gfaz::Codec::zstd_compress_uint32_vector(hap_indices);
+    data.walk_seq_ids_zstd = gfaz::Codec::zstd_compress_string(seq_ids_concat);
     data.walk_seq_id_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(seq_id_lengths);
-    data.walk_seq_starts_zstd = Codec::compress_varint_int64(seq_starts);
-    data.walk_seq_ends_zstd = Codec::compress_varint_int64(seq_ends);
+        gfaz::Codec::zstd_compress_uint32_vector(seq_id_lengths);
+    data.walk_seq_starts_zstd = gfaz::Codec::compress_varint_int64(seq_starts);
+    data.walk_seq_ends_zstd = gfaz::Codec::compress_varint_int64(seq_ends);
   }
 
 } // namespace
 
-void add_haplotypes(CompressedData &data, const std::string &haplotypes_path,
+void add_haplotypes(gfaz::CompressedData &data, const std::string &haplotypes_path,
                     int num_threads) {
   ScopedOMPThreads omp_scope(num_threads);
 

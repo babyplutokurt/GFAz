@@ -187,7 +187,7 @@ int do_decompress(int argc, char *argv[]) {
       gpu_options.rolling_output_chunk_bytes =
           static_cast<size_t>(gpu_max_expanded_chunk_mb) * 1024ull * 1024ull;
       gpu_options.use_legacy_full_decompression = use_gpu_legacy;
-      CompressedData data_gpu = deserialize_compressed_data(input_path);
+      gfaz::CompressedData data_gpu = gfaz::deserialize_compressed_data(input_path);
       const auto deserialize_end = Clock::now();
       deserialize_ms = std::chrono::duration<double, std::milli>(
                            deserialize_end - deserialize_start)
@@ -201,14 +201,14 @@ int do_decompress(int argc, char *argv[]) {
     } else {
 #endif
       const auto deserialize_start = Clock::now();
-      CompressedData data = deserialize_compressed_data(input_path);
+      gfaz::CompressedData data = gfaz::deserialize_compressed_data(input_path);
       const auto deserialize_end = Clock::now();
       deserialize_ms = std::chrono::duration<double, std::milli>(
                            deserialize_end - deserialize_start)
                            .count();
       if (use_legacy) {
         const auto workflow_start = Clock::now();
-        GfaGraph graph;
+        gfaz::GfaGraph graph;
         decompress_gfa(data, graph, num_threads);
         write_gfa(graph, output_path);
         const auto workflow_end = Clock::now();
@@ -230,7 +230,7 @@ int do_decompress(int argc, char *argv[]) {
     if (gfaz_debug_enabled()) {
       const double total_ms =
           std::chrono::duration<double, std::milli>(end - start).count();
-      const auto snapshot = gfz::runtime_utils::read_process_memory_snapshot();
+      const auto snapshot = gfaz::runtime_utils::read_process_memory_snapshot();
       std::cerr << "\n[CLI Decompress] deserialize: " << std::fixed
                 << std::setprecision(2) << deserialize_ms << " ms"
                 << std::endl;
@@ -239,7 +239,7 @@ int do_decompress(int argc, char *argv[]) {
       std::cerr << "[CLI Decompress] total:       " << std::fixed
                 << std::setprecision(2) << total_ms << " ms" << std::endl;
       std::cerr << "[CLI Decompress][Memory] complete | "
-                << gfz::runtime_utils::format_memory_snapshot(snapshot)
+                << gfaz::runtime_utils::format_memory_snapshot(snapshot)
                 << std::endl;
     }
     const uintmax_t output_size = file_size_or_zero(output_path);

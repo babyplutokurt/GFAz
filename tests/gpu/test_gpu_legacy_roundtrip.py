@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 GPU legacy round-trip test:
-1) Parse GFA to original GfaGraph
+1) Parse GFA to original gfaz::GfaGraph
 2) Convert original graph to GfaGraph_gpu
 3) GPU compress using the legacy full-device path
 4) Serialize and reload temporary .gfaz

@@ -24,10 +24,10 @@ struct GpuTraversalPayload {
   double host_decode_ms = 0.0;
 };
 
-GpuTraversalRulebook prepare_gpu_traversal_rulebook(const CompressedData &data);
+GpuTraversalRulebook prepare_gpu_traversal_rulebook(const gfaz::CompressedData &data);
 
 GpuTraversalPayload prepare_gpu_traversal_payload(
-    const ZstdCompressedBlock &encoded_block,
+    const gfaz::ZstdCompressedBlock &encoded_block,
     const std::vector<uint32_t> &final_lengths);
 
 } // namespace gpu_decompression

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 GPU rolling host-graph round-trip test:
-1) Parse GFA to original GfaGraph
+1) Parse GFA to original gfaz::GfaGraph
 2) Convert original graph to GfaGraph_gpu
 3) GPU compress using the rolling scheduler
 4) Serialize and reload temporary .gfaz
-5) GPU decompress using rolling traversal expansion to host-side GfaGraph
-6) Verify original vs reconstructed host GfaGraph
+5) GPU decompress using rolling traversal expansion to host-side gfaz::GfaGraph
+6) Verify original vs reconstructed host gfaz::GfaGraph
 """
 import argparse
 import os
@@ -25,7 +25,7 @@ import gfa_compression as gfac
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="GPU rolling host-graph round-trip test for GfaGraph"
+        description="GPU rolling host-graph round-trip test for gfaz::GfaGraph"
     )
     parser.add_argument("gfa_file", help="Input GFA file")
     parser.add_argument(
@@ -118,7 +118,7 @@ def main():
         )
         print(f"  Saved temporary file: {tmp_gfaz}")
 
-        print("\n[4] Load temporary .gfaz and reconstruct host GfaGraph")
+        print("\n[4] Load temporary .gfaz and reconstruct host gfaz::GfaGraph")
         loaded = gfac.deserialize_gpu(tmp_gfaz)
         decomp_opts = gfac.GpuDecompressionOptions()
         decomp_opts.traversals_per_chunk = args.traversals_per_chunk
@@ -127,7 +127,7 @@ def main():
         host_graph = gfac.decompress_to_host_graph_gpu(loaded, decomp_opts)
         t_decompress_end = time.perf_counter()
 
-        print("\n[5] Verify original vs reconstructed host GfaGraph")
+        print("\n[5] Verify original vs reconstructed host gfaz::GfaGraph")
         ok = gfac.verify_round_trip(original_graph, host_graph)
         if not ok:
             print("❌ GPU rolling host-graph round-trip verification FAILED")

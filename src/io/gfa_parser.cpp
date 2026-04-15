@@ -141,9 +141,9 @@ inline uint32_t parse_overlap_num(std::string_view overlap_view, char &op) {
 
 } // namespace
 
-using gfz::runtime_utils::format_memory_snapshot;
-using gfz::runtime_utils::format_size;
-using gfz::runtime_utils::read_process_memory_snapshot;
+using gfaz::runtime_utils::format_memory_snapshot;
+using gfaz::runtime_utils::format_size;
+using gfaz::runtime_utils::read_process_memory_snapshot;
 
 namespace {
 
@@ -163,14 +163,14 @@ size_t string_vector_owned_bytes(const std::vector<std::string> &values) {
 }
 
 size_t
-nested_node_vector_bytes(const std::vector<std::vector<NodeId>> &sequences) {
-  size_t bytes = sequences.capacity() * sizeof(std::vector<NodeId>);
+nested_node_vector_bytes(const std::vector<std::vector<gfaz::NodeId>> &sequences) {
+  size_t bytes = sequences.capacity() * sizeof(std::vector<gfaz::NodeId>);
   for (const auto &seq : sequences)
-    bytes += seq.capacity() * sizeof(NodeId);
+    bytes += seq.capacity() * sizeof(gfaz::NodeId);
   return bytes;
 }
 
-size_t optional_field_column_bytes(const OptionalFieldColumn &col) {
+size_t optional_field_column_bytes(const gfaz::OptionalFieldColumn &col) {
   return string_owned_bytes(col.tag) + vector_buffer_bytes(col.int_values) +
          vector_buffer_bytes(col.float_values) +
          vector_buffer_bytes(col.char_values) +
@@ -182,25 +182,25 @@ size_t optional_field_column_bytes(const OptionalFieldColumn &col) {
 }
 
 size_t
-optional_field_columns_bytes(const std::vector<OptionalFieldColumn> &cols) {
-  size_t bytes = cols.capacity() * sizeof(OptionalFieldColumn);
+optional_field_columns_bytes(const std::vector<gfaz::OptionalFieldColumn> &cols) {
+  size_t bytes = cols.capacity() * sizeof(gfaz::OptionalFieldColumn);
   for (const auto &col : cols)
     bytes += optional_field_column_bytes(col);
   return bytes;
 }
 
-size_t segment_bytes(const GfaGraph &graph) {
+size_t segment_bytes(const gfaz::GfaGraph &graph) {
   return string_vector_owned_bytes(graph.segments.node_id_to_name) +
          string_vector_owned_bytes(graph.segments.node_sequences);
 }
 
-size_t path_bytes(const GfaGraph &graph) {
+size_t path_bytes(const gfaz::GfaGraph &graph) {
   return nested_node_vector_bytes(graph.paths_data.traversals) +
          string_vector_owned_bytes(graph.paths_data.names) +
          string_vector_owned_bytes(graph.paths_data.overlaps);
 }
 
-size_t walk_bytes(const GfaGraph &graph) {
+size_t walk_bytes(const gfaz::GfaGraph &graph) {
   return nested_node_vector_bytes(graph.walks.walks) +
          string_vector_owned_bytes(graph.walks.sample_ids) +
          vector_buffer_bytes(graph.walks.hap_indices) +
@@ -209,7 +209,7 @@ size_t walk_bytes(const GfaGraph &graph) {
          vector_buffer_bytes(graph.walks.seq_ends);
 }
 
-size_t link_bytes(const GfaGraph &graph) {
+size_t link_bytes(const gfaz::GfaGraph &graph) {
   return vector_buffer_bytes(graph.links.from_ids) +
          vector_buffer_bytes(graph.links.to_ids) +
          vector_buffer_bytes(graph.links.from_orients) +
@@ -218,7 +218,7 @@ size_t link_bytes(const GfaGraph &graph) {
          vector_buffer_bytes(graph.links.overlap_ops);
 }
 
-size_t jump_bytes(const GfaGraph &graph) {
+size_t jump_bytes(const gfaz::GfaGraph &graph) {
   return vector_buffer_bytes(graph.jumps.from_ids) +
          vector_buffer_bytes(graph.jumps.from_orients) +
          vector_buffer_bytes(graph.jumps.to_ids) +
@@ -227,7 +227,7 @@ size_t jump_bytes(const GfaGraph &graph) {
          string_vector_owned_bytes(graph.jumps.rest_fields);
 }
 
-size_t containment_bytes(const GfaGraph &graph) {
+size_t containment_bytes(const gfaz::GfaGraph &graph) {
   return vector_buffer_bytes(graph.containments.container_ids) +
          vector_buffer_bytes(graph.containments.container_orients) +
          vector_buffer_bytes(graph.containments.contained_ids) +
@@ -237,7 +237,7 @@ size_t containment_bytes(const GfaGraph &graph) {
          string_vector_owned_bytes(graph.containments.rest_fields);
 }
 
-size_t node_name_map_bytes(const GfaGraph &graph) {
+size_t node_name_map_bytes(const gfaz::GfaGraph &graph) {
   // Approximation: bucket array + nodes already accounted for by string storage
   // in node_id_to_name. The per-entry pair/node overhead is estimated here.
   constexpr size_t kApproxMapNodeOverhead =
@@ -246,7 +246,7 @@ size_t node_name_map_bytes(const GfaGraph &graph) {
          graph.node_name_to_id.size() * kApproxMapNodeOverhead;
 }
 
-void print_graph_memory_breakdown(const GfaGraph &graph) {
+void print_graph_memory_breakdown(const gfaz::GfaGraph &graph) {
   const size_t segment_data = segment_bytes(graph);
   const size_t path_data = path_bytes(graph);
   const size_t walk_data = walk_bytes(graph);
@@ -303,11 +303,11 @@ bool GfaParser::is_numeric(std::string_view s) {
   return true;
 }
 
-GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
+gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   ScopedOMPThreads omp_scope(num_threads);
   const auto parse_start = Clock::now();
   auto phase_start = parse_start;
-  GfaGraph graph;
+  gfaz::GfaGraph graph;
   segment_field_meta_.clear();
   link_field_meta_.clear();
   node_name_lookup_.clear();
@@ -330,7 +330,7 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   };
 
   // Index 0 is a placeholder to support 1-based node IDs.
-  // This allows NodeId sign to encode orientation without ambiguity.
+  // This allows gfaz::NodeId sign to encode orientation without ambiguity.
   graph.segments.node_id_to_name.push_back("");
   graph.segments.node_sequences.push_back("");
 
@@ -363,8 +363,8 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   log_phase("mmap+madvise");
 
   // Single-pass line classification
-  std::vector<LineOffset> s_offsets, l_offsets, p_offsets, w_offsets;
-  std::vector<LineOffset> j_offsets, c_offsets;
+  std::vector<gfaz::LineOffset> s_offsets, l_offsets, p_offsets, w_offsets;
+  std::vector<gfaz::LineOffset> j_offsets, c_offsets;
   size_t line_start = 0;
 
   for (size_t i = 0; i <= file_size; ++i) {
@@ -594,7 +594,7 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   return graph;
 }
 
-void GfaParser::parse_s_line(std::string_view line, GfaGraph &graph) {
+void GfaParser::parse_s_line(std::string_view line, gfaz::GfaGraph &graph) {
   size_t pos = 1;
   std::string_view node_name_view = next_field(line, pos);
   std::string_view sequence_view = next_field(line, pos);
@@ -635,7 +635,7 @@ void GfaParser::parse_s_line(std::string_view line, GfaGraph &graph) {
   }
 }
 
-void GfaParser::parse_l_line(std::string_view line, GfaGraph &graph) {
+void GfaParser::parse_l_line(std::string_view line, gfaz::GfaGraph &graph) {
   size_t pos = 1;
   std::string_view from_name_view = next_field(line, pos);
   std::string_view from_orient_view = next_field(line, pos);
@@ -673,7 +673,7 @@ void GfaParser::parse_l_line(std::string_view line, GfaGraph &graph) {
   }
 }
 
-void GfaParser::parse_p_line(std::string_view line, GfaGraph &graph,
+void GfaParser::parse_p_line(std::string_view line, gfaz::GfaGraph &graph,
                              size_t index) {
   size_t pos = 1;
 
@@ -696,7 +696,7 @@ void GfaParser::parse_p_line(std::string_view line, GfaGraph &graph,
     ++pos;
   std::string overlaps(line.substr(pos));
 
-  std::vector<NodeId> path;
+  std::vector<gfaz::NodeId> path;
   path.reserve(1 + std::count(nodes_str.begin(), nodes_str.end(), ','));
   size_t node_start = 0;
 
@@ -712,7 +712,7 @@ void GfaParser::parse_p_line(std::string_view line, GfaGraph &graph,
 
           uint32_t node_id = resolve_node_id(node_name_view);
           if (node_id != 0) {
-            NodeId oriented_node_id = node_id;
+            gfaz::NodeId oriented_node_id = node_id;
             if (orientation == '-')
               oriented_node_id = -node_id;
             path.push_back(oriented_node_id);
@@ -728,7 +728,7 @@ void GfaParser::parse_p_line(std::string_view line, GfaGraph &graph,
   graph.paths_data.overlaps[index] = std::move(overlaps);
 }
 
-void GfaParser::parse_w_line(std::string_view line, GfaGraph &graph,
+void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
                              size_t index) {
   size_t pos = 1;
   std::string_view sample_id_view = next_field(line, pos);
@@ -738,7 +738,7 @@ void GfaParser::parse_w_line(std::string_view line, GfaGraph &graph,
   std::string_view seq_end_view = next_field(line, pos);
   std::string_view walk_str = next_field(line, pos);
 
-  std::vector<NodeId> walk;
+  std::vector<gfaz::NodeId> walk;
   size_t walk_steps = 0;
   for (char c : walk_str) {
     if (c == '>' || c == '<')
@@ -766,7 +766,7 @@ void GfaParser::parse_w_line(std::string_view line, GfaGraph &graph,
 
       uint32_t node_id = resolve_node_id(node_name_view);
       if (node_id != 0) {
-        NodeId oriented_node_id = node_id;
+        gfaz::NodeId oriented_node_id = node_id;
         if (orient_char == '<')
           oriented_node_id = -node_id;
         walk.push_back(oriented_node_id);
@@ -790,7 +790,7 @@ void GfaParser::parse_w_line(std::string_view line, GfaGraph &graph,
 }
 
 void GfaParser::parse_segment_field(std::string_view field,
-                                    size_t segment_index, GfaGraph &graph) {
+                                    size_t segment_index, gfaz::GfaGraph &graph) {
   if (field.size() < 5 || field[2] != ':' || field[4] != ':')
     return;
 
@@ -803,7 +803,7 @@ void GfaParser::parse_segment_field(std::string_view field,
     size_t col_index = graph.segments.optional_fields.size();
     segment_field_meta_[tag_key] = {type, col_index};
 
-    OptionalFieldColumn col;
+    gfaz::OptionalFieldColumn col;
     col.tag = std::string(field.substr(0, 2));
     col.type = type;
     if (type == 'i')
@@ -833,7 +833,7 @@ void GfaParser::parse_segment_field(std::string_view field,
                              "', got '" + std::string(1, type) + "'");
   }
 
-  OptionalFieldColumn &col = graph.segments.optional_fields[col_index];
+  gfaz::OptionalFieldColumn &col = graph.segments.optional_fields[col_index];
 
   switch (type) {
   case 'i':
@@ -959,7 +959,7 @@ void GfaParser::parse_segment_field(std::string_view field,
 }
 
 void GfaParser::parse_link_field(std::string_view field, size_t link_index,
-                                 GfaGraph &graph) {
+                                 gfaz::GfaGraph &graph) {
   if (field.size() < 5 || field[2] != ':' || field[4] != ':')
     return;
 
@@ -972,7 +972,7 @@ void GfaParser::parse_link_field(std::string_view field, size_t link_index,
     size_t col_index = graph.link_optional_fields.size();
     link_field_meta_[tag_key] = {type, col_index};
 
-    OptionalFieldColumn col;
+    gfaz::OptionalFieldColumn col;
     col.tag = std::string(field.substr(0, 2));
     col.type = type;
     if (type == 'i')
@@ -1006,7 +1006,7 @@ void GfaParser::parse_link_field(std::string_view field, size_t link_index,
                              "', got '" + std::string(1, type) + "'");
   }
 
-  OptionalFieldColumn &col = graph.link_optional_fields[col_index];
+  gfaz::OptionalFieldColumn &col = graph.link_optional_fields[col_index];
 
   switch (type) {
   case 'i':
@@ -1133,7 +1133,7 @@ void GfaParser::parse_link_field(std::string_view field, size_t link_index,
   }
 }
 
-void GfaParser::parse_j_line(std::string_view line, GfaGraph &graph) {
+void GfaParser::parse_j_line(std::string_view line, gfaz::GfaGraph &graph) {
   // J-line format: J <from_name> <from_orient> <to_name> <to_orient> <distance>
   // [optional fields...]
   size_t pos = 1;
@@ -1169,7 +1169,7 @@ void GfaParser::parse_j_line(std::string_view line, GfaGraph &graph) {
   graph.jumps.rest_fields.push_back(std::move(rest));
 }
 
-void GfaParser::parse_c_line(std::string_view line, GfaGraph &graph) {
+void GfaParser::parse_c_line(std::string_view line, gfaz::GfaGraph &graph) {
   // C-line format: C <container> <orient> <contained> <orient> <pos> <overlap>
   // [optional fields...]
   size_t pos = 1;

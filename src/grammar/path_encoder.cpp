@@ -10,7 +10,7 @@
 
 PathEncoder::PathEncoder() {}
 
-void PathEncoder::encode_paths_2mer(std::vector<std::vector<NodeId>> &paths,
+void PathEncoder::encode_paths_2mer(std::vector<std::vector<gfaz::NodeId>> &paths,
                                     const CompressionRules2Mer &rules,
                                     std::vector<uint8_t> &rules_used) {
 
@@ -28,10 +28,10 @@ void PathEncoder::encode_paths_2mer(std::vector<std::vector<NodeId>> &paths,
 #endif
   for (size_t p = 0; p < paths.size(); ++p) {
     auto &path = paths[p];
-    std::vector<NodeId> stack;
+    std::vector<gfaz::NodeId> stack;
     stack.reserve(path.size());
 
-    for (NodeId node : path) {
+    for (gfaz::NodeId node : path) {
       stack.push_back(node);
 
       if (stack.size() >= 2) {

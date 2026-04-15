@@ -53,9 +53,9 @@ int do_add_haplotypes(int argc, char *argv[]) {
   }
 
   try {
-    CompressedData data = deserialize_compressed_data(input_path);
+    gfaz::CompressedData data = gfaz::deserialize_compressed_data(input_path);
     add_haplotypes(data, haplotypes_path, num_threads);
-    serialize_compressed_data(data, output_path);
+    gfaz::serialize_compressed_data(data, output_path);
     return 0;
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;

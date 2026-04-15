@@ -32,7 +32,7 @@ constexpr int kDefaultDeltaRound = 1;
 constexpr int kDefaultNumThreads = 0;
 } // namespace
 
-GfaGraph parse_gfa_file(const std::string &file_path) {
+gfaz::GfaGraph parse_gfa_file(const std::string &file_path) {
   GfaParser parser;
   return parser.parse(file_path);
 }
@@ -100,14 +100,14 @@ PYBIND11_MODULE(gfa_compression, m) {
   });
 
   // Core data types shared by CPU and GPU workflows.
-  py::class_<WalkData>(m, "WalkData")
+  py::class_<gfaz::WalkData>(m, "WalkData")
       .def(py::init<>())
-      .def_readwrite("walks", &WalkData::walks)
-      .def_readwrite("sample_ids", &WalkData::sample_ids)
-      .def_readwrite("hap_indices", &WalkData::hap_indices)
-      .def_readwrite("seq_ids", &WalkData::seq_ids)
-      .def_readwrite("seq_starts", &WalkData::seq_starts)
-      .def_readwrite("seq_ends", &WalkData::seq_ends);
+      .def_readwrite("walks", &gfaz::WalkData::walks)
+      .def_readwrite("sample_ids", &gfaz::WalkData::sample_ids)
+      .def_readwrite("hap_indices", &gfaz::WalkData::hap_indices)
+      .def_readwrite("seq_ids", &gfaz::WalkData::seq_ids)
+      .def_readwrite("seq_starts", &gfaz::WalkData::seq_starts)
+      .def_readwrite("seq_ends", &gfaz::WalkData::seq_ends);
 
   py::class_<WalkLookupKey>(m, "WalkLookupKey")
       .def(py::init<>())
@@ -117,207 +117,207 @@ PYBIND11_MODULE(gfa_compression, m) {
       .def_readwrite("seq_start", &WalkLookupKey::seq_start)
       .def_readwrite("seq_end", &WalkLookupKey::seq_end);
 
-  py::class_<OptionalFieldColumn>(m, "OptionalFieldColumn")
+  py::class_<gfaz::OptionalFieldColumn>(m, "OptionalFieldColumn")
       .def(py::init<>())
-      .def_readwrite("tag", &OptionalFieldColumn::tag)
-      .def_readwrite("type", &OptionalFieldColumn::type)
-      .def_readwrite("int_values", &OptionalFieldColumn::int_values)
-      .def_readwrite("float_values", &OptionalFieldColumn::float_values)
-      .def_readwrite("char_values", &OptionalFieldColumn::char_values)
+      .def_readwrite("tag", &gfaz::OptionalFieldColumn::tag)
+      .def_readwrite("type", &gfaz::OptionalFieldColumn::type)
+      .def_readwrite("int_values", &gfaz::OptionalFieldColumn::int_values)
+      .def_readwrite("float_values", &gfaz::OptionalFieldColumn::float_values)
+      .def_readwrite("char_values", &gfaz::OptionalFieldColumn::char_values)
       .def_readwrite("concatenated_strings",
-                     &OptionalFieldColumn::concatenated_strings)
-      .def_readwrite("string_lengths", &OptionalFieldColumn::string_lengths)
-      .def_readwrite("b_subtypes", &OptionalFieldColumn::b_subtypes)
-      .def_readwrite("b_lengths", &OptionalFieldColumn::b_lengths)
-      .def_readwrite("b_concat_bytes", &OptionalFieldColumn::b_concat_bytes);
+                     &gfaz::OptionalFieldColumn::concatenated_strings)
+      .def_readwrite("string_lengths", &gfaz::OptionalFieldColumn::string_lengths)
+      .def_readwrite("b_subtypes", &gfaz::OptionalFieldColumn::b_subtypes)
+      .def_readwrite("b_lengths", &gfaz::OptionalFieldColumn::b_lengths)
+      .def_readwrite("b_concat_bytes", &gfaz::OptionalFieldColumn::b_concat_bytes);
 
-  py::class_<SegmentData>(m, "SegmentData")
+  py::class_<gfaz::SegmentData>(m, "SegmentData")
       .def(py::init<>())
-      .def_readwrite("node_id_to_name", &SegmentData::node_id_to_name)
-      .def_readwrite("node_sequences", &SegmentData::node_sequences)
-      .def_readwrite("optional_fields", &SegmentData::optional_fields);
+      .def_readwrite("node_id_to_name", &gfaz::SegmentData::node_id_to_name)
+      .def_readwrite("node_sequences", &gfaz::SegmentData::node_sequences)
+      .def_readwrite("optional_fields", &gfaz::SegmentData::optional_fields);
 
-  py::class_<PathData>(m, "PathData")
+  py::class_<gfaz::PathData>(m, "PathData")
       .def(py::init<>())
-      .def_readwrite("names", &PathData::names)
-      .def_readwrite("traversals", &PathData::traversals)
-      .def_readwrite("overlaps", &PathData::overlaps);
+      .def_readwrite("names", &gfaz::PathData::names)
+      .def_readwrite("traversals", &gfaz::PathData::traversals)
+      .def_readwrite("overlaps", &gfaz::PathData::overlaps);
 
-  py::class_<GfaGraph>(m, "GfaGraph")
+  py::class_<gfaz::GfaGraph>(m, "GfaGraph")
       .def(py::init<>())
-      .def_readonly("node_name_to_id", &GfaGraph::node_name_to_id)
-      .def_readwrite("segments", &GfaGraph::segments)
-      .def_readwrite("paths_data", &GfaGraph::paths_data)
+      .def_readonly("node_name_to_id", &gfaz::GfaGraph::node_name_to_id)
+      .def_readwrite("segments", &gfaz::GfaGraph::segments)
+      .def_readwrite("paths_data", &gfaz::GfaGraph::paths_data)
       .def_property(
           "node_id_to_name",
-          [](GfaGraph &graph) -> std::vector<std::string> & {
+          [](gfaz::GfaGraph &graph) -> std::vector<std::string> & {
             return graph.segments.node_id_to_name;
           },
-          [](GfaGraph &graph, const std::vector<std::string> &value) {
+          [](gfaz::GfaGraph &graph, const std::vector<std::string> &value) {
             graph.segments.node_id_to_name = value;
           },
           py::return_value_policy::reference_internal)
       .def_property(
           "node_sequences",
-          [](GfaGraph &graph) -> std::vector<std::string> & {
+          [](gfaz::GfaGraph &graph) -> std::vector<std::string> & {
             return graph.segments.node_sequences;
           },
-          [](GfaGraph &graph, const std::vector<std::string> &value) {
+          [](gfaz::GfaGraph &graph, const std::vector<std::string> &value) {
             graph.segments.node_sequences = value;
           },
           py::return_value_policy::reference_internal)
       .def_property(
           "segment_optional_fields",
-          [](GfaGraph &graph) -> std::vector<OptionalFieldColumn> & {
+          [](gfaz::GfaGraph &graph) -> std::vector<gfaz::OptionalFieldColumn> & {
             return graph.segments.optional_fields;
           },
-          [](GfaGraph &graph, const std::vector<OptionalFieldColumn> &value) {
+          [](gfaz::GfaGraph &graph, const std::vector<gfaz::OptionalFieldColumn> &value) {
             graph.segments.optional_fields = value;
           },
           py::return_value_policy::reference_internal)
       .def_property(
           "path_names",
-          [](GfaGraph &graph) -> std::vector<std::string> & {
+          [](gfaz::GfaGraph &graph) -> std::vector<std::string> & {
             return graph.paths_data.names;
           },
-          [](GfaGraph &graph, const std::vector<std::string> &value) {
+          [](gfaz::GfaGraph &graph, const std::vector<std::string> &value) {
             graph.paths_data.names = value;
           },
           py::return_value_policy::reference_internal)
       .def_property(
           "paths",
-          [](GfaGraph &graph) -> std::vector<std::vector<NodeId>> & {
+          [](gfaz::GfaGraph &graph) -> std::vector<std::vector<gfaz::NodeId>> & {
             return graph.paths_data.traversals;
           },
-          [](GfaGraph &graph, const std::vector<std::vector<NodeId>> &value) {
+          [](gfaz::GfaGraph &graph, const std::vector<std::vector<gfaz::NodeId>> &value) {
             graph.paths_data.traversals = value;
           },
           py::return_value_policy::reference_internal)
       .def_property(
           "path_overlaps",
-          [](GfaGraph &graph) -> std::vector<std::string> & {
+          [](gfaz::GfaGraph &graph) -> std::vector<std::string> & {
             return graph.paths_data.overlaps;
           },
-          [](GfaGraph &graph, const std::vector<std::string> &value) {
+          [](gfaz::GfaGraph &graph, const std::vector<std::string> &value) {
             graph.paths_data.overlaps = value;
           },
           py::return_value_policy::reference_internal)
-      .def_readwrite("walks", &GfaGraph::walks);
+      .def_readwrite("walks", &gfaz::GfaGraph::walks);
 
-  py::class_<LayerRuleRange>(m, "LayerRuleRange")
+  py::class_<gfaz::LayerRuleRange>(m, "LayerRuleRange")
       .def(py::init<>())
-      .def_readonly("k", &LayerRuleRange::k)
-      .def_readonly("start_id", &LayerRuleRange::start_id)
-      .def_readonly("end_id", &LayerRuleRange::end_id)
-      .def_readonly("flattened_offset", &LayerRuleRange::flattened_offset)
-      .def_readonly("element_count", &LayerRuleRange::element_count);
+      .def_readonly("k", &gfaz::LayerRuleRange::k)
+      .def_readonly("start_id", &gfaz::LayerRuleRange::start_id)
+      .def_readonly("end_id", &gfaz::LayerRuleRange::end_id)
+      .def_readonly("flattened_offset", &gfaz::LayerRuleRange::flattened_offset)
+      .def_readonly("element_count", &gfaz::LayerRuleRange::element_count);
 
-  py::class_<ZstdCompressedBlock>(m, "ZstdCompressedBlock")
+  py::class_<gfaz::ZstdCompressedBlock>(m, "ZstdCompressedBlock")
       .def(py::init<>())
-      .def_readonly("payload", &ZstdCompressedBlock::payload)
-      .def_readonly("original_size", &ZstdCompressedBlock::original_size);
+      .def_readonly("payload", &gfaz::ZstdCompressedBlock::payload)
+      .def_readonly("original_size", &gfaz::ZstdCompressedBlock::original_size);
 
-  py::class_<CompressedOptionalFieldColumn>(m, "CompressedOptionalFieldColumn")
+  py::class_<gfaz::CompressedOptionalFieldColumn>(m, "CompressedOptionalFieldColumn")
       .def(py::init<>())
-      .def_readonly("tag", &CompressedOptionalFieldColumn::tag)
-      .def_readonly("type", &CompressedOptionalFieldColumn::type)
+      .def_readonly("tag", &gfaz::CompressedOptionalFieldColumn::tag)
+      .def_readonly("type", &gfaz::CompressedOptionalFieldColumn::type)
       .def_readonly("num_elements",
-                    &CompressedOptionalFieldColumn::num_elements)
+                    &gfaz::CompressedOptionalFieldColumn::num_elements)
       .def_readonly("int_values_zstd",
-                    &CompressedOptionalFieldColumn::int_values_zstd)
+                    &gfaz::CompressedOptionalFieldColumn::int_values_zstd)
       .def_readonly("float_values_zstd",
-                    &CompressedOptionalFieldColumn::float_values_zstd)
+                    &gfaz::CompressedOptionalFieldColumn::float_values_zstd)
       .def_readonly("char_values_zstd",
-                    &CompressedOptionalFieldColumn::char_values_zstd)
+                    &gfaz::CompressedOptionalFieldColumn::char_values_zstd)
       .def_readonly("strings_zstd",
-                    &CompressedOptionalFieldColumn::strings_zstd)
+                    &gfaz::CompressedOptionalFieldColumn::strings_zstd)
       .def_readonly("string_lengths_zstd",
-                    &CompressedOptionalFieldColumn::string_lengths_zstd);
+                    &gfaz::CompressedOptionalFieldColumn::string_lengths_zstd);
 
-  py::class_<CompressedData>(m, "CompressedData")
+  py::class_<gfaz::CompressedData>(m, "CompressedData")
       .def(py::init<>())
-      .def_readonly("header_line", &CompressedData::header_line)
-      .def_readonly("layer_rule_ranges", &CompressedData::layer_rule_ranges)
-      .def_readonly("sequence_lengths", &CompressedData::sequence_lengths)
+      .def_readonly("header_line", &gfaz::CompressedData::header_line)
+      .def_readonly("layer_rule_ranges", &gfaz::CompressedData::layer_rule_ranges)
+      .def_readonly("sequence_lengths", &gfaz::CompressedData::sequence_lengths)
       .def_readonly("original_path_lengths",
-                    &CompressedData::original_path_lengths)
-      .def_readonly("rules_first_zstd", &CompressedData::rules_first_zstd)
-      .def_readonly("rules_second_zstd", &CompressedData::rules_second_zstd)
-      .def_readonly("paths_zstd", &CompressedData::paths_zstd)
-      .def_readonly("delta_round", &CompressedData::delta_round)
-      .def_readonly("names_zstd", &CompressedData::names_zstd)
-      .def_readonly("name_lengths_zstd", &CompressedData::name_lengths_zstd)
-      .def_readonly("overlaps_zstd", &CompressedData::overlaps_zstd)
+                    &gfaz::CompressedData::original_path_lengths)
+      .def_readonly("rules_first_zstd", &gfaz::CompressedData::rules_first_zstd)
+      .def_readonly("rules_second_zstd", &gfaz::CompressedData::rules_second_zstd)
+      .def_readonly("paths_zstd", &gfaz::CompressedData::paths_zstd)
+      .def_readonly("delta_round", &gfaz::CompressedData::delta_round)
+      .def_readonly("names_zstd", &gfaz::CompressedData::names_zstd)
+      .def_readonly("name_lengths_zstd", &gfaz::CompressedData::name_lengths_zstd)
+      .def_readonly("overlaps_zstd", &gfaz::CompressedData::overlaps_zstd)
       .def_readonly("overlap_lengths_zstd",
-                    &CompressedData::overlap_lengths_zstd)
+                    &gfaz::CompressedData::overlap_lengths_zstd)
       .def_readonly("segment_sequences_zstd",
-                    &CompressedData::segment_sequences_zstd)
+                    &gfaz::CompressedData::segment_sequences_zstd)
       .def_readonly("segment_seq_lengths_zstd",
-                    &CompressedData::segment_seq_lengths_zstd)
+                    &gfaz::CompressedData::segment_seq_lengths_zstd)
       .def_readonly("segment_optional_fields_zstd",
-                    &CompressedData::segment_optional_fields_zstd)
-      .def_readonly("num_links", &CompressedData::num_links)
-      .def_readonly("link_from_ids_zstd", &CompressedData::link_from_ids_zstd)
-      .def_readonly("link_to_ids_zstd", &CompressedData::link_to_ids_zstd)
+                    &gfaz::CompressedData::segment_optional_fields_zstd)
+      .def_readonly("num_links", &gfaz::CompressedData::num_links)
+      .def_readonly("link_from_ids_zstd", &gfaz::CompressedData::link_from_ids_zstd)
+      .def_readonly("link_to_ids_zstd", &gfaz::CompressedData::link_to_ids_zstd)
       .def_readonly("link_from_orients_zstd",
-                    &CompressedData::link_from_orients_zstd)
+                    &gfaz::CompressedData::link_from_orients_zstd)
       .def_readonly("link_to_orients_zstd",
-                    &CompressedData::link_to_orients_zstd)
+                    &gfaz::CompressedData::link_to_orients_zstd)
       .def_readonly("link_overlap_nums_zstd",
-                    &CompressedData::link_overlap_nums_zstd)
+                    &gfaz::CompressedData::link_overlap_nums_zstd)
       .def_readonly("link_overlap_ops_zstd",
-                    &CompressedData::link_overlap_ops_zstd)
+                    &gfaz::CompressedData::link_overlap_ops_zstd)
       .def_readonly("link_optional_fields_zstd",
-                    &CompressedData::link_optional_fields_zstd)
-      .def_readonly("num_jumps", &CompressedData::num_jumps)
-      .def_readonly("jump_from_ids_zstd", &CompressedData::jump_from_ids_zstd)
+                    &gfaz::CompressedData::link_optional_fields_zstd)
+      .def_readonly("num_jumps", &gfaz::CompressedData::num_jumps)
+      .def_readonly("jump_from_ids_zstd", &gfaz::CompressedData::jump_from_ids_zstd)
       .def_readonly("jump_from_orients_zstd",
-                    &CompressedData::jump_from_orients_zstd)
-      .def_readonly("jump_to_ids_zstd", &CompressedData::jump_to_ids_zstd)
+                    &gfaz::CompressedData::jump_from_orients_zstd)
+      .def_readonly("jump_to_ids_zstd", &gfaz::CompressedData::jump_to_ids_zstd)
       .def_readonly("jump_to_orients_zstd",
-                    &CompressedData::jump_to_orients_zstd)
-      .def_readonly("jump_distances_zstd", &CompressedData::jump_distances_zstd)
+                    &gfaz::CompressedData::jump_to_orients_zstd)
+      .def_readonly("jump_distances_zstd", &gfaz::CompressedData::jump_distances_zstd)
       .def_readonly("jump_distance_lengths_zstd",
-                    &CompressedData::jump_distance_lengths_zstd)
+                    &gfaz::CompressedData::jump_distance_lengths_zstd)
       .def_readonly("jump_rest_fields_zstd",
-                    &CompressedData::jump_rest_fields_zstd)
+                    &gfaz::CompressedData::jump_rest_fields_zstd)
       .def_readonly("jump_rest_lengths_zstd",
-                    &CompressedData::jump_rest_lengths_zstd)
-      .def_readonly("num_containments", &CompressedData::num_containments)
+                    &gfaz::CompressedData::jump_rest_lengths_zstd)
+      .def_readonly("num_containments", &gfaz::CompressedData::num_containments)
       .def_readonly("containment_container_ids_zstd",
-                    &CompressedData::containment_container_ids_zstd)
+                    &gfaz::CompressedData::containment_container_ids_zstd)
       .def_readonly("containment_container_orients_zstd",
-                    &CompressedData::containment_container_orients_zstd)
+                    &gfaz::CompressedData::containment_container_orients_zstd)
       .def_readonly("containment_contained_ids_zstd",
-                    &CompressedData::containment_contained_ids_zstd)
+                    &gfaz::CompressedData::containment_contained_ids_zstd)
       .def_readonly("containment_contained_orients_zstd",
-                    &CompressedData::containment_contained_orients_zstd)
+                    &gfaz::CompressedData::containment_contained_orients_zstd)
       .def_readonly("containment_positions_zstd",
-                    &CompressedData::containment_positions_zstd)
+                    &gfaz::CompressedData::containment_positions_zstd)
       .def_readonly("containment_overlaps_zstd",
-                    &CompressedData::containment_overlaps_zstd)
+                    &gfaz::CompressedData::containment_overlaps_zstd)
       .def_readonly("containment_overlap_lengths_zstd",
-                    &CompressedData::containment_overlap_lengths_zstd)
+                    &gfaz::CompressedData::containment_overlap_lengths_zstd)
       .def_readonly("containment_rest_fields_zstd",
-                    &CompressedData::containment_rest_fields_zstd)
+                    &gfaz::CompressedData::containment_rest_fields_zstd)
       .def_readonly("containment_rest_lengths_zstd",
-                    &CompressedData::containment_rest_lengths_zstd)
-      .def_readonly("walk_lengths", &CompressedData::walk_lengths)
+                    &gfaz::CompressedData::containment_rest_lengths_zstd)
+      .def_readonly("walk_lengths", &gfaz::CompressedData::walk_lengths)
       .def_readonly("original_walk_lengths",
-                    &CompressedData::original_walk_lengths)
-      .def_readonly("walks_zstd", &CompressedData::walks_zstd)
+                    &gfaz::CompressedData::original_walk_lengths)
+      .def_readonly("walks_zstd", &gfaz::CompressedData::walks_zstd)
       .def_readonly("walk_sample_ids_zstd",
-                    &CompressedData::walk_sample_ids_zstd)
+                    &gfaz::CompressedData::walk_sample_ids_zstd)
       .def_readonly("walk_sample_id_lengths_zstd",
-                    &CompressedData::walk_sample_id_lengths_zstd)
+                    &gfaz::CompressedData::walk_sample_id_lengths_zstd)
       .def_readonly("walk_hap_indices_zstd",
-                    &CompressedData::walk_hap_indices_zstd)
-      .def_readonly("walk_seq_ids_zstd", &CompressedData::walk_seq_ids_zstd)
+                    &gfaz::CompressedData::walk_hap_indices_zstd)
+      .def_readonly("walk_seq_ids_zstd", &gfaz::CompressedData::walk_seq_ids_zstd)
       .def_readonly("walk_seq_id_lengths_zstd",
-                    &CompressedData::walk_seq_id_lengths_zstd)
+                    &gfaz::CompressedData::walk_seq_id_lengths_zstd)
       .def_readonly("walk_seq_starts_zstd",
-                    &CompressedData::walk_seq_starts_zstd)
-      .def_readonly("walk_seq_ends_zstd", &CompressedData::walk_seq_ends_zstd);
+                    &gfaz::CompressedData::walk_seq_starts_zstd)
+      .def_readonly("walk_seq_ends_zstd", &gfaz::CompressedData::walk_seq_ends_zstd);
 
   // Stable CPU-oriented APIs at module root.
   m.def("compress", &compress_gfa,
@@ -330,8 +330,8 @@ PYBIND11_MODULE(gfa_compression, m) {
 
   m.def(
       "decompress",
-      [](const CompressedData &data, int num_threads) {
-        GfaGraph graph;
+      [](const gfaz::CompressedData &data, int num_threads) {
+        gfaz::GfaGraph graph;
         decompress_gfa(data, graph, num_threads);
         return graph;
       },
@@ -340,7 +340,7 @@ PYBIND11_MODULE(gfa_compression, m) {
 
   m.def(
       "verify_round_trip",
-      [](const GfaGraph &original, const GfaGraph &decompressed) {
+      [](const gfaz::GfaGraph &original, const gfaz::GfaGraph &decompressed) {
         // Verify header
         if (original.header_line != decompressed.header_line) {
           std::cerr << "Verification Failed: Header mismatch. Original: '"
@@ -374,8 +374,8 @@ PYBIND11_MODULE(gfa_compression, m) {
         }
 
         for (size_t i = 0; i < original.paths_data.traversals.size(); ++i) {
-          const std::vector<NodeId> &original_path = original.paths_data.traversals[i];
-          const std::vector<NodeId> &decompressed_path = decompressed.paths_data.traversals[i];
+          const std::vector<gfaz::NodeId> &original_path = original.paths_data.traversals[i];
+          const std::vector<gfaz::NodeId> &decompressed_path = decompressed.paths_data.traversals[i];
 
           if (original_path.size() != decompressed_path.size()) {
             std::cerr << "Verification Failed: Path index " << i
@@ -667,25 +667,25 @@ PYBIND11_MODULE(gfa_compression, m) {
         py::arg("show_stats") = false);
   m.def(
       "decompress_data",
-      [](const CompressedData &data, int threads) {
-        GfaGraph graph;
+      [](const gfaz::CompressedData &data, int threads) {
+        gfaz::GfaGraph graph;
         decompress_gfa(data, graph, threads);
         return graph;
       },
       "Alias for decompress with normalized argument names", py::arg("data"),
       py::arg("threads") = kDefaultNumThreads);
 
-  m.def("serialize", &serialize_compressed_data,
+  m.def("serialize", &gfaz::serialize_compressed_data,
         "Serialize CompressedData to the shared .gfaz binary format",
         py::arg("data"), py::arg("output_path"));
-  m.def("serialize_file", &serialize_compressed_data,
+  m.def("serialize_file", &gfaz::serialize_compressed_data,
         "Serialize CompressedData to the shared .gfaz binary format",
         py::arg("data"), py::arg("output_path"));
 
-  m.def("deserialize", &deserialize_compressed_data,
+  m.def("deserialize", &gfaz::deserialize_compressed_data,
         "Deserialize CompressedData from the shared .gfaz binary format",
         py::arg("input_path"));
-  m.def("deserialize_file", &deserialize_compressed_data,
+  m.def("deserialize_file", &gfaz::deserialize_compressed_data,
         "Deserialize CompressedData from the shared .gfaz binary format",
         py::arg("input_path"));
 
@@ -732,7 +732,7 @@ PYBIND11_MODULE(gfa_compression, m) {
         py::arg("num_threads") = kDefaultNumThreads);
   m.def(
       "add_haplotypes",
-      [](CompressedData data, const std::string &haplotypes_path, int threads) {
+      [](gfaz::CompressedData data, const std::string &haplotypes_path, int threads) {
         add_haplotypes(data, haplotypes_path, threads);
         return data;
       },
@@ -990,7 +990,7 @@ PYBIND11_MODULE(gfa_compression, m) {
   // Experimental convenience helpers built on compressed GPU payloads.
   experimental_gpu.def(
       "build_rulebook",
-      [](const CompressedData &data) {
+      [](const gfaz::CompressedData &data) {
         return gpu_compression::build_rulebook(data);
       },
       "Build rulebook map from CompressedData.\n"
@@ -1000,14 +1000,14 @@ PYBIND11_MODULE(gfa_compression, m) {
 
   experimental_gpu.def(
       "decompress_encoded_path",
-      [](const ZstdCompressedBlock &block) {
-        return Codec::zstd_decompress_int32_vector(block);
+      [](const gfaz::ZstdCompressedBlock &block) {
+        return gfaz::Codec::zstd_decompress_int32_vector(block);
       },
       "Decompress an encoded path block to vector<int32>.", py::arg("block"));
 
   experimental_gpu.def(
       "get_min_rule_id",
-      [](const std::vector<LayerRuleRange> &layer_ranges) {
+      [](const std::vector<gfaz::LayerRuleRange> &layer_ranges) {
         if (layer_ranges.empty()) {
           return (uint32_t)0;
         }
@@ -1022,7 +1022,7 @@ PYBIND11_MODULE(gfa_compression, m) {
 
   experimental_gpu.def(
       "decompress_paths_gpu",
-      [](const CompressedData &data) {
+      [](const gfaz::CompressedData &data) {
         return gpu_decompression::decompress_paths_gpu(data);
       },
       "GPU-accelerated path decompression.\n"
@@ -1063,7 +1063,7 @@ PYBIND11_MODULE(gfa_compression, m) {
 
   m.def(
       "decompress_to_gpu_layout",
-      [](const CompressedData &data,
+      [](const gfaz::CompressedData &data,
          gpu_decompression::GpuDecompressionOptions options) {
         return gpu_decompression::decompress_to_gpu_layout(data, options);
       },
@@ -1075,7 +1075,7 @@ PYBIND11_MODULE(gfa_compression, m) {
 
   m.def(
       "decompress_to_host_graph_gpu",
-      [](const CompressedData &data,
+      [](const gfaz::CompressedData &data,
          gpu_decompression::GpuDecompressionOptions options) {
         return gpu_decompression::decompress_to_host_graph(data, options);
       },

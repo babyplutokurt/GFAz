@@ -19,12 +19,12 @@
 namespace {
 
 using Clock = std::chrono::high_resolution_clock;
-using gfz::runtime_utils::elapsed_ms;
-using namespace gfz::decompression_debug;
+using gfaz::runtime_utils::elapsed_ms;
+using namespace gfaz::decompression_debug;
 
 template <typename Metadata, typename WriteChunkFn>
 void stream_gpu_traversal_column_to_writer(
-    std::ofstream &out, const ZstdCompressedBlock &encoded_block,
+    std::ofstream &out, const gfaz::ZstdCompressedBlock &encoded_block,
     const std::vector<uint32_t> &final_lengths,
     const gpu_decompression::GpuTraversalRulebook &rulebook,
     gpu_decompression::GpuDecompressionOptions options,
@@ -52,10 +52,10 @@ void stream_gpu_traversal_column_to_writer(
 } // namespace
 
 void write_gfa_from_compressed_data_gpu(
-    const CompressedData &data, const std::string &output_path,
+    const gfaz::CompressedData &data, const std::string &output_path,
     gpu_decompression::GpuDecompressionOptions options) {
   if (options.use_legacy_full_decompression) {
-    GfaGraph graph = gpu_decompression::decompress_to_host_graph(data, options);
+    gfaz::GfaGraph graph = gpu_decompression::decompress_to_host_graph(data, options);
     write_gfa(graph, output_path);
     return;
   }

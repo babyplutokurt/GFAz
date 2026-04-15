@@ -25,9 +25,9 @@ namespace {
 
 constexpr const char *kWriterErrorPrefix = "GFA writer error: ";
 using Clock = std::chrono::high_resolution_clock;
-using gfz::runtime_utils::elapsed_ms;
-using namespace gfz::decompression_debug;
-using namespace gfz::gfa_write_utils;
+using gfaz::runtime_utils::elapsed_ms;
+using namespace gfaz::decompression_debug;
+using namespace gfaz::gfa_write_utils;
 
 // Get node name or numeric ID as string
 inline void append_node_name(std::string &out, uint32_t node_id,
@@ -41,7 +41,7 @@ inline void append_node_name(std::string &out, uint32_t node_id,
 void expand_rule(uint32_t rule_id, bool reverse,
                  const std::vector<int32_t> &first,
                  const std::vector<int32_t> &second, uint32_t min_id,
-                 uint32_t max_id, std::vector<NodeId> &out) {
+                 uint32_t max_id, std::vector<gfaz::NodeId> &out) {
   const uint32_t idx = rule_id - min_id;
   const int32_t a = first[idx];
   const int32_t b = second[idx];
@@ -73,7 +73,7 @@ void expand_rule(uint32_t rule_id, bool reverse,
   }
 }
 
-std::vector<NodeId>
+std::vector<gfaz::NodeId>
 decode_sequence_at_index(const std::vector<int32_t> &flat,
                          const SequenceOffsets &compressed_offsets,
                          const SequenceOffsets &original_offsets, size_t index,
@@ -99,11 +99,11 @@ decode_sequence_at_index(const std::vector<int32_t> &flat,
           ? (original_offsets[index + 1] - original_offsets[index])
           : (end - start);
 
-  std::vector<NodeId> decoded;
+  std::vector<gfaz::NodeId> decoded;
   decoded.reserve(original_length);
 
   for (size_t pos = start; pos < end; ++pos) {
-    const NodeId node = flat[pos];
+    const gfaz::NodeId node = flat[pos];
     const uint32_t abs_id = static_cast<uint32_t>(std::abs(node));
     if (abs_id >= min_rule_id && abs_id < max_rule_id)
       expand_rule(abs_id, node < 0, rules_first, rules_second, min_rule_id,
@@ -112,10 +112,10 @@ decode_sequence_at_index(const std::vector<int32_t> &flat,
       decoded.push_back(node);
   }
 
-  std::vector<std::vector<NodeId>> seqs(1);
+  std::vector<std::vector<gfaz::NodeId>> seqs(1);
   seqs[0] = std::move(decoded);
   for (int round = 0; round < delta_round; ++round)
-    Codec::inverse_delta_transform(seqs);
+    gfaz::Codec::inverse_delta_transform(seqs);
   return std::move(seqs[0]);
 }
 
@@ -146,7 +146,7 @@ void write_sequence_batch_stream(std::ofstream &out, size_t total_count,
 
 } // namespace
 
-void write_gfa(const GfaGraph &graph, const std::string &output_path) {
+void write_gfa(const gfaz::GfaGraph &graph, const std::string &output_path) {
   std::ofstream out(output_path);
   if (!out)
     throw std::runtime_error(std::string(kWriterErrorPrefix) +
@@ -231,7 +231,7 @@ void write_gfa(const GfaGraph &graph, const std::string &output_path) {
       if (n > 0)
         line += ',';
 
-      NodeId node = path[n];
+      gfaz::NodeId node = path[n];
       bool is_reverse = (node < 0);
       uint32_t node_id = is_reverse ? static_cast<uint32_t>(-node)
                                     : static_cast<uint32_t>(node);
@@ -292,7 +292,7 @@ void write_gfa(const GfaGraph &graph, const std::string &output_path) {
     // Walk nodes (>node or <node format)
     const auto &walk = graph.walks.walks[w];
     for (size_t n = 0; n < walk.size(); ++n) {
-      NodeId node = walk[n];
+      gfaz::NodeId node = walk[n];
       bool is_reverse = (node < 0);
       uint32_t node_id = is_reverse ? static_cast<uint32_t>(-node)
                                     : static_cast<uint32_t>(node);
@@ -373,7 +373,7 @@ void write_gfa(const GfaGraph &graph, const std::string &output_path) {
   GFAZ_LOG("Wrote GFA file: " << output_path << " (" << file_size << " bytes)");
 }
 
-void write_gfa_from_compressed_data(const CompressedData &data,
+void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
                                     const std::string &output_path,
                                     int num_threads) {
   ScopedOMPThreads omp_scope(num_threads);
@@ -422,12 +422,12 @@ void write_gfa_from_compressed_data(const CompressedData &data,
 #pragma omp section
     {
       if (!data.paths_zstd.payload.empty())
-        paths_flat = Codec::zstd_decompress_int32_vector(data.paths_zstd);
+        paths_flat = gfaz::Codec::zstd_decompress_int32_vector(data.paths_zstd);
     }
 #pragma omp section
     {
       if (!data.walks_zstd.payload.empty())
-        walks_flat = Codec::zstd_decompress_int32_vector(data.walks_zstd);
+        walks_flat = gfaz::Codec::zstd_decompress_int32_vector(data.walks_zstd);
     }
 #pragma omp section
     {
@@ -440,39 +440,39 @@ void write_gfa_from_compressed_data(const CompressedData &data,
       walk_sample_ids = decompress_string_column(data.walk_sample_ids_zstd,
                                                  data.walk_sample_id_lengths_zstd);
       walk_hap_indices =
-          Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
+          gfaz::Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
       walk_seq_ids = decompress_string_column(data.walk_seq_ids_zstd,
                                               data.walk_seq_id_lengths_zstd);
-      walk_seq_starts = Codec::decompress_varint_int64(
+      walk_seq_starts = gfaz::Codec::decompress_varint_int64(
           data.walk_seq_starts_zstd, data.walk_lengths.size());
       walk_seq_ends =
-          Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
+          gfaz::Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
                                         data.walk_lengths.size());
     }
 #pragma omp section
     {
       segment_sequences =
-          Codec::zstd_decompress_string(data.segment_sequences_zstd);
+          gfaz::Codec::zstd_decompress_string(data.segment_sequences_zstd);
       segment_lengths =
-          Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
+          gfaz::Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
     }
 #pragma omp section
 
     {
       link_from_ids =
-          Codec::decompress_delta_varint_uint32(data.link_from_ids_zstd,
+          gfaz::Codec::decompress_delta_varint_uint32(data.link_from_ids_zstd,
                                                 data.num_links);
       link_to_ids =
-          Codec::decompress_delta_varint_uint32(data.link_to_ids_zstd,
+          gfaz::Codec::decompress_delta_varint_uint32(data.link_to_ids_zstd,
                                                 data.num_links);
-      link_from_orients = Codec::decompress_orientations(
+      link_from_orients = gfaz::Codec::decompress_orientations(
           data.link_from_orients_zstd, data.num_links);
       link_to_orients =
-          Codec::decompress_orientations(data.link_to_orients_zstd, data.num_links);
+          gfaz::Codec::decompress_orientations(data.link_to_orients_zstd, data.num_links);
       link_overlap_nums =
-          Codec::zstd_decompress_uint32_vector(data.link_overlap_nums_zstd);
+          gfaz::Codec::zstd_decompress_uint32_vector(data.link_overlap_nums_zstd);
       link_overlap_ops =
-          Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
+          gfaz::Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
     }
   }
 #else
@@ -480,49 +480,49 @@ void write_gfa_from_compressed_data(const CompressedData &data,
   rules_first = std::move(decoded_rules.first);
   rules_second = std::move(decoded_rules.second);
   if (!data.paths_zstd.payload.empty())
-    paths_flat = Codec::zstd_decompress_int32_vector(data.paths_zstd);
+    paths_flat = gfaz::Codec::zstd_decompress_int32_vector(data.paths_zstd);
   if (!data.walks_zstd.payload.empty())
-    walks_flat = Codec::zstd_decompress_int32_vector(data.walks_zstd);
+    walks_flat = gfaz::Codec::zstd_decompress_int32_vector(data.walks_zstd);
   path_names = decompress_string_column(data.names_zstd, data.name_lengths_zstd);
   path_overlaps =
       decompress_string_column(data.overlaps_zstd, data.overlap_lengths_zstd);
   walk_sample_ids = decompress_string_column(data.walk_sample_ids_zstd,
                                              data.walk_sample_id_lengths_zstd);
   walk_hap_indices =
-      Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
+      gfaz::Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
   walk_seq_ids =
       decompress_string_column(data.walk_seq_ids_zstd, data.walk_seq_id_lengths_zstd);
-  walk_seq_starts = Codec::decompress_varint_int64(data.walk_seq_starts_zstd,
+  walk_seq_starts = gfaz::Codec::decompress_varint_int64(data.walk_seq_starts_zstd,
                                                    data.walk_lengths.size());
-  walk_seq_ends = Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
+  walk_seq_ends = gfaz::Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
                                                  data.walk_lengths.size());
-  segment_sequences = Codec::zstd_decompress_string(data.segment_sequences_zstd);
+  segment_sequences = gfaz::Codec::zstd_decompress_string(data.segment_sequences_zstd);
   segment_lengths =
-      Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
+      gfaz::Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
   link_from_ids =
-      Codec::decompress_delta_varint_uint32(data.link_from_ids_zstd,
+      gfaz::Codec::decompress_delta_varint_uint32(data.link_from_ids_zstd,
                                             data.num_links);
-  link_to_ids = Codec::decompress_delta_varint_uint32(data.link_to_ids_zstd,
+  link_to_ids = gfaz::Codec::decompress_delta_varint_uint32(data.link_to_ids_zstd,
                                                       data.num_links);
   link_from_orients =
-      Codec::decompress_orientations(data.link_from_orients_zstd, data.num_links);
+      gfaz::Codec::decompress_orientations(data.link_from_orients_zstd, data.num_links);
   link_to_orients =
-      Codec::decompress_orientations(data.link_to_orients_zstd, data.num_links);
+      gfaz::Codec::decompress_orientations(data.link_to_orients_zstd, data.num_links);
   link_overlap_nums =
-      Codec::zstd_decompress_uint32_vector(data.link_overlap_nums_zstd);
+      gfaz::Codec::zstd_decompress_uint32_vector(data.link_overlap_nums_zstd);
   link_overlap_ops =
-      Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
+      gfaz::Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
 #endif
   auto t1 = Clock::now();
   debug_stages.push_back({"decode core columns", elapsed_ms(t0, t1)});
 
   t0 = Clock::now();
-  std::vector<OptionalFieldColumn> segment_optional_fields;
+  std::vector<gfaz::OptionalFieldColumn> segment_optional_fields;
   segment_optional_fields.reserve(data.segment_optional_fields_zstd.size());
   for (const auto &c : data.segment_optional_fields_zstd)
     segment_optional_fields.push_back(decompress_optional_column(c));
 
-  std::vector<OptionalFieldColumn> link_optional_fields;
+  std::vector<gfaz::OptionalFieldColumn> link_optional_fields;
   link_optional_fields.reserve(data.link_optional_fields_zstd.size());
   for (const auto &c : data.link_optional_fields_zstd)
     link_optional_fields.push_back(decompress_optional_column(c));
@@ -537,14 +537,14 @@ void write_gfa_from_compressed_data(const CompressedData &data,
   std::vector<std::string> jump_rest_fields;
   if (data.num_jumps > 0) {
     t0 = Clock::now();
-    jump_from_ids = Codec::decompress_delta_varint_uint32(data.jump_from_ids_zstd,
+    jump_from_ids = gfaz::Codec::decompress_delta_varint_uint32(data.jump_from_ids_zstd,
                                                           data.num_jumps);
-    jump_to_ids = Codec::decompress_delta_varint_uint32(data.jump_to_ids_zstd,
+    jump_to_ids = gfaz::Codec::decompress_delta_varint_uint32(data.jump_to_ids_zstd,
                                                         data.num_jumps);
-    jump_from_orients = Codec::decompress_orientations(
+    jump_from_orients = gfaz::Codec::decompress_orientations(
         data.jump_from_orients_zstd, data.num_jumps);
     jump_to_orients =
-        Codec::decompress_orientations(data.jump_to_orients_zstd, data.num_jumps);
+        gfaz::Codec::decompress_orientations(data.jump_to_orients_zstd, data.num_jumps);
     jump_distances = decompress_string_column(data.jump_distances_zstd,
                                               data.jump_distance_lengths_zstd);
     jump_rest_fields = decompress_string_column(data.jump_rest_fields_zstd,
@@ -562,16 +562,16 @@ void write_gfa_from_compressed_data(const CompressedData &data,
   std::vector<std::string> containment_rest_fields;
   if (data.num_containments > 0) {
     t0 = Clock::now();
-    containment_container_ids = Codec::decompress_delta_varint_uint32(
+    containment_container_ids = gfaz::Codec::decompress_delta_varint_uint32(
         data.containment_container_ids_zstd, data.num_containments);
-    containment_contained_ids = Codec::decompress_delta_varint_uint32(
+    containment_contained_ids = gfaz::Codec::decompress_delta_varint_uint32(
         data.containment_contained_ids_zstd, data.num_containments);
-    containment_container_orients = Codec::decompress_orientations(
+    containment_container_orients = gfaz::Codec::decompress_orientations(
         data.containment_container_orients_zstd, data.num_containments);
-    containment_contained_orients = Codec::decompress_orientations(
+    containment_contained_orients = gfaz::Codec::decompress_orientations(
         data.containment_contained_orients_zstd, data.num_containments);
     containment_positions =
-        Codec::zstd_decompress_uint32_vector(data.containment_positions_zstd);
+        gfaz::Codec::zstd_decompress_uint32_vector(data.containment_positions_zstd);
     containment_overlaps = decompress_string_column(
         data.containment_overlaps_zstd, data.containment_overlap_lengths_zstd);
     containment_rest_fields = decompress_string_column(
@@ -704,7 +704,7 @@ void write_gfa_from_compressed_data(const CompressedData &data,
   t0 = Clock::now();
   write_sequence_batch_stream(out, data.sequence_lengths.size(), num_threads,
                               [&](size_t index) {
-                                const std::vector<NodeId> path =
+                                const std::vector<gfaz::NodeId> path =
                                     decode_sequence_at_index(
                                         paths_flat, path_offsets,
                                         original_path_offsets, index,
@@ -728,7 +728,7 @@ void write_gfa_from_compressed_data(const CompressedData &data,
   t0 = Clock::now();
   write_sequence_batch_stream(out, data.walk_lengths.size(), num_threads,
                               [&](size_t index) {
-                                const std::vector<NodeId> walk =
+                                const std::vector<gfaz::NodeId> walk =
                                     decode_sequence_at_index(
                                         walks_flat, walk_offsets,
                                         original_walk_offsets, index,

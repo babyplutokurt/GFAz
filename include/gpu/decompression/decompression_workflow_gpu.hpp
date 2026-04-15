@@ -26,14 +26,14 @@ struct GpuDecompressionOptions {
  * 3. Iteratively expanding rules until all are raw nodes
  * 4. Inverse delta-encoding the path
  *
- * @param data CompressedData with compressed P-line paths and rules
+ * @param data gfaz::CompressedData with compressed P-line paths and rules
  * @return FlattenedPaths with decompressed path data and lengths
  */
-FlattenedPaths decompress_paths_gpu(const CompressedData &data,
+FlattenedPaths decompress_paths_gpu(const gfaz::CompressedData &data,
                                     GpuDecompressionOptions options = {});
 
 /**
- * Full GPU decompression: CompressedData -> GfaGraph_gpu
+ * Full GPU decompression: gfaz::CompressedData -> GfaGraph_gpu
  *
  * Decompresses all components:
  * - Paths (using GPU rule expansion)
@@ -42,22 +42,22 @@ FlattenedPaths decompress_paths_gpu(const CompressedData &data,
  * - Links
  * - Optional fields
  *
- * @param data CompressedData with all compressed fields
+ * @param data gfaz::CompressedData with all compressed fields
  * @return GfaGraph_gpu with fully decompressed data
  */
-GfaGraph_gpu decompress_to_gpu_layout(const CompressedData &data,
+GfaGraph_gpu decompress_to_gpu_layout(const gfaz::CompressedData &data,
                                       GpuDecompressionOptions options = {});
 
 /**
- * Full GPU decompression to host graph: CompressedData -> GfaGraph
+ * Full GPU decompression to host graph: gfaz::CompressedData -> gfaz::GfaGraph
  *
  * Uses the configured GPU path decompression mode (legacy whole-device or
  * rolling traversal expansion), then reconstructs the host-side graph model.
  *
- * @param data CompressedData with all compressed fields
- * @return GfaGraph with fully decompressed host-side data
+ * @param data gfaz::CompressedData with all compressed fields
+ * @return gfaz::GfaGraph with fully decompressed host-side data
  */
-GfaGraph decompress_to_host_graph(const CompressedData &data,
+gfaz::GfaGraph decompress_to_host_graph(const gfaz::CompressedData &data,
                                   GpuDecompressionOptions options = {});
 
 void set_gpu_decompression_debug(bool enabled);

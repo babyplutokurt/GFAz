@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 GPU rolling direct-writer round-trip test:
-1) Parse GFA to original GfaGraph
+1) Parse GFA to original gfaz::GfaGraph
 2) Convert original graph to GfaGraph_gpu
 3) GPU compress using the rolling scheduler
 4) Serialize to a temporary .gfaz file
@@ -230,7 +230,7 @@ def main():
         streamed_graph = gfac.parse(tmp_out_path)
         t_reparse_end = time.perf_counter()
 
-        print("\n[6] Verify original vs streamed-output GfaGraph")
+        print("\n[6] Verify original vs streamed-output gfaz::GfaGraph")
         ok = gfac.verify_round_trip(original_graph, streamed_graph)
         if not ok:
             print("❌ GPU rolling direct-writer round-trip verification FAILED")

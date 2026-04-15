@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace gfz::decompression_debug {
+namespace gfaz::decompression_debug {
 
 struct TimedDebugStage {
   std::string label;
@@ -27,10 +27,10 @@ void print_cpu_decompression_timing(
     const CpuDecompressionTimingDebugInfo &info);
 
 void print_cpu_decompression_summary(const std::string &scope_label,
-                                     const CompressedData &data);
+                                     const gfaz::CompressedData &data);
 
 void print_cpu_decompression_summary(const std::string &scope_label,
-                                     const GfaGraph &graph, size_t num_rules,
+                                     const gfaz::GfaGraph &graph, size_t num_rules,
                                      int delta_round);
 
-} // namespace gfz::decompression_debug
+} // namespace gfaz::decompression_debug

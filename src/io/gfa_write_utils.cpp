@@ -53,9 +53,9 @@ void reconstruct_strings(const std::string &concat,
 
 } // namespace
 
-namespace gfz::gfa_write_utils {
+namespace gfaz::gfa_write_utils {
 
-FieldOffsets build_field_offsets(const std::vector<OptionalFieldColumn> &cols) {
+FieldOffsets build_field_offsets(const std::vector<gfaz::OptionalFieldColumn> &cols) {
   FieldOffsets offsets(cols.size());
   for (size_t c = 0; c < cols.size(); ++c) {
     const auto &col = cols[c];
@@ -76,7 +76,7 @@ FieldOffsets build_field_offsets(const std::vector<OptionalFieldColumn> &cols) {
   return offsets;
 }
 
-std::string format_optional_fields(const std::vector<OptionalFieldColumn> &cols,
+std::string format_optional_fields(const std::vector<gfaz::OptionalFieldColumn> &cols,
                                    const FieldOffsets &offsets, size_t index) {
   std::string result;
   for (size_t c = 0; c < cols.size(); ++c) {
@@ -169,43 +169,43 @@ void append_numeric_node_name(std::string &out, uint32_t node_id) {
 }
 
 std::vector<std::string>
-decompress_string_column(const ZstdCompressedBlock &strings_zstd,
-                         const ZstdCompressedBlock &lengths_zstd) {
+decompress_string_column(const gfaz::ZstdCompressedBlock &strings_zstd,
+                         const gfaz::ZstdCompressedBlock &lengths_zstd) {
   std::vector<std::string> out;
-  reconstruct_strings(Codec::zstd_decompress_string(strings_zstd),
-                      Codec::zstd_decompress_uint32_vector(lengths_zstd), out);
+  reconstruct_strings(gfaz::Codec::zstd_decompress_string(strings_zstd),
+                      gfaz::Codec::zstd_decompress_uint32_vector(lengths_zstd), out);
   return out;
 }
 
-OptionalFieldColumn
-decompress_optional_column(const CompressedOptionalFieldColumn &c) {
-  OptionalFieldColumn col;
+gfaz::OptionalFieldColumn
+decompress_optional_column(const gfaz::CompressedOptionalFieldColumn &c) {
+  gfaz::OptionalFieldColumn col;
   col.tag = c.tag;
   col.type = c.type;
 
   switch (c.type) {
   case 'i':
     col.int_values =
-        Codec::decompress_varint_int64(c.int_values_zstd, c.num_elements);
+        gfaz::Codec::decompress_varint_int64(c.int_values_zstd, c.num_elements);
     break;
   case 'f':
-    col.float_values = Codec::zstd_decompress_float_vector(c.float_values_zstd);
+    col.float_values = gfaz::Codec::zstd_decompress_float_vector(c.float_values_zstd);
     break;
   case 'A':
-    col.char_values = Codec::zstd_decompress_char_vector(c.char_values_zstd);
+    col.char_values = gfaz::Codec::zstd_decompress_char_vector(c.char_values_zstd);
     break;
   case 'Z':
   case 'J':
   case 'H':
-    col.concatenated_strings = Codec::zstd_decompress_string(c.strings_zstd);
+    col.concatenated_strings = gfaz::Codec::zstd_decompress_string(c.strings_zstd);
     col.string_lengths =
-        Codec::zstd_decompress_uint32_vector(c.string_lengths_zstd);
+        gfaz::Codec::zstd_decompress_uint32_vector(c.string_lengths_zstd);
     break;
   case 'B': {
-    col.b_subtypes = Codec::zstd_decompress_char_vector(c.b_subtypes_zstd);
-    col.b_lengths = Codec::zstd_decompress_uint32_vector(c.b_lengths_zstd);
+    col.b_subtypes = gfaz::Codec::zstd_decompress_char_vector(c.b_subtypes_zstd);
+    col.b_lengths = gfaz::Codec::zstd_decompress_uint32_vector(c.b_lengths_zstd);
     const std::string bytes =
-        Codec::zstd_decompress_string(c.b_concat_bytes_zstd);
+        gfaz::Codec::zstd_decompress_string(c.b_concat_bytes_zstd);
     col.b_concat_bytes = std::vector<uint8_t>(bytes.begin(), bytes.end());
     break;
   }
@@ -225,13 +225,13 @@ SequenceOffsets build_offsets(const std::vector<uint32_t> &lengths) {
 }
 
 std::pair<std::vector<int32_t>, std::vector<int32_t>>
-decode_rules(const CompressedData &data) {
+decode_rules(const gfaz::CompressedData &data) {
   std::vector<int32_t> first =
-      Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
+      gfaz::Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
   std::vector<int32_t> second =
-      Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
-  Codec::delta_decode_int32(first);
-  Codec::delta_decode_int32(second);
+      gfaz::Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
+  gfaz::Codec::delta_decode_int32(first);
+  gfaz::Codec::delta_decode_int32(second);
   return {std::move(first), std::move(second)};
 }
 
@@ -292,7 +292,7 @@ std::string format_walk_line_numeric(const std::string &sample_id,
 void write_segments_numeric(std::ofstream &out,
                             const std::string &segment_sequences,
                             const std::vector<uint32_t> &segment_lengths,
-                            const std::vector<OptionalFieldColumn>
+                            const std::vector<gfaz::OptionalFieldColumn>
                                 &segment_optional_fields,
                             const FieldOffsets &segment_offsets) {
   std::string line;
@@ -325,7 +325,7 @@ void write_links_numeric(
     const std::vector<char> &link_to_orients,
     const std::vector<uint32_t> &link_overlap_nums,
     const std::vector<char> &link_overlap_ops,
-    const std::vector<OptionalFieldColumn> &link_optional_fields,
+    const std::vector<gfaz::OptionalFieldColumn> &link_optional_fields,
     const FieldOffsets &link_offsets) {
   std::string line;
   line.reserve(4096);
@@ -417,4 +417,4 @@ void write_containments_numeric(
   }
 }
 
-} // namespace gfz::gfa_write_utils
+} // namespace gfaz::gfa_write_utils

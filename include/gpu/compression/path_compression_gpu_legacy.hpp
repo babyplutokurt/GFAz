@@ -5,7 +5,7 @@
 
 namespace gpu_compression {
 
-CompressedData compress_gpu_traversals_legacy_whole_device(
+gfaz::CompressedData compress_gpu_traversals_legacy_whole_device(
     const FlattenedPaths &paths, uint32_t num_paths, int num_rounds,
     GpuPathCompressionDebugInfo *debug_info);
 

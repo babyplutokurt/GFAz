@@ -11,7 +11,7 @@ public:
 
     // Encode paths using 2-mer rules
     void encode_paths_2mer(
-        std::vector<std::vector<NodeId>>& paths, 
+        std::vector<std::vector<gfaz::NodeId>>& paths, 
         const CompressionRules2Mer& rules, 
         std::vector<uint8_t>& rules_used);
 };

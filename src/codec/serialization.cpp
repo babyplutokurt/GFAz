@@ -69,19 +69,19 @@ std::string read_str(std::ifstream &in) {
   return s;
 }
 
-void write_block(std::ofstream &out, const ZstdCompressedBlock &b) {
+void write_block(std::ofstream &out, const gfaz::ZstdCompressedBlock &b) {
   write_val(out, b.original_size);
   write_bytes(out, b.payload);
 }
 
-ZstdCompressedBlock read_block(std::ifstream &in) {
-  ZstdCompressedBlock b;
+gfaz::ZstdCompressedBlock read_block(std::ifstream &in) {
+  gfaz::ZstdCompressedBlock b;
   b.original_size = read_val<size_t>(in);
   b.payload = read_bytes(in);
   return b;
 }
 
-void write_range(std::ofstream &out, const LayerRuleRange &r) {
+void write_range(std::ofstream &out, const gfaz::LayerRuleRange &r) {
   write_val(out, r.k);
   write_val(out, r.start_id);
   write_val(out, r.end_id);
@@ -89,8 +89,8 @@ void write_range(std::ofstream &out, const LayerRuleRange &r) {
   write_val(out, r.element_count);
 }
 
-LayerRuleRange read_range(std::ifstream &in) {
-  LayerRuleRange r;
+gfaz::LayerRuleRange read_range(std::ifstream &in) {
+  gfaz::LayerRuleRange r;
   r.k = read_val<int>(in);
   r.start_id = read_val<uint32_t>(in);
   r.end_id = read_val<uint32_t>(in);
@@ -99,7 +99,8 @@ LayerRuleRange read_range(std::ifstream &in) {
   return r;
 }
 
-void write_opt_col(std::ofstream &out, const CompressedOptionalFieldColumn &c) {
+void write_opt_col(std::ofstream &out,
+                   const gfaz::CompressedOptionalFieldColumn &c) {
   write_str(out, c.tag);
   write_val(out, c.type);
   write_val(out, c.num_elements);
@@ -113,8 +114,8 @@ void write_opt_col(std::ofstream &out, const CompressedOptionalFieldColumn &c) {
   write_block(out, c.b_concat_bytes_zstd);
 }
 
-CompressedOptionalFieldColumn read_opt_col(std::ifstream &in) {
-  CompressedOptionalFieldColumn c;
+gfaz::CompressedOptionalFieldColumn read_opt_col(std::ifstream &in) {
+  gfaz::CompressedOptionalFieldColumn c;
   c.tag = read_str(in);
   c.type = read_val<char>(in);
   c.num_elements = read_val<size_t>(in);
@@ -130,6 +131,8 @@ CompressedOptionalFieldColumn read_opt_col(std::ifstream &in) {
 }
 
 } // namespace
+
+namespace gfaz {
 
 void serialize_compressed_data(const CompressedData &data,
                                const std::string &output_path) {
@@ -341,3 +344,5 @@ CompressedData deserialize_compressed_data(const std::string &input_path) {
   GFAZ_LOG("Deserialized from " << input_path);
   return data;
 }
+
+} // namespace gfaz

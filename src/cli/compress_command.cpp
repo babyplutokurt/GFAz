@@ -192,14 +192,14 @@ int do_compress(int argc, char *argv[]) {
         gpu_options.rolling_input_chunk_bytes =
             static_cast<size_t>(gpu_chunk_mb) * 1024ull * 1024ull;
       }
-      CompressedData compressed_data_gpu =
+      gfaz::CompressedData compressed_data_gpu =
           gpu_compression::compress_gfa_gpu(input_path, rounds, gpu_options);
       const auto workflow_end = Clock::now();
       workflow_ms =
           std::chrono::duration<double, std::milli>(workflow_end - workflow_start)
               .count();
       const auto serialize_start = Clock::now();
-      serialize_compressed_data(compressed_data_gpu, output_path);
+      gfaz::serialize_compressed_data(compressed_data_gpu, output_path);
       const auto serialize_end = Clock::now();
       serialize_ms =
           std::chrono::duration<double, std::milli>(serialize_end -
@@ -208,7 +208,7 @@ int do_compress(int argc, char *argv[]) {
     } else {
 #endif
       const auto workflow_start = Clock::now();
-      CompressedData compressed_data = compress_gfa(
+      gfaz::CompressedData compressed_data = compress_gfa(
           input_path, rounds, freq_threshold, delta_round, num_threads,
           show_stats);
       const auto workflow_end = Clock::now();
@@ -216,7 +216,7 @@ int do_compress(int argc, char *argv[]) {
           std::chrono::duration<double, std::milli>(workflow_end - workflow_start)
               .count();
       const auto serialize_start = Clock::now();
-      serialize_compressed_data(compressed_data, output_path);
+      gfaz::serialize_compressed_data(compressed_data, output_path);
       const auto serialize_end = Clock::now();
       serialize_ms =
           std::chrono::duration<double, std::milli>(serialize_end -

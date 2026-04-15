@@ -5,12 +5,12 @@
 #include <iostream>
 #include <sstream>
 
-namespace gfz::compression_debug {
+namespace gfaz::compression_debug {
 
 namespace {
 
-using gfz::runtime_utils::format_memory_snapshot;
-using gfz::runtime_utils::format_size;
+using gfaz::runtime_utils::format_memory_snapshot;
+using gfaz::runtime_utils::format_size;
 
 std::string format_reduction_percent(size_t original, size_t encoded) {
   if (original == 0)
@@ -103,10 +103,10 @@ void log_cpu_memory_checkpoint(const std::string &label) {
 }
 
 CompressionRatio sum_optional_field_ratio(
-    const std::vector<CompressedOptionalFieldColumn> &cols) {
+    const std::vector<gfaz::CompressedOptionalFieldColumn> &cols) {
   CompressionRatio total;
   for (const auto &c : cols) {
-    const ZstdCompressedBlock *blocks[] = {
+    const gfaz::ZstdCompressedBlock *blocks[] = {
         &c.int_values_zstd,     &c.float_values_zstd,    &c.char_values_zstd,
         &c.strings_zstd,        &c.string_lengths_zstd,  &c.b_subtypes_zstd,
         &c.b_lengths_zstd,      &c.b_concat_bytes_zstd};
@@ -118,7 +118,7 @@ CompressionRatio sum_optional_field_ratio(
   return total;
 }
 
-CompressionRatio block_ratio(const ZstdCompressedBlock &block) {
+CompressionRatio block_ratio(const gfaz::ZstdCompressedBlock &block) {
   return CompressionRatio{block.original_size, block.payload.size()};
 }
 
@@ -131,19 +131,19 @@ CompressionRatio sum_ratios(std::initializer_list<CompressionRatio> ratios) {
   return total;
 }
 
-CompressionRatio collect_rules_ratio(const CompressedData &data) {
+CompressionRatio collect_rules_ratio(const gfaz::CompressedData &data) {
   return sum_ratios({block_ratio(data.rules_first_zstd),
                      block_ratio(data.rules_second_zstd)});
 }
 
-CompressionRatio collect_path_ratio(const CompressedData &data) {
+CompressionRatio collect_path_ratio(const gfaz::CompressedData &data) {
   return sum_ratios({block_ratio(data.paths_zstd), block_ratio(data.names_zstd),
                      block_ratio(data.name_lengths_zstd),
                      block_ratio(data.overlaps_zstd),
                      block_ratio(data.overlap_lengths_zstd)});
 }
 
-CompressionRatio collect_walk_ratio(const CompressedData &data) {
+CompressionRatio collect_walk_ratio(const gfaz::CompressedData &data) {
   return sum_ratios({block_ratio(data.walks_zstd),
                      block_ratio(data.walk_sample_ids_zstd),
                      block_ratio(data.walk_sample_id_lengths_zstd),
@@ -154,7 +154,7 @@ CompressionRatio collect_walk_ratio(const CompressedData &data) {
                      block_ratio(data.walk_seq_ends_zstd)});
 }
 
-CompressionRatio collect_segment_link_ratio(const CompressedData &data) {
+CompressionRatio collect_segment_link_ratio(const gfaz::CompressedData &data) {
   return sum_ratios({block_ratio(data.segment_sequences_zstd),
                      block_ratio(data.segment_seq_lengths_zstd),
                      block_ratio(data.link_from_ids_zstd),
@@ -165,12 +165,12 @@ CompressionRatio collect_segment_link_ratio(const CompressedData &data) {
                      block_ratio(data.link_overlap_ops_zstd)});
 }
 
-CompressionRatio collect_optional_field_ratio(const CompressedData &data) {
+CompressionRatio collect_optional_field_ratio(const gfaz::CompressedData &data) {
   return sum_ratios({sum_optional_field_ratio(data.segment_optional_fields_zstd),
                      sum_optional_field_ratio(data.link_optional_fields_zstd)});
 }
 
-CompressionRatio collect_jump_ratio(const CompressedData &data) {
+CompressionRatio collect_jump_ratio(const gfaz::CompressedData &data) {
   return sum_ratios({block_ratio(data.jump_from_ids_zstd),
                      block_ratio(data.jump_from_orients_zstd),
                      block_ratio(data.jump_to_ids_zstd),
@@ -181,7 +181,7 @@ CompressionRatio collect_jump_ratio(const CompressedData &data) {
                      block_ratio(data.jump_rest_lengths_zstd)});
 }
 
-CompressionRatio collect_containment_ratio(const CompressedData &data) {
+CompressionRatio collect_containment_ratio(const gfaz::CompressedData &data) {
   return sum_ratios({block_ratio(data.containment_container_ids_zstd),
                      block_ratio(data.containment_container_orients_zstd),
                      block_ratio(data.containment_contained_ids_zstd),
@@ -231,4 +231,4 @@ void print_cpu_compression_timing(const CpuCompressionTimingDebugInfo &info) {
             << std::setprecision(2) << info.total_ms << " ms" << std::endl;
 }
 
-} // namespace gfz::compression_debug
+} // namespace gfaz::compression_debug

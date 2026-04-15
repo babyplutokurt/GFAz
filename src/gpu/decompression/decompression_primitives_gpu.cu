@@ -11,19 +11,19 @@ namespace gpu_decompression {
 namespace {
 
 using Clock = std::chrono::high_resolution_clock;
-using gfz::runtime_utils::elapsed_ms;
+using gfaz::runtime_utils::elapsed_ms;
 
 } // namespace
 
-GpuTraversalRulebook prepare_gpu_traversal_rulebook(const CompressedData &data) {
+GpuTraversalRulebook prepare_gpu_traversal_rulebook(const gfaz::CompressedData &data) {
   const auto start = Clock::now();
 
   std::vector<int32_t> first_host =
-      Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
+      gfaz::Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
   std::vector<int32_t> second_host =
-      Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
-  Codec::delta_decode_int32(first_host);
-  Codec::delta_decode_int32(second_host);
+      gfaz::Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
+  gfaz::Codec::delta_decode_int32(first_host);
+  gfaz::Codec::delta_decode_int32(second_host);
 
   GpuTraversalRulebook rulebook;
   rulebook.d_rules_first = thrust::device_vector<int32_t>(first_host.begin(),
@@ -39,12 +39,12 @@ GpuTraversalRulebook prepare_gpu_traversal_rulebook(const CompressedData &data) 
 }
 
 GpuTraversalPayload prepare_gpu_traversal_payload(
-    const ZstdCompressedBlock &encoded_block,
+    const gfaz::ZstdCompressedBlock &encoded_block,
     const std::vector<uint32_t> &final_lengths) {
   const auto start = Clock::now();
 
   std::vector<int32_t> encoded_host =
-      Codec::zstd_decompress_int32_vector(encoded_block);
+      gfaz::Codec::zstd_decompress_int32_vector(encoded_block);
 
   GpuTraversalPayload payload;
   payload.d_encoded =

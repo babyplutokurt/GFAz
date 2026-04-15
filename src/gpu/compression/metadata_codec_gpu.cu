@@ -20,7 +20,7 @@ namespace gpu_compression {
 namespace {
 
 using Clock = std::chrono::high_resolution_clock;
-using gfz::runtime_utils::elapsed_ms;
+using gfaz::runtime_utils::elapsed_ms;
 
 std::string flattened_to_string(const FlattenedStrings &flat) {
   return std::string(flat.data.begin(), flat.data.end());
@@ -78,7 +78,7 @@ size_t optional_columns_original_size(
 }
 
 size_t optional_columns_compressed_size(
-    const std::vector<CompressedOptionalFieldColumn> &columns) {
+    const std::vector<gfaz::CompressedOptionalFieldColumn> &columns) {
   size_t total = 0;
   for (const auto &col : columns) {
     total += col.int_values_zstd.payload.size();
@@ -105,67 +105,67 @@ void add_stage_debug(
       label, codec_label, time_ms, original_bytes, compressed_bytes});
 }
 
-ZstdCompressedBlock compress_bytes_gpu(const std::vector<uint8_t> &input,
+gfaz::ZstdCompressedBlock compress_bytes_gpu(const std::vector<uint8_t> &input,
                                        const char *label = "bytes") {
   auto block =
-      Codec::zstd_compress_string(std::string(input.begin(), input.end()));
+      gfaz::Codec::zstd_compress_string(std::string(input.begin(), input.end()));
   print_compression_stats(label, input.size(), block.payload.size());
   return block;
 }
 
-ZstdCompressedBlock compress_string_gpu(const std::string &input,
+gfaz::ZstdCompressedBlock compress_string_gpu(const std::string &input,
                                         const char *label = "string") {
-  auto block = Codec::zstd_compress_string(input);
+  auto block = gfaz::Codec::zstd_compress_string(input);
   print_compression_stats(label, input.size(), block.payload.size());
   return block;
 }
 
-ZstdCompressedBlock compress_float_gpu(const std::vector<float> &input,
+gfaz::ZstdCompressedBlock compress_float_gpu(const std::vector<float> &input,
                                        const char *label = "float_vec") {
-  auto block = Codec::zstd_compress_float_vector(input);
+  auto block = gfaz::Codec::zstd_compress_float_vector(input);
   print_compression_stats(label, input.size() * sizeof(float),
                           block.payload.size());
   return block;
 }
 
-ZstdCompressedBlock compress_char_gpu(const std::vector<char> &input,
+gfaz::ZstdCompressedBlock compress_char_gpu(const std::vector<char> &input,
                                       const char *label = "char_vec") {
-  auto block = Codec::zstd_compress_char_vector(input);
+  auto block = gfaz::Codec::zstd_compress_char_vector(input);
   print_compression_stats(label, input.size() * sizeof(char),
                           block.payload.size());
   return block;
 }
 
-ZstdCompressedBlock
+gfaz::ZstdCompressedBlock
 compress_varint_int64_gpu(const std::vector<int64_t> &input,
                           const char *label = "varint_int64") {
-  auto block = Codec::compress_varint_int64(input);
+  auto block = gfaz::Codec::compress_varint_int64(input);
   print_compression_stats(label, input.size() * sizeof(int64_t),
                           block.payload.size());
   return block;
 }
 
-ZstdCompressedBlock
+gfaz::ZstdCompressedBlock
 compress_delta_varint_uint32_gpu(const std::vector<uint32_t> &input,
                                  const char *label = "delta_varint_uint32") {
-  auto block = Codec::compress_delta_varint_uint32(input);
+  auto block = gfaz::Codec::compress_delta_varint_uint32(input);
   print_compression_stats(label, input.size() * sizeof(uint32_t),
                           block.payload.size());
   return block;
 }
 
-ZstdCompressedBlock
+gfaz::ZstdCompressedBlock
 compress_orientations_gpu(const std::vector<char> &orients,
                           const char *label = "orientations") {
-  auto block = Codec::compress_orientations(orients);
+  auto block = gfaz::Codec::compress_orientations(orients);
   print_compression_stats(label, orients.size() * sizeof(char),
                           block.payload.size());
   return block;
 }
 
 void compress_flattened_strings_gpu(const FlattenedStrings &flat,
-                                    ZstdCompressedBlock &data_block,
-                                    ZstdCompressedBlock &lengths_block,
+                                    gfaz::ZstdCompressedBlock &data_block,
+                                    gfaz::ZstdCompressedBlock &lengths_block,
                                     const char *data_label,
                                     const char *lengths_label) {
   data_block = compress_string_gpu(flattened_to_string(flat), data_label);
@@ -173,8 +173,8 @@ void compress_flattened_strings_gpu(const FlattenedStrings &flat,
 }
 
 void compress_segment_sequences_gpu(const FlattenedStrings &flat,
-                                    ZstdCompressedBlock &data_block,
-                                    ZstdCompressedBlock &lengths_block) {
+                                    gfaz::ZstdCompressedBlock &data_block,
+                                    gfaz::ZstdCompressedBlock &lengths_block) {
   data_block = compress_string_gpu(flattened_to_string(flat),
                                    "segment_sequences");
 
@@ -185,10 +185,10 @@ void compress_segment_sequences_gpu(const FlattenedStrings &flat,
   lengths_block = compress_uint32_gpu(lengths, "segment_seq_lengths");
 }
 
-CompressedOptionalFieldColumn
+gfaz::CompressedOptionalFieldColumn
 compress_optional_column_gpu(const OptionalFieldColumn_gpu &col,
                              const char *prefix) {
-  CompressedOptionalFieldColumn compressed_col;
+  gfaz::CompressedOptionalFieldColumn compressed_col;
   compressed_col.tag = col.tag;
   compressed_col.type = col.type;
 
@@ -238,7 +238,7 @@ compress_optional_column_gpu(const OptionalFieldColumn_gpu &col,
 
 void compress_optional_columns_gpu(
     const std::vector<OptionalFieldColumn_gpu> &columns,
-    std::vector<CompressedOptionalFieldColumn> &out_columns,
+    std::vector<gfaz::CompressedOptionalFieldColumn> &out_columns,
     const char *prefix) {
   out_columns.reserve(out_columns.size() + columns.size());
   for (const auto &col : columns) {
@@ -248,35 +248,35 @@ void compress_optional_columns_gpu(
 
 } // namespace
 
-ZstdCompressedBlock compress_uint32_gpu(const std::vector<uint32_t> &input,
+gfaz::ZstdCompressedBlock compress_uint32_gpu(const std::vector<uint32_t> &input,
                                         const char *label) {
   size_t original_bytes = input.size() * sizeof(uint32_t);
-  auto block = Codec::zstd_compress_uint32_vector(input);
+  auto block = gfaz::Codec::zstd_compress_uint32_vector(input);
   print_compression_stats(label, original_bytes, block.payload.size());
   return block;
 }
 
-ZstdCompressedBlock compress_int32_gpu(const std::vector<int32_t> &input,
+gfaz::ZstdCompressedBlock compress_int32_gpu(const std::vector<int32_t> &input,
                                        const char *label) {
   size_t original_bytes = input.size() * sizeof(int32_t);
-  auto block = Codec::zstd_compress_int32_vector(input);
+  auto block = gfaz::Codec::zstd_compress_int32_vector(input);
   print_compression_stats(label, original_bytes, block.payload.size());
   return block;
 }
 
-ZstdCompressedBlock
+gfaz::ZstdCompressedBlock
 compress_int32_device_gpu(const thrust::device_vector<int32_t> &d_input,
                           const char *label) {
   std::vector<int32_t> host(d_input.size());
   thrust::copy(d_input.begin(), d_input.end(), host.begin());
-  auto block = Codec::zstd_compress_int32_vector(host);
+  auto block = gfaz::Codec::zstd_compress_int32_vector(host);
   size_t original_bytes = d_input.size() * sizeof(int32_t);
   print_compression_stats(label, original_bytes, block.payload.size());
   return block;
 }
 
 void compress_graph_metadata_gpu(const GfaGraph_gpu &gpu_graph,
-                                 CompressedData &data,
+                                 gfaz::CompressedData &data,
                                  GpuMetadataCompressionDebugInfo *debug_info) {
   const auto metadata_start = Clock::now();
 
@@ -501,7 +501,7 @@ namespace gpu_decompression {
 namespace {
 
 OptionalFieldColumn_gpu decompress_optional_field_column(
-    const CompressedOptionalFieldColumn &compressed) {
+    const gfaz::CompressedOptionalFieldColumn &compressed) {
   OptionalFieldColumn_gpu result;
   result.tag = compressed.tag;
   result.type = compressed.type;
@@ -509,34 +509,34 @@ OptionalFieldColumn_gpu decompress_optional_field_column(
 
   switch (compressed.type) {
   case 'i':
-    result.int_values = Codec::decompress_varint_int64(
+    result.int_values = gfaz::Codec::decompress_varint_int64(
         compressed.int_values_zstd, compressed.num_elements);
     break;
   case 'f':
     result.float_values =
-        Codec::zstd_decompress_float_vector(compressed.float_values_zstd);
+        gfaz::Codec::zstd_decompress_float_vector(compressed.float_values_zstd);
     break;
   case 'A':
     result.char_values =
-        Codec::zstd_decompress_char_vector(compressed.char_values_zstd);
+        gfaz::Codec::zstd_decompress_char_vector(compressed.char_values_zstd);
     break;
   case 'Z':
   case 'J':
   case 'H': {
     std::string str_data =
-        Codec::zstd_decompress_string(compressed.strings_zstd);
+        gfaz::Codec::zstd_decompress_string(compressed.strings_zstd);
     result.strings.data = std::vector<char>(str_data.begin(), str_data.end());
     result.strings.lengths =
-        Codec::zstd_decompress_uint32_vector(compressed.string_lengths_zstd);
+        gfaz::Codec::zstd_decompress_uint32_vector(compressed.string_lengths_zstd);
     break;
   }
   case 'B': {
     result.b_subtypes =
-        Codec::zstd_decompress_char_vector(compressed.b_subtypes_zstd);
+        gfaz::Codec::zstd_decompress_char_vector(compressed.b_subtypes_zstd);
     result.b_lengths =
-        Codec::zstd_decompress_uint32_vector(compressed.b_lengths_zstd);
+        gfaz::Codec::zstd_decompress_uint32_vector(compressed.b_lengths_zstd);
     std::string bytes =
-        Codec::zstd_decompress_string(compressed.b_concat_bytes_zstd);
+        gfaz::Codec::zstd_decompress_string(compressed.b_concat_bytes_zstd);
     result.b_data = std::vector<uint8_t>(bytes.begin(), bytes.end());
     break;
   }
@@ -548,17 +548,17 @@ OptionalFieldColumn_gpu decompress_optional_field_column(
 }
 
 FlattenedStrings
-decompress_flattened_strings(const ZstdCompressedBlock &data_block,
-                             const ZstdCompressedBlock &lengths_block) {
+decompress_flattened_strings(const gfaz::ZstdCompressedBlock &data_block,
+                             const gfaz::ZstdCompressedBlock &lengths_block) {
   FlattenedStrings result;
-  std::string str_data = Codec::zstd_decompress_string(data_block);
+  std::string str_data = gfaz::Codec::zstd_decompress_string(data_block);
   result.data = std::vector<char>(str_data.begin(), str_data.end());
-  result.lengths = Codec::zstd_decompress_uint32_vector(lengths_block);
+  result.lengths = gfaz::Codec::zstd_decompress_uint32_vector(lengths_block);
   return result;
 }
 
 void decompress_optional_columns(
-    const std::vector<CompressedOptionalFieldColumn> &compressed_columns,
+    const std::vector<gfaz::CompressedOptionalFieldColumn> &compressed_columns,
     std::vector<OptionalFieldColumn_gpu> &out_columns) {
   out_columns.reserve(out_columns.size() + compressed_columns.size());
   for (const auto &compressed_col : compressed_columns) {
@@ -583,7 +583,7 @@ void prepend_placeholder_length(FlattenedStrings &strings) {
 
 } // namespace
 
-void decompress_graph_metadata_gpu(const CompressedData &data,
+void decompress_graph_metadata_gpu(const gfaz::CompressedData &data,
                                    GfaGraph_gpu &result) {
   result.num_paths = static_cast<uint32_t>(data.sequence_lengths.size());
   result.num_walks = static_cast<uint32_t>(data.walk_lengths.size());
@@ -597,12 +597,12 @@ void decompress_graph_metadata_gpu(const CompressedData &data,
     result.walk_sample_ids = decompress_flattened_strings(
         data.walk_sample_ids_zstd, data.walk_sample_id_lengths_zstd);
     result.walk_hap_indices =
-        Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
+        gfaz::Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
     result.walk_seq_ids = decompress_flattened_strings(
         data.walk_seq_ids_zstd, data.walk_seq_id_lengths_zstd);
-    result.walk_seq_starts = Codec::decompress_varint_int64(
+    result.walk_seq_starts = gfaz::Codec::decompress_varint_int64(
         data.walk_seq_starts_zstd, result.num_walks);
-    result.walk_seq_ends = Codec::decompress_varint_int64(
+    result.walk_seq_ends = gfaz::Codec::decompress_varint_int64(
         data.walk_seq_ends_zstd, result.num_walks);
   }
 
@@ -615,18 +615,18 @@ void decompress_graph_metadata_gpu(const CompressedData &data,
   prepend_placeholder_length(result.node_names);
 
   if (data.num_links > 0) {
-    result.link_from_ids = Codec::decompress_delta_varint_uint32(
+    result.link_from_ids = gfaz::Codec::decompress_delta_varint_uint32(
         data.link_from_ids_zstd, data.num_links);
-    result.link_to_ids = Codec::decompress_delta_varint_uint32(
+    result.link_to_ids = gfaz::Codec::decompress_delta_varint_uint32(
         data.link_to_ids_zstd, data.num_links);
-    result.link_from_orients = Codec::decompress_orientations(
+    result.link_from_orients = gfaz::Codec::decompress_orientations(
         data.link_from_orients_zstd, data.num_links);
-    result.link_to_orients = Codec::decompress_orientations(
+    result.link_to_orients = gfaz::Codec::decompress_orientations(
         data.link_to_orients_zstd, data.num_links);
     result.link_overlap_nums =
-        Codec::zstd_decompress_uint32_vector(data.link_overlap_nums_zstd);
+        gfaz::Codec::zstd_decompress_uint32_vector(data.link_overlap_nums_zstd);
     result.link_overlap_ops =
-        Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
+        gfaz::Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
   }
 
   if (!data.segment_optional_fields_zstd.empty()) {
@@ -640,13 +640,13 @@ void decompress_graph_metadata_gpu(const CompressedData &data,
   }
 
   if (data.num_jumps > 0) {
-    result.jump_from_ids = Codec::decompress_delta_varint_uint32(
+    result.jump_from_ids = gfaz::Codec::decompress_delta_varint_uint32(
         data.jump_from_ids_zstd, data.num_jumps);
-    result.jump_to_ids = Codec::decompress_delta_varint_uint32(
+    result.jump_to_ids = gfaz::Codec::decompress_delta_varint_uint32(
         data.jump_to_ids_zstd, data.num_jumps);
-    result.jump_from_orients = Codec::decompress_orientations(
+    result.jump_from_orients = gfaz::Codec::decompress_orientations(
         data.jump_from_orients_zstd, data.num_jumps);
-    result.jump_to_orients = Codec::decompress_orientations(
+    result.jump_to_orients = gfaz::Codec::decompress_orientations(
         data.jump_to_orients_zstd, data.num_jumps);
     result.jump_distances = decompress_flattened_strings(
         data.jump_distances_zstd, data.jump_distance_lengths_zstd);
@@ -655,16 +655,16 @@ void decompress_graph_metadata_gpu(const CompressedData &data,
   }
 
   if (data.num_containments > 0) {
-    result.containment_container_ids = Codec::decompress_delta_varint_uint32(
+    result.containment_container_ids = gfaz::Codec::decompress_delta_varint_uint32(
         data.containment_container_ids_zstd, data.num_containments);
-    result.containment_contained_ids = Codec::decompress_delta_varint_uint32(
+    result.containment_contained_ids = gfaz::Codec::decompress_delta_varint_uint32(
         data.containment_contained_ids_zstd, data.num_containments);
-    result.containment_container_orients = Codec::decompress_orientations(
+    result.containment_container_orients = gfaz::Codec::decompress_orientations(
         data.containment_container_orients_zstd, data.num_containments);
-    result.containment_contained_orients = Codec::decompress_orientations(
+    result.containment_contained_orients = gfaz::Codec::decompress_orientations(
         data.containment_contained_orients_zstd, data.num_containments);
     result.containment_positions =
-        Codec::zstd_decompress_uint32_vector(data.containment_positions_zstd);
+        gfaz::Codec::zstd_decompress_uint32_vector(data.containment_positions_zstd);
     result.containment_overlaps = decompress_flattened_strings(
         data.containment_overlaps_zstd, data.containment_overlap_lengths_zstd);
     result.containment_rest_fields = decompress_flattened_strings(

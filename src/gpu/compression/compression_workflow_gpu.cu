@@ -22,9 +22,9 @@ namespace gpu_compression {
 // compile flag)
 static bool g_debug_compression = false;
 using Clock = std::chrono::high_resolution_clock;
-using gfz::runtime_utils::elapsed_ms;
-using gfz::runtime_utils::format_memory_snapshot;
-using gfz::runtime_utils::format_size;
+using gfaz::runtime_utils::elapsed_ms;
+using gfaz::runtime_utils::format_memory_snapshot;
+using gfaz::runtime_utils::format_size;
 
 namespace {
 
@@ -56,7 +56,7 @@ void log_gpu_memory_checkpoint(const std::string &label) {
     return;
   }
 
-  const auto host_snapshot = gfz::runtime_utils::read_process_memory_snapshot();
+  const auto host_snapshot = gfaz::runtime_utils::read_process_memory_snapshot();
   const auto gpu_snapshot = read_gpu_memory_snapshot();
   std::cerr << "[GPU Compress][Memory] " << label << " | "
             << format_memory_snapshot(host_snapshot) << " | "
@@ -182,7 +182,7 @@ void set_gpu_compression_debug(bool enabled) {
   g_debug_compression = enabled;
 }
 
-CompressedData run_path_compression_gpu(
+gfaz::CompressedData run_path_compression_gpu(
     const FlattenedPaths &paths, uint32_t num_paths, int num_rounds,
     GpuCompressionOptions options, GpuPathCompressionDebugInfo *debug_info) {
   return compress_gpu_traversals(paths, num_paths, num_rounds, options,
@@ -190,20 +190,20 @@ CompressedData run_path_compression_gpu(
 }
 
 
-std::map<uint32_t, uint64_t> build_rulebook(const CompressedData &data) {
+std::map<uint32_t, uint64_t> build_rulebook(const gfaz::CompressedData &data) {
   std::map<uint32_t, uint64_t> rulebook;
 
   std::vector<int32_t> first =
-      Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
+      gfaz::Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
   std::vector<int32_t> second =
-      Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
+      gfaz::Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
 
   if (first.empty() || second.empty()) {
     return rulebook;
   }
 
-  Codec::delta_decode_int32(first);
-  Codec::delta_decode_int32(second);
+  gfaz::Codec::delta_decode_int32(first);
+  gfaz::Codec::delta_decode_int32(second);
 
   size_t offset = 0;
   for (const auto &range : data.layer_rule_ranges) {
@@ -222,14 +222,14 @@ std::map<uint32_t, uint64_t> build_rulebook(const CompressedData &data) {
   return rulebook;
 }
 
-CompressedData compress_gfa_gpu(const std::string &gfa_file_path,
+gfaz::CompressedData compress_gfa_gpu(const std::string &gfa_file_path,
                                 int num_rounds,
                                 GpuCompressionOptions options) {
   ScopedOMPThreads omp_scope(options.num_threads);
   const auto total_start = Clock::now();
   const auto parse_start = Clock::now();
   GfaParser parser;
-  GfaGraph graph = parser.parse(gfa_file_path, options.num_threads);
+  gfaz::GfaGraph graph = parser.parse(gfa_file_path, options.num_threads);
   const auto parse_end = Clock::now();
   log_gpu_memory_checkpoint("after parse");
 
@@ -238,7 +238,7 @@ CompressedData compress_gfa_gpu(const std::string &gfa_file_path,
   const auto layout_end = Clock::now();
   log_gpu_memory_checkpoint("after GPU layout conversion");
 
-  CompressedData data = compress_gpu_graph(gpu_graph, num_rounds, options);
+  gfaz::CompressedData data = compress_gpu_graph(gpu_graph, num_rounds, options);
 
   if (g_debug_compression) {
     std::cerr << "[GPU Compress] parse+layout: parse=" << std::fixed
@@ -251,7 +251,7 @@ CompressedData compress_gfa_gpu(const std::string &gfa_file_path,
   return data;
 }
 
-CompressedData compress_gpu_graph(const GfaGraph_gpu &gpu_graph,
+gfaz::CompressedData compress_gpu_graph(const GfaGraph_gpu &gpu_graph,
                                   int num_rounds,
                                   GpuCompressionOptions options) {
   ScopedOMPThreads omp_scope(options.num_threads);
@@ -259,7 +259,7 @@ CompressedData compress_gpu_graph(const GfaGraph_gpu &gpu_graph,
   GpuPathCompressionDebugInfo path_debug;
   GpuMetadataCompressionDebugInfo metadata_debug;
 
-  CompressedData data =
+  gfaz::CompressedData data =
       run_path_compression_gpu(gpu_graph.paths, gpu_graph.num_paths,
                                num_rounds, options,
                                g_debug_compression ? &path_debug : nullptr);

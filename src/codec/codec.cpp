@@ -7,6 +7,8 @@
 #include <omp.h>
 #endif
 
+namespace gfaz {
+
 namespace Codec {
 
 // --- Delta Encoding ---
@@ -550,3 +552,5 @@ zstd_decompress_float_vector(const ZstdCompressedBlock &block) {
 }
 
 } // namespace Codec
+
+} // namespace gfaz

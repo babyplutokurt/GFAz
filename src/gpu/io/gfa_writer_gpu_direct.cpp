@@ -10,50 +10,50 @@ namespace gpu_decompression {
 namespace {
 
 using Clock = std::chrono::high_resolution_clock;
-using gfz::runtime_utils::elapsed_ms;
-using namespace gfz::gfa_write_utils;
+using gfaz::runtime_utils::elapsed_ms;
+using namespace gfaz::gfa_write_utils;
 
 } // namespace
 
 GpuDirectWriterStaticFields
-decode_gpu_direct_writer_static_fields(const CompressedData &data) {
+decode_gpu_direct_writer_static_fields(const gfaz::CompressedData &data) {
   const auto start = Clock::now();
 
   GpuDirectWriterStaticFields fields;
   fields.segment_sequences =
-      Codec::zstd_decompress_string(data.segment_sequences_zstd);
+      gfaz::Codec::zstd_decompress_string(data.segment_sequences_zstd);
   fields.segment_lengths =
-      Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
+      gfaz::Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
   fields.segment_optional_fields.reserve(data.segment_optional_fields_zstd.size());
   for (const auto &c : data.segment_optional_fields_zstd)
     fields.segment_optional_fields.push_back(decompress_optional_column(c));
 
   fields.link_from_ids =
-      Codec::decompress_delta_varint_uint32(data.link_from_ids_zstd,
+      gfaz::Codec::decompress_delta_varint_uint32(data.link_from_ids_zstd,
                                             data.num_links);
   fields.link_to_ids =
-      Codec::decompress_delta_varint_uint32(data.link_to_ids_zstd,
+      gfaz::Codec::decompress_delta_varint_uint32(data.link_to_ids_zstd,
                                             data.num_links);
   fields.link_from_orients =
-      Codec::decompress_orientations(data.link_from_orients_zstd, data.num_links);
+      gfaz::Codec::decompress_orientations(data.link_from_orients_zstd, data.num_links);
   fields.link_to_orients =
-      Codec::decompress_orientations(data.link_to_orients_zstd, data.num_links);
+      gfaz::Codec::decompress_orientations(data.link_to_orients_zstd, data.num_links);
   fields.link_overlap_nums =
-      Codec::zstd_decompress_uint32_vector(data.link_overlap_nums_zstd);
+      gfaz::Codec::zstd_decompress_uint32_vector(data.link_overlap_nums_zstd);
   fields.link_overlap_ops =
-      Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
+      gfaz::Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
   fields.link_optional_fields.reserve(data.link_optional_fields_zstd.size());
   for (const auto &c : data.link_optional_fields_zstd)
     fields.link_optional_fields.push_back(decompress_optional_column(c));
 
   if (data.num_jumps > 0) {
-    fields.jump_from_ids = Codec::decompress_delta_varint_uint32(
+    fields.jump_from_ids = gfaz::Codec::decompress_delta_varint_uint32(
         data.jump_from_ids_zstd, data.num_jumps);
-    fields.jump_to_ids = Codec::decompress_delta_varint_uint32(
+    fields.jump_to_ids = gfaz::Codec::decompress_delta_varint_uint32(
         data.jump_to_ids_zstd, data.num_jumps);
-    fields.jump_from_orients = Codec::decompress_orientations(
+    fields.jump_from_orients = gfaz::Codec::decompress_orientations(
         data.jump_from_orients_zstd, data.num_jumps);
-    fields.jump_to_orients = Codec::decompress_orientations(
+    fields.jump_to_orients = gfaz::Codec::decompress_orientations(
         data.jump_to_orients_zstd, data.num_jumps);
     fields.jump_distances = decompress_string_column(
         data.jump_distances_zstd, data.jump_distance_lengths_zstd);
@@ -62,16 +62,16 @@ decode_gpu_direct_writer_static_fields(const CompressedData &data) {
   }
 
   if (data.num_containments > 0) {
-    fields.containment_container_ids = Codec::decompress_delta_varint_uint32(
+    fields.containment_container_ids = gfaz::Codec::decompress_delta_varint_uint32(
         data.containment_container_ids_zstd, data.num_containments);
-    fields.containment_contained_ids = Codec::decompress_delta_varint_uint32(
+    fields.containment_contained_ids = gfaz::Codec::decompress_delta_varint_uint32(
         data.containment_contained_ids_zstd, data.num_containments);
-    fields.containment_container_orients = Codec::decompress_orientations(
+    fields.containment_container_orients = gfaz::Codec::decompress_orientations(
         data.containment_container_orients_zstd, data.num_containments);
-    fields.containment_contained_orients = Codec::decompress_orientations(
+    fields.containment_contained_orients = gfaz::Codec::decompress_orientations(
         data.containment_contained_orients_zstd, data.num_containments);
     fields.containment_positions =
-        Codec::zstd_decompress_uint32_vector(data.containment_positions_zstd);
+        gfaz::Codec::zstd_decompress_uint32_vector(data.containment_positions_zstd);
     fields.containment_overlaps = decompress_string_column(
         data.containment_overlaps_zstd, data.containment_overlap_lengths_zstd);
     fields.containment_rest_fields = decompress_string_column(
@@ -84,7 +84,7 @@ decode_gpu_direct_writer_static_fields(const CompressedData &data) {
   return fields;
 }
 
-GpuPathWriterMetadata decode_gpu_path_writer_metadata(const CompressedData &data) {
+GpuPathWriterMetadata decode_gpu_path_writer_metadata(const gfaz::CompressedData &data) {
   const auto start = Clock::now();
 
   GpuPathWriterMetadata metadata;
@@ -96,26 +96,26 @@ GpuPathWriterMetadata decode_gpu_path_writer_metadata(const CompressedData &data
   return metadata;
 }
 
-GpuWalkWriterMetadata decode_gpu_walk_writer_metadata(const CompressedData &data) {
+GpuWalkWriterMetadata decode_gpu_walk_writer_metadata(const gfaz::CompressedData &data) {
   const auto start = Clock::now();
 
   GpuWalkWriterMetadata metadata;
   metadata.sample_ids = decompress_string_column(data.walk_sample_ids_zstd,
                                                  data.walk_sample_id_lengths_zstd);
   metadata.hap_indices =
-      Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
+      gfaz::Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
   metadata.seq_ids = decompress_string_column(data.walk_seq_ids_zstd,
                                               data.walk_seq_id_lengths_zstd);
-  metadata.seq_starts = Codec::decompress_varint_int64(
+  metadata.seq_starts = gfaz::Codec::decompress_varint_int64(
       data.walk_seq_starts_zstd, data.walk_lengths.size());
-  metadata.seq_ends = Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
+  metadata.seq_ends = gfaz::Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
                                                      data.walk_lengths.size());
   metadata.decode_ms = elapsed_ms(start, Clock::now());
   return metadata;
 }
 
 void write_gpu_direct_writer_static_fields(
-    std::ofstream &out, const CompressedData &data,
+    std::ofstream &out, const gfaz::CompressedData &data,
     const GpuDirectWriterStaticFields &fields) {
   if (!data.header_line.empty())
     out << data.header_line << '\n';

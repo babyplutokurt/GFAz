@@ -5,7 +5,7 @@
 #include "model/gfa_graph.hpp"
 
 
-void decompress_gfa(const CompressedData &data, GfaGraph &output_graph,
+void decompress_gfa(const gfaz::CompressedData &data, gfaz::GfaGraph &output_graph,
                     int num_threads = 0);
 
 #endif

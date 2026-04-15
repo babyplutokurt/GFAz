@@ -8,7 +8,7 @@
 
 
 void write_gfa_from_compressed_data_gpu(
-    const CompressedData &data,
+    const gfaz::CompressedData &data,
     const std::string &output_path,
     gpu_decompression::GpuDecompressionOptions options = {});
 #endif

@@ -46,7 +46,7 @@ int do_extract_path(int argc, char *argv[]) {
     path_names.push_back(argv[i]);
 
   try {
-    const CompressedData data = deserialize_compressed_data(input_path);
+    const gfaz::CompressedData data = gfaz::deserialize_compressed_data(input_path);
     for (const auto &line :
          extract_path_lines_by_name(data, path_names, num_threads)) {
       std::cout << line;

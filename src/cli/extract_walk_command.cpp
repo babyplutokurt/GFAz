@@ -65,7 +65,7 @@ int do_extract_walk(int argc, char *argv[]) {
       walk_keys.push_back(std::move(walk_key));
     }
 
-    const CompressedData data = deserialize_compressed_data(input_path);
+    const gfaz::CompressedData data = gfaz::deserialize_compressed_data(input_path);
     for (const auto &line : extract_walk_lines(data, walk_keys, num_threads)) {
       std::cout << line;
     }

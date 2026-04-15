@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 CPU direct-writer round-trip test:
-1) Parse GFA to original GfaGraph
+1) Parse GFA to original gfaz::GfaGraph
 2) Compress and serialize to a temporary .gfaz file
 3) Deserialize and write GFA through the CPU direct-writer path
 4) Parse the streamed GFA output
@@ -122,7 +122,7 @@ def main():
         streamed_graph = gfa_lib.parse(tmp_out_path)
         t_reparse_end = time.perf_counter()
 
-        print("\n[5] Verify original vs streamed-output GfaGraph")
+        print("\n[5] Verify original vs streamed-output gfaz::GfaGraph")
         ok = gfa_lib.verify_round_trip(original_graph, streamed_graph)
         if not ok:
             print("❌ FAIL CPU direct-writer round-trip verification FAILED")

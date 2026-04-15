@@ -9,7 +9,7 @@
 
 namespace gpu_compression {
 
-using gfz::runtime_utils::format_size;
+using gfaz::runtime_utils::format_size;
 
 GpuTraversalCompressionPath resolve_gpu_traversal_compression_path(
     const FlattenedPaths &paths, GpuCompressionOptions options,
@@ -50,7 +50,7 @@ GpuTraversalCompressionPath resolve_gpu_traversal_compression_path(
   return GpuTraversalCompressionPath::kRollingScheduler;
 }
 
-CompressedData compress_gpu_traversals(
+gfaz::CompressedData compress_gpu_traversals(
     const FlattenedPaths &paths, uint32_t num_paths, int num_rounds,
     GpuCompressionOptions options, GpuPathCompressionDebugInfo *debug_info) {
   size_t chunk_bytes = 0;

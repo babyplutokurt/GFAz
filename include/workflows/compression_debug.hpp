@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace gfz::compression_debug {
+namespace gfaz::compression_debug {
 
 struct GrammarRoundDebugInfo {
   int round = 0;
@@ -64,21 +64,21 @@ void print_traversal_reduction(const TraversalReductionDebugInfo &info);
 void log_cpu_memory_checkpoint(const std::string &label);
 
 CompressionRatio sum_optional_field_ratio(
-    const std::vector<CompressedOptionalFieldColumn> &cols);
+    const std::vector<gfaz::CompressedOptionalFieldColumn> &cols);
 
-CompressionRatio block_ratio(const ZstdCompressedBlock &block);
+CompressionRatio block_ratio(const gfaz::ZstdCompressedBlock &block);
 
 CompressionRatio sum_ratios(std::initializer_list<CompressionRatio> ratios);
 
-CompressionRatio collect_rules_ratio(const CompressedData &data);
-CompressionRatio collect_path_ratio(const CompressedData &data);
-CompressionRatio collect_walk_ratio(const CompressedData &data);
-CompressionRatio collect_segment_link_ratio(const CompressedData &data);
-CompressionRatio collect_optional_field_ratio(const CompressedData &data);
-CompressionRatio collect_jump_ratio(const CompressedData &data);
-CompressionRatio collect_containment_ratio(const CompressedData &data);
+CompressionRatio collect_rules_ratio(const gfaz::CompressedData &data);
+CompressionRatio collect_path_ratio(const gfaz::CompressedData &data);
+CompressionRatio collect_walk_ratio(const gfaz::CompressedData &data);
+CompressionRatio collect_segment_link_ratio(const gfaz::CompressedData &data);
+CompressionRatio collect_optional_field_ratio(const gfaz::CompressedData &data);
+CompressionRatio collect_jump_ratio(const gfaz::CompressedData &data);
+CompressionRatio collect_containment_ratio(const gfaz::CompressedData &data);
 
 void print_cpu_compression_timing(
     const CpuCompressionTimingDebugInfo &info);
 
-} // namespace gfz::compression_debug
+} // namespace gfaz::compression_debug

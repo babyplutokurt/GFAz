@@ -5,11 +5,11 @@
 #include <iomanip>
 #include <iostream>
 
-namespace gfz::decompression_debug {
+namespace gfaz::decompression_debug {
 
 namespace {
 
-using gfz::runtime_utils::format_memory_snapshot;
+using gfaz::runtime_utils::format_memory_snapshot;
 
 } // namespace
 
@@ -45,7 +45,7 @@ void print_cpu_decompression_timing(
 }
 
 void print_cpu_decompression_summary(const std::string &scope_label,
-                                     const CompressedData &data) {
+                                     const gfaz::CompressedData &data) {
   if (!gfaz_debug_enabled())
     return;
 
@@ -63,7 +63,7 @@ void print_cpu_decompression_summary(const std::string &scope_label,
 }
 
 void print_cpu_decompression_summary(const std::string &scope_label,
-                                     const GfaGraph &graph, size_t num_rules,
+                                     const gfaz::GfaGraph &graph, size_t num_rules,
                                      int delta_round) {
   if (!gfaz_debug_enabled())
     return;
@@ -79,4 +79,4 @@ void print_cpu_decompression_summary(const std::string &scope_label,
             << std::endl;
 }
 
-} // namespace gfz::decompression_debug
+} // namespace gfaz::decompression_debug

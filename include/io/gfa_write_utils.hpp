@@ -10,29 +10,29 @@
 #include <utility>
 #include <vector>
 
-namespace gfz::gfa_write_utils {
+namespace gfaz::gfa_write_utils {
 
 using FieldOffsets = std::vector<std::vector<size_t>>;
 using SequenceOffsets = std::vector<size_t>;
 
-FieldOffsets build_field_offsets(const std::vector<OptionalFieldColumn> &cols);
+FieldOffsets build_field_offsets(const std::vector<gfaz::OptionalFieldColumn> &cols);
 
-std::string format_optional_fields(const std::vector<OptionalFieldColumn> &cols,
+std::string format_optional_fields(const std::vector<gfaz::OptionalFieldColumn> &cols,
                                    const FieldOffsets &offsets, size_t index);
 
 void append_numeric_node_name(std::string &out, uint32_t node_id);
 
 std::vector<std::string>
-decompress_string_column(const ZstdCompressedBlock &strings_zstd,
-                         const ZstdCompressedBlock &lengths_zstd);
+decompress_string_column(const gfaz::ZstdCompressedBlock &strings_zstd,
+                         const gfaz::ZstdCompressedBlock &lengths_zstd);
 
-OptionalFieldColumn
-decompress_optional_column(const CompressedOptionalFieldColumn &c);
+gfaz::OptionalFieldColumn
+decompress_optional_column(const gfaz::CompressedOptionalFieldColumn &c);
 
 SequenceOffsets build_offsets(const std::vector<uint32_t> &lengths);
 
 std::pair<std::vector<int32_t>, std::vector<int32_t>>
-decode_rules(const CompressedData &data);
+decode_rules(const gfaz::CompressedData &data);
 
 std::string format_path_line_numeric(const std::string &path_name,
                                      const int32_t *path_data, size_t path_size,
@@ -48,7 +48,7 @@ std::string format_walk_line_numeric(const std::string &sample_id,
 void write_segments_numeric(std::ofstream &out,
                             const std::string &segment_sequences,
                             const std::vector<uint32_t> &segment_lengths,
-                            const std::vector<OptionalFieldColumn>
+                            const std::vector<gfaz::OptionalFieldColumn>
                                 &segment_optional_fields,
                             const FieldOffsets &segment_offsets);
 
@@ -59,7 +59,7 @@ void write_links_numeric(
     const std::vector<char> &link_to_orients,
     const std::vector<uint32_t> &link_overlap_nums,
     const std::vector<char> &link_overlap_ops,
-    const std::vector<OptionalFieldColumn> &link_optional_fields,
+    const std::vector<gfaz::OptionalFieldColumn> &link_optional_fields,
     const FieldOffsets &link_offsets);
 
 void write_jumps_numeric(std::ofstream &out,
@@ -80,4 +80,4 @@ void write_containments_numeric(
     const std::vector<std::string> &containment_overlaps,
     const std::vector<std::string> &containment_rest_fields);
 
-} // namespace gfz::gfa_write_utils
+} // namespace gfaz::gfa_write_utils

@@ -18,7 +18,7 @@ namespace gpu_decompression {
 namespace {
 
 using Clock = std::chrono::high_resolution_clock;
-using gfz::runtime_utils::elapsed_ms;
+using gfaz::runtime_utils::elapsed_ms;
 
 std::vector<int32_t>
 decode_gpu_traversal_without_rules(const GpuTraversalPayload &payload) {
@@ -74,7 +74,7 @@ GpuTraversalDecompressionPath resolve_gpu_traversal_decompression_path(
 }
 
 std::vector<int32_t> decompress_gpu_traversal_materialized(
-    const ZstdCompressedBlock &encoded_block,
+    const gfaz::ZstdCompressedBlock &encoded_block,
     const std::vector<uint32_t> &final_lengths,
     const GpuTraversalRulebook &rulebook, GpuDecompressionOptions options,
     GpuTraversalDecodeStats *stats) {
@@ -120,7 +120,7 @@ std::vector<int32_t> decompress_gpu_traversal_materialized(
 }
 
 void decompress_gpu_traversal_rolling_direct_writer(
-    const ZstdCompressedBlock &encoded_block,
+    const gfaz::ZstdCompressedBlock &encoded_block,
     const std::vector<uint32_t> &final_lengths,
     const GpuTraversalRulebook &rulebook, GpuDecompressionOptions options,
     RollingPathChunkConsumer consumer,

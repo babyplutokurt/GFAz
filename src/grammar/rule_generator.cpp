@@ -15,7 +15,7 @@ RuleGenerator::RuleGenerator() {}
 // DEPRECATED: This function is kept for legacy compatibility but is not used in
 // the current workflow. See generate_rules_2mer_combined below.
 CompressionRules2Mer RuleGenerator::generate_rules_2mer(
-    const std::vector<std::vector<NodeId>> &paths, uint32_t starting_id,
+    const std::vector<std::vector<gfaz::NodeId>> &paths, uint32_t starting_id,
     size_t freq_threshold, int num_threads) {
 
   CompressionRules2Mer rules;
@@ -146,8 +146,8 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer(
 }
 
 CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
-    const std::vector<std::vector<NodeId>> &paths,
-    const std::vector<std::vector<NodeId>> &walks, uint32_t starting_id,
+    const std::vector<std::vector<gfaz::NodeId>> &paths,
+    const std::vector<std::vector<gfaz::NodeId>> &walks, uint32_t starting_id,
     size_t freq_threshold, int num_threads) {
 
   CompressionRules2Mer rules;
@@ -161,7 +161,7 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
 
   // Helper lambda to process a sequence vector
   auto process_sequences =
-      [&](const std::vector<std::vector<NodeId>> &sequences) {
+      [&](const std::vector<std::vector<gfaz::NodeId>> &sequences) {
 #ifdef _OPENMP
         int actual_threads = resolve_omp_thread_count(num_threads);
 

@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <string>
 
-namespace gfz::runtime_utils {
+namespace gfaz::runtime_utils {
 
 struct ProcessMemorySnapshot {
   size_t vm_rss_kb = 0;
@@ -26,4 +26,4 @@ ProcessMemorySnapshot read_process_memory_snapshot();
 
 std::string format_memory_snapshot(const ProcessMemorySnapshot &snapshot);
 
-} // namespace gfz::runtime_utils
+} // namespace gfaz::runtime_utils

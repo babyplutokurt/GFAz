@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 CPU legacy materialized round-trip test:
-1) Parse GFA to original GfaGraph
+1) Parse GFA to original gfaz::GfaGraph
 2) Compress and serialize to a temporary .gfaz file
 3) Deserialize and decompress through the CPU legacy materialized path
-4) Verify original vs decompressed GfaGraph
+4) Verify original vs decompressed gfaz::GfaGraph
 """
 import argparse
 import os
@@ -108,7 +108,7 @@ def main():
         decompressed_graph = gfa_lib.decompress(loaded, num_threads=args.threads)
         t_decompress_end = time.perf_counter()
 
-        print("\n[4] Verify original vs decompressed GfaGraph")
+        print("\n[4] Verify original vs decompressed gfaz::GfaGraph")
         ok = gfa_lib.verify_round_trip(original_graph, decompressed_graph)
         if not ok:
             print("❌ CPU legacy materialized round-trip verification FAILED")

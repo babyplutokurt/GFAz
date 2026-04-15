@@ -28,7 +28,7 @@ namespace {
 
 void append_decoded_traversal_column(
     std::vector<int32_t> &decoded_nodes, std::vector<uint32_t> &decoded_lengths,
-    const ZstdCompressedBlock &encoded_block,
+    const gfaz::ZstdCompressedBlock &encoded_block,
     const std::vector<uint32_t> &final_lengths,
     const GpuTraversalRulebook &rulebook, GpuDecompressionOptions options) {
   if (encoded_block.payload.empty() || final_lengths.empty()) {
@@ -44,7 +44,7 @@ void append_decoded_traversal_column(
 
 } // namespace
 
-FlattenedPaths decompress_paths_gpu(const CompressedData &data,
+FlattenedPaths decompress_paths_gpu(const gfaz::CompressedData &data,
                                     GpuDecompressionOptions options) {
   FlattenedPaths result;
   const GpuTraversalRulebook rulebook = prepare_gpu_traversal_rulebook(data);
@@ -54,7 +54,7 @@ FlattenedPaths decompress_paths_gpu(const CompressedData &data,
   return result;
 }
 
-GfaGraph_gpu decompress_to_gpu_layout(const CompressedData &data,
+GfaGraph_gpu decompress_to_gpu_layout(const gfaz::CompressedData &data,
                                       GpuDecompressionOptions options) {
   auto start = Clock::now();
 
@@ -79,7 +79,7 @@ GfaGraph_gpu decompress_to_gpu_layout(const CompressedData &data,
   return result;
 }
 
-GfaGraph decompress_to_host_graph(const CompressedData &data,
+gfaz::GfaGraph decompress_to_host_graph(const gfaz::CompressedData &data,
                                   GpuDecompressionOptions options) {
   return convert_from_gpu_layout(decompress_to_gpu_layout(data, options));
 }

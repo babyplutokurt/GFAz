@@ -24,9 +24,9 @@ namespace gpu_compression {
 namespace {
 
 using Clock = std::chrono::high_resolution_clock;
-using gfz::runtime_utils::elapsed_ms;
+using gfaz::runtime_utils::elapsed_ms;
 
-void finalize_traversal_columns(CompressedData &data,
+void finalize_traversal_columns(gfaz::CompressedData &data,
                                 const std::vector<int32_t> &encoded,
                                 const std::vector<uint32_t> &lengths,
                                 const std::vector<uint32_t> &original,
@@ -50,9 +50,9 @@ void finalize_traversal_columns(CompressedData &data,
                                      static_cast<std::ptrdiff_t>(split_offset),
                                  encoded.end());
 
-  data.paths_zstd = Codec::zstd_compress_int32_vector(path_data);
+  data.paths_zstd = gfaz::Codec::zstd_compress_int32_vector(path_data);
   if (!walk_data.empty())
-    data.walks_zstd = Codec::zstd_compress_int32_vector(walk_data);
+    data.walks_zstd = gfaz::Codec::zstd_compress_int32_vector(walk_data);
 }
 
 struct HistogramLevel {
@@ -322,10 +322,10 @@ void collapse_histogram_levels(
 
 } // namespace
 
-CompressedData compress_gpu_traversals_rolling_scheduler(
+gfaz::CompressedData compress_gpu_traversals_rolling_scheduler(
     const FlattenedPaths &paths, uint32_t num_paths, int num_rounds,
     size_t chunk_bytes, GpuPathCompressionDebugInfo *debug_info) {
-  CompressedData result;
+  gfaz::CompressedData result;
   const auto total_start = Clock::now();
 
   if (debug_info != nullptr) {
@@ -578,7 +578,7 @@ CompressedData compress_gpu_traversals_rolling_scheduler(
     round_debug.remap_ms = elapsed_ms(stage_start, Clock::now());
 
     result.layer_rule_ranges.push_back(
-        LayerRuleRange{2, next_start_id, next_start_id + num_rules_after_compact,
+        gfaz::LayerRuleRange{2, next_start_id, next_start_id + num_rules_after_compact,
                        all_rules.size() * 2, num_rules_after_compact * 2});
 
     std::vector<uint64_t> h_round_rules(num_rules_after_compact);

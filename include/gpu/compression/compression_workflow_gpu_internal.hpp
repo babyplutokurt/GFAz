@@ -14,21 +14,21 @@ namespace gpu_compression {
 bool scheduler_debug_enabled();
 bool compression_debug_enabled();
 
-ZstdCompressedBlock compress_uint32_gpu(const std::vector<uint32_t> &input,
+gfaz::ZstdCompressedBlock compress_uint32_gpu(const std::vector<uint32_t> &input,
                                         const char *label = "uint32_vec");
 
-ZstdCompressedBlock compress_int32_gpu(const std::vector<int32_t> &input,
+gfaz::ZstdCompressedBlock compress_int32_gpu(const std::vector<int32_t> &input,
                                        const char *label = "int32_vec");
 
-ZstdCompressedBlock
+gfaz::ZstdCompressedBlock
 compress_int32_device_gpu(const thrust::device_vector<int32_t> &d_input,
                           const char *label = "int32_device");
 
-CompressedData compress_gpu_traversals_legacy_whole_device(
+gfaz::CompressedData compress_gpu_traversals_legacy_whole_device(
     const FlattenedPaths &paths, uint32_t num_paths, int num_rounds,
     GpuPathCompressionDebugInfo *debug_info = nullptr);
 
-CompressedData compress_gpu_traversals_rolling_scheduler(
+gfaz::CompressedData compress_gpu_traversals_rolling_scheduler(
     const FlattenedPaths &paths, uint32_t num_paths, int num_rounds,
     size_t chunk_bytes, GpuPathCompressionDebugInfo *debug_info = nullptr);
 

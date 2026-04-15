@@ -8,21 +8,21 @@
 #include <string>
 #include <vector>
 
-namespace gfz::compression_utils {
+namespace gfaz::compression_utils {
 
 inline constexpr const char *kCompressionErrorPrefix = "Compression workflow error: ";
 
-size_t total_node_count(const std::vector<std::vector<NodeId>> &sequences);
+size_t total_node_count(const std::vector<std::vector<gfaz::NodeId>> &sequences);
 
 void append_string_column(const std::vector<std::string> &values,
                           std::string &concatenated,
                           std::vector<uint32_t> &lengths);
 
 void flatten_traversal_sequences(
-    const std::vector<std::vector<NodeId>> &sequences,
+    const std::vector<std::vector<gfaz::NodeId>> &sequences,
     std::vector<int32_t> &flattened, std::vector<uint32_t> &lengths);
 
-void flatten_path_metadata(const std::vector<std::vector<NodeId>> &paths,
+void flatten_path_metadata(const std::vector<std::vector<gfaz::NodeId>> &paths,
                            const std::vector<std::string> &path_names,
                            const std::vector<std::string> &path_overlaps,
                            std::string &names_concat,
@@ -30,7 +30,7 @@ void flatten_path_metadata(const std::vector<std::vector<NodeId>> &paths,
                            std::string &overlaps_concat,
                            std::vector<uint32_t> &overlap_lengths);
 
-void flatten_walk_string_metadata(const WalkData &walks,
+void flatten_walk_string_metadata(const gfaz::WalkData &walks,
                                   std::string &sample_ids_concat,
                                   std::vector<uint32_t> &sample_id_lengths,
                                   std::string &seq_ids_concat,
@@ -41,10 +41,10 @@ void flatten_segment_sequences(const std::vector<std::string> &sequences,
                                std::vector<uint32_t> &lengths,
                                uint32_t max_id);
 
-CompressedOptionalFieldColumn
-compress_optional_column(const OptionalFieldColumn &col);
+gfaz::CompressedOptionalFieldColumn
+compress_optional_column(const gfaz::OptionalFieldColumn &col);
 
-void flatten_paths(const std::vector<std::vector<NodeId>> &paths,
+void flatten_paths(const std::vector<std::vector<gfaz::NodeId>> &paths,
                    const std::vector<std::string> &path_names,
                    const std::vector<std::string> &path_overlaps,
                    std::vector<int32_t> &flattened,
@@ -59,18 +59,18 @@ void flatten_segments(const std::vector<std::string> &sequences,
 
 void process_rules(const std::vector<Packed2mer> &rulebook,
                    uint32_t layer_start_id,
-                   const std::vector<LayerRuleRange> &ranges,
+                   const std::vector<gfaz::LayerRuleRange> &ranges,
                    std::vector<int32_t> &first, std::vector<int32_t> &second);
 
-void flatten_walks(const std::vector<std::vector<NodeId>> &walks,
+void flatten_walks(const std::vector<std::vector<gfaz::NodeId>> &walks,
                    std::vector<int32_t> &flattened,
                    std::vector<uint32_t> &lengths);
 
-void remap_rule_ids(std::vector<std::vector<NodeId>> &sequences,
+void remap_rule_ids(std::vector<std::vector<gfaz::NodeId>> &sequences,
                     uint32_t rules_start_id,
                     const std::vector<uint32_t> &id_map);
 
-void print_compression_stats(const CompressedData &d, size_t num_segments,
+void print_compression_stats(const gfaz::CompressedData &d, size_t num_segments,
                              bool show_stats);
 
-} // namespace gfz::compression_utils
+} // namespace gfaz::compression_utils

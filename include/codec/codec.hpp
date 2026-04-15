@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+namespace gfaz {
 
 namespace Codec {
 
@@ -61,5 +62,7 @@ std::vector<float>
 zstd_decompress_float_vector(const ZstdCompressedBlock &block);
 
 } // namespace Codec
+
+} // namespace gfaz
 
 #endif // CODEC_HPP

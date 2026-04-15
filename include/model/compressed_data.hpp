@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+namespace gfaz {
+
 struct LayerRuleRange {
   int k;                   // k-mer size (always 2 for 2-mer grammar)
   uint32_t start_id;       // First rule ID in this layer
@@ -116,5 +118,7 @@ struct CompressedData {
   ZstdCompressedBlock walk_seq_starts_zstd;
   ZstdCompressedBlock walk_seq_ends_zstd;
 };
+
+} // namespace gfaz
 
 #endif // MODEL_COMPRESSED_DATA_HPP

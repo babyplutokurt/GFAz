@@ -7,7 +7,7 @@
 namespace gpu_compression {
 
 void compress_graph_metadata_gpu(const GfaGraph_gpu &gpu_graph,
-                                 CompressedData &data,
+                                 gfaz::CompressedData &data,
                                  GpuMetadataCompressionDebugInfo
                                      *debug_info = nullptr);
 
@@ -15,7 +15,7 @@ void compress_graph_metadata_gpu(const GfaGraph_gpu &gpu_graph,
 
 namespace gpu_decompression {
 
-void decompress_graph_metadata_gpu(const CompressedData &data,
+void decompress_graph_metadata_gpu(const gfaz::CompressedData &data,
                                    GfaGraph_gpu &result);
 
 } // namespace gpu_decompression

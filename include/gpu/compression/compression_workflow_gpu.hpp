@@ -70,9 +70,9 @@ struct GpuMetadataCompressionDebugInfo {
  *
  * @param paths Input flattened paths (host memory)
  * @param num_rounds Maximum number of compression rounds
- * @return CompressedData containing shared Zstd-compressed path/walk columns
+ * @return gfaz::CompressedData containing shared Zstd-compressed path/walk columns
  */
-CompressedData run_path_compression_gpu(
+gfaz::CompressedData run_path_compression_gpu(
     const FlattenedPaths &paths, uint32_t num_paths, int num_rounds,
     GpuCompressionOptions options = {},
     GpuPathCompressionDebugInfo *debug_info = nullptr);
@@ -82,7 +82,7 @@ CompressedData run_path_compression_gpu(
  * Mirrors CPU compress_gfa but uses GPU path compression and shared CPU Zstd
  * for final entropy coding.
  */
-CompressedData compress_gfa_gpu(const std::string &gfa_file_path,
+gfaz::CompressedData compress_gfa_gpu(const std::string &gfa_file_path,
                                 int num_rounds,
                                 GpuCompressionOptions options = {});
 
@@ -92,9 +92,9 @@ CompressedData compress_gfa_gpu(const std::string &gfa_file_path,
  *
  * @param gpu_graph Pre-converted GPU graph
  * @param num_rounds Number of compression rounds
- * @return CompressedData containing all compressed fields
+ * @return gfaz::CompressedData containing all compressed fields
  */
-CompressedData compress_gpu_graph(
+gfaz::CompressedData compress_gpu_graph(
     const GfaGraph_gpu &gpu_graph, int num_rounds,
     GpuCompressionOptions options = {});
 
@@ -104,10 +104,10 @@ void set_gpu_compression_debug(bool enabled);
  * Build a rulebook map from the flat rules vector and layer ranges.
  * Useful for round-trip verification with CPU reconstruction.
  *
- * @param data CompressedData containing all_rules and layer ranges
+ * @param data gfaz::CompressedData containing all_rules and layer ranges
  * @return Map from rule_id -> packed_2mer
  */
-std::map<uint32_t, uint64_t> build_rulebook(const CompressedData &data);
+std::map<uint32_t, uint64_t> build_rulebook(const gfaz::CompressedData &data);
 
 } // namespace gpu_compression
 

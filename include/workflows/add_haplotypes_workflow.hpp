@@ -6,7 +6,7 @@
 #include <string>
 
 
-void add_haplotypes(CompressedData &data, const std::string &haplotypes_path,
+void add_haplotypes(gfaz::CompressedData &data, const std::string &haplotypes_path,
                     int num_threads = 0);
 
 #endif

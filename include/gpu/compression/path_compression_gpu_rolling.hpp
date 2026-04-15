@@ -5,7 +5,7 @@
 
 namespace gpu_compression {
 
-CompressedData compress_gpu_traversals_rolling_scheduler(
+gfaz::CompressedData compress_gpu_traversals_rolling_scheduler(
     const FlattenedPaths &paths, uint32_t num_paths, int num_rounds,
     size_t chunk_bytes, GpuPathCompressionDebugInfo *debug_info);
 

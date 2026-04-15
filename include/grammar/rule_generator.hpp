@@ -32,14 +32,14 @@ public:
 
   // Generate 2-mer rules from paths
   CompressionRules2Mer
-  generate_rules_2mer(const std::vector<std::vector<NodeId>> &paths,
+  generate_rules_2mer(const std::vector<std::vector<gfaz::NodeId>> &paths,
                       uint32_t starting_id, size_t freq_threshold,
                       int num_threads = 0);
 
   // Generate 2-mer rules from both paths and walks (zero-copy)
   CompressionRules2Mer
-  generate_rules_2mer_combined(const std::vector<std::vector<NodeId>> &paths,
-                               const std::vector<std::vector<NodeId>> &walks,
+  generate_rules_2mer_combined(const std::vector<std::vector<gfaz::NodeId>> &paths,
+                               const std::vector<std::vector<gfaz::NodeId>> &walks,
                                uint32_t starting_id, size_t freq_threshold,
                                int num_threads = 0);
 };

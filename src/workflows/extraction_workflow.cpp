@@ -32,11 +32,11 @@ void reconstruct_strings(const std::string &concat,
 }
 
 std::vector<std::string>
-decompress_string_column(const ZstdCompressedBlock &strings_zstd,
-                         const ZstdCompressedBlock &lengths_zstd) {
+decompress_string_column(const gfaz::ZstdCompressedBlock &strings_zstd,
+                         const gfaz::ZstdCompressedBlock &lengths_zstd) {
   std::vector<std::string> out;
-  reconstruct_strings(Codec::zstd_decompress_string(strings_zstd),
-                      Codec::zstd_decompress_uint32_vector(lengths_zstd), out);
+  reconstruct_strings(gfaz::Codec::zstd_decompress_string(strings_zstd),
+                      gfaz::Codec::zstd_decompress_uint32_vector(lengths_zstd), out);
   return out;
 }
 
@@ -47,7 +47,7 @@ size_t compute_offset(const std::vector<uint32_t> &lengths, size_t index) {
   return offset;
 }
 
-std::vector<NodeId>
+std::vector<gfaz::NodeId>
 extract_encoded_sequence_from_flat(const std::vector<int32_t> &flat,
                                    const std::vector<uint32_t> &lengths,
                                    size_t index) {
@@ -63,7 +63,7 @@ extract_encoded_sequence_from_flat(const std::vector<int32_t> &flat,
                              "flattened sequence block is truncated");
   }
 
-  return std::vector<NodeId>(flat.begin() + static_cast<std::ptrdiff_t>(offset),
+  return std::vector<gfaz::NodeId>(flat.begin() + static_cast<std::ptrdiff_t>(offset),
                              flat.begin() +
                                  static_cast<std::ptrdiff_t>(offset + length));
 }
@@ -71,7 +71,7 @@ extract_encoded_sequence_from_flat(const std::vector<int32_t> &flat,
 void expand_rule(uint32_t rule_id, bool reverse,
                  const std::vector<int32_t> &first,
                  const std::vector<int32_t> &second, uint32_t min_id,
-                 uint32_t max_id, std::vector<NodeId> &out) {
+                 uint32_t max_id, std::vector<gfaz::NodeId> &out) {
   const uint32_t idx = rule_id - min_id;
   const int32_t a = first[idx];
   const int32_t b = second[idx];
@@ -103,19 +103,19 @@ void expand_rule(uint32_t rule_id, bool reverse,
   }
 }
 
-std::vector<NodeId> decode_sequence(const std::vector<int32_t> &encoded,
+std::vector<gfaz::NodeId> decode_sequence(const std::vector<int32_t> &encoded,
                                     const std::vector<int32_t> &rules_first,
                                     const std::vector<int32_t> &rules_second,
                                     uint32_t min_rule_id,
                                     uint32_t original_length,
                                     int delta_round) {
-  std::vector<NodeId> decoded;
+  std::vector<gfaz::NodeId> decoded;
   decoded.reserve(original_length);
 
   const uint32_t max_rule_id =
       min_rule_id + static_cast<uint32_t>(rules_first.size());
 
-  for (NodeId node : encoded) {
+  for (gfaz::NodeId node : encoded) {
     const uint32_t abs_id = static_cast<uint32_t>(std::abs(node));
     if (abs_id >= min_rule_id && abs_id < max_rule_id) {
       expand_rule(abs_id, node < 0, rules_first, rules_second, min_rule_id,
@@ -125,10 +125,10 @@ std::vector<NodeId> decode_sequence(const std::vector<int32_t> &encoded,
     }
   }
 
-  std::vector<std::vector<NodeId>> seqs(1);
+  std::vector<std::vector<gfaz::NodeId>> seqs(1);
   seqs[0] = std::move(decoded);
   for (int i = 0; i < delta_round; ++i)
-    Codec::inverse_delta_transform(seqs);
+    gfaz::Codec::inverse_delta_transform(seqs);
   return std::move(seqs[0]);
 }
 
@@ -137,17 +137,17 @@ void append_node_name(std::string &line, uint32_t node_id) {
 }
 
 std::pair<std::vector<int32_t>, std::vector<int32_t>>
-decode_rules(const CompressedData &data) {
-  std::vector<int32_t> first = Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
+decode_rules(const gfaz::CompressedData &data) {
+  std::vector<int32_t> first = gfaz::Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
   std::vector<int32_t> second =
-      Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
-  Codec::delta_decode_int32(first);
-  Codec::delta_decode_int32(second);
+      gfaz::Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
+  gfaz::Codec::delta_decode_int32(first);
+  gfaz::Codec::delta_decode_int32(second);
   return {std::move(first), std::move(second)};
 }
 
 std::string format_path_line(const std::string &path_name,
-                             const std::vector<NodeId> &path,
+                             const std::vector<gfaz::NodeId> &path,
                              const std::string &overlap) {
   std::string line = "P\t";
   line += path_name;
@@ -157,7 +157,7 @@ std::string format_path_line(const std::string &path_name,
     if (i > 0)
       line += ',';
 
-    const NodeId node = path[i];
+    const gfaz::NodeId node = path[i];
     const bool is_reverse = node < 0;
     append_node_name(line, static_cast<uint32_t>(is_reverse ? -node : node));
     line += (is_reverse ? '-' : '+');
@@ -172,7 +172,7 @@ std::string format_path_line(const std::string &path_name,
 std::string format_walk_line(const std::string &sample_id, uint32_t hap_index,
                              const std::string &seq_id, int64_t seq_start,
                              int64_t seq_end,
-                             const std::vector<NodeId> &walk) {
+                             const std::vector<gfaz::NodeId> &walk) {
   std::string line = "W\t";
   line += sample_id;
   line += '\t';
@@ -185,7 +185,7 @@ std::string format_walk_line(const std::string &sample_id, uint32_t hap_index,
   line += (seq_end >= 0) ? std::to_string(seq_end) : "*";
   line += '\t';
 
-  for (NodeId node : walk) {
+  for (gfaz::NodeId node : walk) {
     const bool is_reverse = node < 0;
     line += (is_reverse ? '<' : '>');
     append_node_name(line, static_cast<uint32_t>(is_reverse ? -node : node));
@@ -197,14 +197,14 @@ std::string format_walk_line(const std::string &sample_id, uint32_t hap_index,
 
 } // namespace
 
-std::string extract_path_line_by_name(const CompressedData &data,
+std::string extract_path_line_by_name(const gfaz::CompressedData &data,
                                       const std::string &path_name,
                                       int num_threads) {
   return extract_path_lines_by_name(data, {path_name}, num_threads).front();
 }
 
 std::vector<std::string>
-extract_path_lines_by_name(const CompressedData &data,
+extract_path_lines_by_name(const gfaz::CompressedData &data,
                            const std::vector<std::string> &requested_path_names,
                            int num_threads) {
   ScopedOMPThreads omp_scope(num_threads);
@@ -239,20 +239,20 @@ extract_path_lines_by_name(const CompressedData &data,
       decompress_string_column(data.overlaps_zstd, data.overlap_lengths_zstd);
   const auto [rules_first, rules_second] = decode_rules(data);
   const std::vector<int32_t> flat =
-      Codec::zstd_decompress_int32_vector(data.paths_zstd);
+      gfaz::Codec::zstd_decompress_int32_vector(data.paths_zstd);
 
   std::vector<std::string> lines;
   lines.reserve(requested_path_names.size());
   for (size_t request_idx = 0; request_idx < requested_path_names.size();
        ++request_idx) {
     const size_t path_index = indices[request_idx];
-    const std::vector<NodeId> encoded = extract_encoded_sequence_from_flat(
+    const std::vector<gfaz::NodeId> encoded = extract_encoded_sequence_from_flat(
         flat, data.sequence_lengths, path_index);
     const uint32_t original_length =
         (path_index < data.original_path_lengths.size())
             ? data.original_path_lengths[path_index]
             : static_cast<uint32_t>(encoded.size());
-    const std::vector<NodeId> decoded =
+    const std::vector<gfaz::NodeId> decoded =
         decode_sequence(encoded, rules_first, rules_second, data.min_rule_id(),
                         original_length, data.delta_round);
     const std::string overlap =
@@ -263,7 +263,7 @@ extract_path_lines_by_name(const CompressedData &data,
   return lines;
 }
 
-std::string extract_walk_line(const CompressedData &data,
+std::string extract_walk_line(const gfaz::CompressedData &data,
                               const std::string &sample_id,
                               uint32_t hap_index,
                               const std::string &seq_id,
@@ -280,7 +280,7 @@ std::string extract_walk_line(const CompressedData &data,
 }
 
 std::vector<std::string>
-extract_walk_lines(const CompressedData &data,
+extract_walk_lines(const gfaz::CompressedData &data,
                    const std::vector<WalkLookupKey> &walk_keys,
                    int num_threads) {
   ScopedOMPThreads omp_scope(num_threads);
@@ -290,15 +290,15 @@ extract_walk_lines(const CompressedData &data,
   const std::vector<std::string> sample_ids = decompress_string_column(
       data.walk_sample_ids_zstd, data.walk_sample_id_lengths_zstd);
   const std::vector<uint32_t> hap_indices =
-      Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
+      gfaz::Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
   const std::vector<std::string> seq_ids =
       decompress_string_column(data.walk_seq_ids_zstd,
                                data.walk_seq_id_lengths_zstd);
   const std::vector<int64_t> seq_starts =
-      Codec::decompress_varint_int64(data.walk_seq_starts_zstd,
+      gfaz::Codec::decompress_varint_int64(data.walk_seq_starts_zstd,
                                      data.walk_lengths.size());
   const std::vector<int64_t> seq_ends =
-      Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
+      gfaz::Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
                                      data.walk_lengths.size());
 
   std::vector<size_t> indices;
@@ -332,19 +332,19 @@ extract_walk_lines(const CompressedData &data,
 
   const auto [rules_first, rules_second] = decode_rules(data);
   const std::vector<int32_t> flat =
-      Codec::zstd_decompress_int32_vector(data.walks_zstd);
+      gfaz::Codec::zstd_decompress_int32_vector(data.walks_zstd);
 
   std::vector<std::string> lines;
   lines.reserve(walk_keys.size());
   for (size_t request_idx = 0; request_idx < walk_keys.size(); ++request_idx) {
     const size_t walk_index = indices[request_idx];
-    const std::vector<NodeId> encoded =
+    const std::vector<gfaz::NodeId> encoded =
         extract_encoded_sequence_from_flat(flat, data.walk_lengths, walk_index);
     const uint32_t original_length =
         (walk_index < data.original_walk_lengths.size())
             ? data.original_walk_lengths[walk_index]
             : static_cast<uint32_t>(encoded.size());
-    const std::vector<NodeId> decoded =
+    const std::vector<gfaz::NodeId> decoded =
         decode_sequence(encoded, rules_first, rules_second, data.min_rule_id(),
                         original_length, data.delta_round);
 
@@ -356,14 +356,14 @@ extract_walk_lines(const CompressedData &data,
   return lines;
 }
 
-std::string extract_walk_line_by_name(const CompressedData &data,
+std::string extract_walk_line_by_name(const gfaz::CompressedData &data,
                                       const std::string &walk_name,
                                       int num_threads) {
   return extract_walk_lines_by_name(data, {walk_name}, num_threads).front();
 }
 
 std::vector<std::string>
-extract_walk_lines_by_name(const CompressedData &data,
+extract_walk_lines_by_name(const gfaz::CompressedData &data,
                            const std::vector<std::string> &walk_names,
                            int num_threads) {
   ScopedOMPThreads omp_scope(num_threads);
@@ -393,15 +393,15 @@ extract_walk_lines_by_name(const CompressedData &data,
   }
 
   const std::vector<uint32_t> hap_indices =
-      Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
+      gfaz::Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
   const std::vector<std::string> seq_ids =
       decompress_string_column(data.walk_seq_ids_zstd,
                                data.walk_seq_id_lengths_zstd);
   const std::vector<int64_t> seq_starts =
-      Codec::decompress_varint_int64(data.walk_seq_starts_zstd,
+      gfaz::Codec::decompress_varint_int64(data.walk_seq_starts_zstd,
                                      data.walk_lengths.size());
   const std::vector<int64_t> seq_ends =
-      Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
+      gfaz::Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
                                      data.walk_lengths.size());
 
   std::vector<WalkLookupKey> walk_keys;

@@ -25,7 +25,7 @@ struct FlattenedPaths {
   size_t total_nodes() const { return data.size(); }
 };
 
-// GPU-friendly version of OptionalFieldColumn
+// GPU-friendly version of gfaz::OptionalFieldColumn
 struct OptionalFieldColumn_gpu {
   std::string tag;     // Two-character tag (e.g., "LN", "RC")
   char type;           // GFA type: 'A', 'i', 'f', 'Z', 'J', 'H', 'B'
@@ -45,7 +45,7 @@ struct OptionalFieldColumn_gpu {
   std::vector<uint8_t> b_data;     // All array data concatenated
 };
 
-// GPU-friendly GfaGraph structure
+// GPU-friendly gfaz::GfaGraph structure
 // All nested containers are flattened for GPU memory access patterns
 struct GfaGraph_gpu {
   // ====== METADATA ======
@@ -74,7 +74,7 @@ struct GfaGraph_gpu {
   std::vector<int64_t> walk_seq_starts;   // seq_start per walk
   std::vector<int64_t> walk_seq_ends;     // seq_end per walk
 
-  // ====== LINK DATA (already columnar - direct copy from LinkData) ======
+  // ====== LINK DATA (already columnar - direct copy from gfaz::LinkData) ======
   std::vector<uint32_t> link_from_ids;
   std::vector<uint32_t> link_to_ids;
   std::vector<char> link_from_orients;
@@ -113,7 +113,7 @@ struct GfaGraph_gpu {
 };
 
 // Conversion functions
-GfaGraph_gpu convert_to_gpu_layout(const GfaGraph &graph);
-GfaGraph convert_from_gpu_layout(const GfaGraph_gpu &gpu_graph);
+GfaGraph_gpu convert_to_gpu_layout(const gfaz::GfaGraph &graph);
+gfaz::GfaGraph convert_from_gpu_layout(const GfaGraph_gpu &gpu_graph);
 
 #endif // GFA_GRAPH_GPU_HPP

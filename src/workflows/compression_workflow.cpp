@@ -26,12 +26,12 @@
 #include <parallel/algorithm>
 #endif
 
-using namespace gfz::compression_utils;
-using namespace gfz::compression_debug;
-using namespace gfz::runtime_utils;
+using namespace gfaz::compression_utils;
+using namespace gfaz::compression_debug;
+using namespace gfaz::runtime_utils;
 
-static void run_grammar_compression(std::vector<std::vector<NodeId>> &paths,
-                                    std::vector<std::vector<NodeId>> &walks,
+static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &paths,
+                                    std::vector<std::vector<gfaz::NodeId>> &walks,
                                     uint32_t &next_id, int num_rounds,
                                     size_t freq_threshold, uint32_t layer_start,
                                     std::vector<Packed2mer> &rulebook,
@@ -40,8 +40,8 @@ static void run_grammar_compression(std::vector<std::vector<NodeId>> &paths,
 namespace {
 
 struct CompressionContext {
-  GfaGraph graph;
-  CompressedData out;
+  gfaz::GfaGraph graph;
+  gfaz::CompressedData out;
 
   int num_rounds = 0;
   size_t freq_threshold = 0;
@@ -81,7 +81,7 @@ struct SegmentCompressionInput {
 };
 
 struct LinkCompressionInput {
-  const LinkData *links = nullptr;
+  const gfaz::LinkData *links = nullptr;
 };
 
 struct JumpCompressionInput {
@@ -89,7 +89,7 @@ struct JumpCompressionInput {
   std::vector<uint32_t> distance_lengths;
   std::string rest_fields_concat;
   std::vector<uint32_t> rest_lengths;
-  const JumpData *jumps = nullptr;
+  const gfaz::JumpData *jumps = nullptr;
 };
 
 struct ContainmentCompressionInput {
@@ -97,7 +97,7 @@ struct ContainmentCompressionInput {
   std::vector<uint32_t> overlap_lengths;
   std::string rest_fields_concat;
   std::vector<uint32_t> rest_lengths;
-  const ContainmentData *containments = nullptr;
+  const gfaz::ContainmentData *containments = nullptr;
 };
 
 void release_path_fields(CompressionContext &ctx) {
@@ -219,9 +219,9 @@ double apply_delta_transform(CompressionContext &ctx) {
   ctx.max_abs = 0;
   for (int i = 0; i < ctx.delta_round; ++i) {
     const uint32_t path_max =
-        Codec::delta_transform_and_max_abs(ctx.graph.paths_data.traversals);
+        gfaz::Codec::delta_transform_and_max_abs(ctx.graph.paths_data.traversals);
     const uint32_t walk_max =
-        Codec::delta_transform_and_max_abs(ctx.graph.walks.walks);
+        gfaz::Codec::delta_transform_and_max_abs(ctx.graph.walks.walks);
     ctx.max_abs = std::max(ctx.max_abs, std::max(path_max, walk_max));
   }
   const auto end = std::chrono::high_resolution_clock::now();
@@ -248,7 +248,7 @@ double run_grammar_stage(CompressionContext &ctx) {
 
   const uint32_t rule_count = ctx.next_id - ctx.layer_start;
   ctx.out.layer_rule_ranges.push_back(
-      LayerRuleRange{2, ctx.layer_start, ctx.next_id, 0, rule_count * 2});
+      gfaz::LayerRuleRange{2, ctx.layer_start, ctx.next_id, 0, rule_count * 2});
   return elapsed_ms(start, end);
 }
 
@@ -264,13 +264,13 @@ double compress_rule_columns(CompressionContext &ctx) {
 #pragma omp parallel sections
   {
 #pragma omp section
-    ctx.out.rules_first_zstd = Codec::zstd_compress_int32_vector(first);
+    ctx.out.rules_first_zstd = gfaz::Codec::zstd_compress_int32_vector(first);
 #pragma omp section
-    ctx.out.rules_second_zstd = Codec::zstd_compress_int32_vector(second);
+    ctx.out.rules_second_zstd = gfaz::Codec::zstd_compress_int32_vector(second);
   }
 #else
-  ctx.out.rules_first_zstd = Codec::zstd_compress_int32_vector(first);
-  ctx.out.rules_second_zstd = Codec::zstd_compress_int32_vector(second);
+  ctx.out.rules_first_zstd = gfaz::Codec::zstd_compress_int32_vector(first);
+  ctx.out.rules_second_zstd = gfaz::Codec::zstd_compress_int32_vector(second);
 #endif
 
   const auto end = std::chrono::high_resolution_clock::now();
@@ -291,29 +291,29 @@ double compress_path_fields(CompressionContext &ctx) {
 #pragma omp parallel sections
   {
 #pragma omp section
-    ctx.out.paths_zstd = Codec::zstd_compress_int32_vector(input.flat);
+    ctx.out.paths_zstd = gfaz::Codec::zstd_compress_int32_vector(input.flat);
 #pragma omp section
     {
-      ctx.out.names_zstd = Codec::zstd_compress_string(input.names_concat);
+      ctx.out.names_zstd = gfaz::Codec::zstd_compress_string(input.names_concat);
       ctx.out.name_lengths_zstd =
-          Codec::zstd_compress_uint32_vector(input.name_lengths);
+          gfaz::Codec::zstd_compress_uint32_vector(input.name_lengths);
     }
 #pragma omp section
     {
       ctx.out.overlaps_zstd =
-          Codec::zstd_compress_string(input.overlaps_concat);
+          gfaz::Codec::zstd_compress_string(input.overlaps_concat);
       ctx.out.overlap_lengths_zstd =
-          Codec::zstd_compress_uint32_vector(input.overlap_lengths);
+          gfaz::Codec::zstd_compress_uint32_vector(input.overlap_lengths);
     }
   }
 #else
-  ctx.out.paths_zstd = Codec::zstd_compress_int32_vector(input.flat);
-  ctx.out.names_zstd = Codec::zstd_compress_string(input.names_concat);
+  ctx.out.paths_zstd = gfaz::Codec::zstd_compress_int32_vector(input.flat);
+  ctx.out.names_zstd = gfaz::Codec::zstd_compress_string(input.names_concat);
   ctx.out.name_lengths_zstd =
-      Codec::zstd_compress_uint32_vector(input.name_lengths);
-  ctx.out.overlaps_zstd = Codec::zstd_compress_string(input.overlaps_concat);
+      gfaz::Codec::zstd_compress_uint32_vector(input.name_lengths);
+  ctx.out.overlaps_zstd = gfaz::Codec::zstd_compress_string(input.overlaps_concat);
   ctx.out.overlap_lengths_zstd =
-      Codec::zstd_compress_uint32_vector(input.overlap_lengths);
+      gfaz::Codec::zstd_compress_uint32_vector(input.overlap_lengths);
 #endif
 
   release_path_fields(ctx);
@@ -328,26 +328,26 @@ double compress_walk_fields(CompressionContext &ctx) {
     WalkCompressionInput input;
     flatten_traversal_sequences(ctx.graph.walks.walks, input.flat,
                                 ctx.out.walk_lengths);
-    ctx.out.walks_zstd = Codec::zstd_compress_int32_vector(input.flat);
+    ctx.out.walks_zstd = gfaz::Codec::zstd_compress_int32_vector(input.flat);
 
     flatten_walk_string_metadata(ctx.graph.walks, input.sample_ids_concat,
                                  input.sample_id_lengths, input.seq_ids_concat,
                                  input.seq_id_lengths);
 
     ctx.out.walk_sample_ids_zstd =
-        Codec::zstd_compress_string(input.sample_ids_concat);
+        gfaz::Codec::zstd_compress_string(input.sample_ids_concat);
     ctx.out.walk_sample_id_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(input.sample_id_lengths);
+        gfaz::Codec::zstd_compress_uint32_vector(input.sample_id_lengths);
     ctx.out.walk_hap_indices_zstd =
-        Codec::zstd_compress_uint32_vector(ctx.graph.walks.hap_indices);
+        gfaz::Codec::zstd_compress_uint32_vector(ctx.graph.walks.hap_indices);
     ctx.out.walk_seq_ids_zstd =
-        Codec::zstd_compress_string(input.seq_ids_concat);
+        gfaz::Codec::zstd_compress_string(input.seq_ids_concat);
     ctx.out.walk_seq_id_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(input.seq_id_lengths);
+        gfaz::Codec::zstd_compress_uint32_vector(input.seq_id_lengths);
     ctx.out.walk_seq_starts_zstd =
-        Codec::compress_varint_int64(ctx.graph.walks.seq_starts);
+        gfaz::Codec::compress_varint_int64(ctx.graph.walks.seq_starts);
     ctx.out.walk_seq_ends_zstd =
-        Codec::compress_varint_int64(ctx.graph.walks.seq_ends);
+        gfaz::Codec::compress_varint_int64(ctx.graph.walks.seq_ends);
   }
 
   release_walk_fields(ctx);
@@ -373,49 +373,49 @@ double compress_segment_link_fields(CompressionContext &ctx) {
 #pragma omp section
     {
       ctx.out.segment_sequences_zstd =
-          Codec::zstd_compress_string(segment_input.segment_concat);
+          gfaz::Codec::zstd_compress_string(segment_input.segment_concat);
       ctx.out.segment_seq_lengths_zstd =
-          Codec::zstd_compress_uint32_vector(segment_input.segment_lengths);
+          gfaz::Codec::zstd_compress_uint32_vector(segment_input.segment_lengths);
     }
 #pragma omp section
     {
       ctx.out.link_from_ids_zstd =
-          Codec::compress_delta_varint_uint32(link_input.links->from_ids);
+          gfaz::Codec::compress_delta_varint_uint32(link_input.links->from_ids);
       ctx.out.link_to_ids_zstd =
-          Codec::compress_delta_varint_uint32(link_input.links->to_ids);
+          gfaz::Codec::compress_delta_varint_uint32(link_input.links->to_ids);
     }
 #pragma omp section
     {
       ctx.out.link_from_orients_zstd =
-          Codec::compress_orientations(link_input.links->from_orients);
+          gfaz::Codec::compress_orientations(link_input.links->from_orients);
       ctx.out.link_to_orients_zstd =
-          Codec::compress_orientations(link_input.links->to_orients);
+          gfaz::Codec::compress_orientations(link_input.links->to_orients);
     }
 #pragma omp section
     {
       ctx.out.link_overlap_nums_zstd =
-          Codec::zstd_compress_uint32_vector(link_input.links->overlap_nums);
+          gfaz::Codec::zstd_compress_uint32_vector(link_input.links->overlap_nums);
       ctx.out.link_overlap_ops_zstd =
-          Codec::zstd_compress_char_vector(link_input.links->overlap_ops);
+          gfaz::Codec::zstd_compress_char_vector(link_input.links->overlap_ops);
     }
   }
 #else
   ctx.out.segment_sequences_zstd =
-      Codec::zstd_compress_string(segment_input.segment_concat);
+      gfaz::Codec::zstd_compress_string(segment_input.segment_concat);
   ctx.out.segment_seq_lengths_zstd =
-      Codec::zstd_compress_uint32_vector(segment_input.segment_lengths);
+      gfaz::Codec::zstd_compress_uint32_vector(segment_input.segment_lengths);
   ctx.out.link_from_ids_zstd =
-      Codec::compress_delta_varint_uint32(link_input.links->from_ids);
+      gfaz::Codec::compress_delta_varint_uint32(link_input.links->from_ids);
   ctx.out.link_to_ids_zstd =
-      Codec::compress_delta_varint_uint32(link_input.links->to_ids);
+      gfaz::Codec::compress_delta_varint_uint32(link_input.links->to_ids);
   ctx.out.link_from_orients_zstd =
-      Codec::compress_orientations(link_input.links->from_orients);
+      gfaz::Codec::compress_orientations(link_input.links->from_orients);
   ctx.out.link_to_orients_zstd =
-      Codec::compress_orientations(link_input.links->to_orients);
+      gfaz::Codec::compress_orientations(link_input.links->to_orients);
   ctx.out.link_overlap_nums_zstd =
-      Codec::zstd_compress_uint32_vector(link_input.links->overlap_nums);
+      gfaz::Codec::zstd_compress_uint32_vector(link_input.links->overlap_nums);
   ctx.out.link_overlap_ops_zstd =
-      Codec::zstd_compress_char_vector(link_input.links->overlap_ops);
+      gfaz::Codec::zstd_compress_char_vector(link_input.links->overlap_ops);
 #endif
 
   release_segment_link_fields(ctx);
@@ -451,21 +451,21 @@ double compress_jump_fields(CompressionContext &ctx) {
     ctx.out.num_jumps = ctx.graph.jumps.size();
 
     ctx.out.jump_from_ids_zstd =
-        Codec::compress_delta_varint_uint32(input.jumps->from_ids);
+        gfaz::Codec::compress_delta_varint_uint32(input.jumps->from_ids);
     ctx.out.jump_to_ids_zstd =
-        Codec::compress_delta_varint_uint32(input.jumps->to_ids);
+        gfaz::Codec::compress_delta_varint_uint32(input.jumps->to_ids);
     ctx.out.jump_from_orients_zstd =
-        Codec::compress_orientations(input.jumps->from_orients);
+        gfaz::Codec::compress_orientations(input.jumps->from_orients);
     ctx.out.jump_to_orients_zstd =
-        Codec::compress_orientations(input.jumps->to_orients);
+        gfaz::Codec::compress_orientations(input.jumps->to_orients);
     ctx.out.jump_distances_zstd =
-        Codec::zstd_compress_string(input.distances_concat);
+        gfaz::Codec::zstd_compress_string(input.distances_concat);
     ctx.out.jump_distance_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(input.distance_lengths);
+        gfaz::Codec::zstd_compress_uint32_vector(input.distance_lengths);
     ctx.out.jump_rest_fields_zstd =
-        Codec::zstd_compress_string(input.rest_fields_concat);
+        gfaz::Codec::zstd_compress_string(input.rest_fields_concat);
     ctx.out.jump_rest_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(input.rest_lengths);
+        gfaz::Codec::zstd_compress_uint32_vector(input.rest_lengths);
   }
 
   release_jump_fields(ctx);
@@ -487,23 +487,23 @@ double compress_containment_fields(CompressionContext &ctx) {
     ctx.out.num_containments = ctx.graph.containments.size();
 
     ctx.out.containment_container_ids_zstd =
-        Codec::compress_delta_varint_uint32(input.containments->container_ids);
+        gfaz::Codec::compress_delta_varint_uint32(input.containments->container_ids);
     ctx.out.containment_contained_ids_zstd =
-        Codec::compress_delta_varint_uint32(input.containments->contained_ids);
+        gfaz::Codec::compress_delta_varint_uint32(input.containments->contained_ids);
     ctx.out.containment_container_orients_zstd =
-        Codec::compress_orientations(input.containments->container_orients);
+        gfaz::Codec::compress_orientations(input.containments->container_orients);
     ctx.out.containment_contained_orients_zstd =
-        Codec::compress_orientations(input.containments->contained_orients);
+        gfaz::Codec::compress_orientations(input.containments->contained_orients);
     ctx.out.containment_positions_zstd =
-        Codec::zstd_compress_uint32_vector(input.containments->positions);
+        gfaz::Codec::zstd_compress_uint32_vector(input.containments->positions);
     ctx.out.containment_overlaps_zstd =
-        Codec::zstd_compress_string(input.overlaps_concat);
+        gfaz::Codec::zstd_compress_string(input.overlaps_concat);
     ctx.out.containment_overlap_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(input.overlap_lengths);
+        gfaz::Codec::zstd_compress_uint32_vector(input.overlap_lengths);
     ctx.out.containment_rest_fields_zstd =
-        Codec::zstd_compress_string(input.rest_fields_concat);
+        gfaz::Codec::zstd_compress_string(input.rest_fields_concat);
     ctx.out.containment_rest_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(input.rest_lengths);
+        gfaz::Codec::zstd_compress_uint32_vector(input.rest_lengths);
   }
 
   release_containment_fields(ctx);
@@ -519,8 +519,8 @@ double compress_containment_fields(CompressionContext &ctx) {
 // ---------------------------------------------------------------------------
 
 // Run multi-round 2-mer grammar compression on paths and walks
-static void run_grammar_compression(std::vector<std::vector<NodeId>> &paths,
-                                    std::vector<std::vector<NodeId>> &walks,
+static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &paths,
+                                    std::vector<std::vector<gfaz::NodeId>> &walks,
                                     uint32_t &next_id, int num_rounds,
                                     size_t freq_threshold, uint32_t layer_start,
                                     std::vector<Packed2mer> &rulebook,
@@ -677,16 +677,16 @@ static void run_grammar_compression(std::vector<std::vector<NodeId>> &paths,
 // Public workflow entry point
 // ---------------------------------------------------------------------------
 
-CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
+gfaz::CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
                             size_t freq_threshold, int delta_round,
                             int num_threads, bool show_stats) {
   // CPU compression pipeline:
-  // 1. Parse the input GFA into GfaGraph.
+  // 1. Parse the input GFA into gfaz::GfaGraph.
   // 2. Initialize output metadata and establish the traversal ID space.
   // 3. Apply delta encoding to paths and walks.
   // 4. Run multi-round 2-mer grammar compression over traversals.
   // 5. Encode the rulebook into compressed rule columns.
-  // 6. Compress each record group into CompressedData field blocks:
+  // 6. Compress each record group into gfaz::CompressedData field blocks:
   //    P, W, S, L, optional fields, J, and C.
   // 7. Emit compression stats and return the finalized container.
   ScopedOMPThreads omp_scope(num_threads);

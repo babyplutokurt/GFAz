@@ -24,8 +24,8 @@ flatten_string_vector(const std::vector<std::string> &strings) {
   return result;
 }
 
-// Helper: Convert OptionalFieldColumn to GPU-friendly version
-OptionalFieldColumn_gpu convert_optional_field(const OptionalFieldColumn &col) {
+// Helper: Convert gfaz::OptionalFieldColumn to GPU-friendly version
+OptionalFieldColumn_gpu convert_optional_field(const gfaz::OptionalFieldColumn &col) {
   OptionalFieldColumn_gpu result;
   result.tag = col.tag;
   result.type = col.type;
@@ -71,7 +71,7 @@ OptionalFieldColumn_gpu convert_optional_field(const OptionalFieldColumn &col) {
 
 } // anonymous namespace
 
-GfaGraph_gpu convert_to_gpu_layout(const GfaGraph &graph) {
+GfaGraph_gpu convert_to_gpu_layout(const gfaz::GfaGraph &graph) {
   GfaGraph_gpu gpu;
 
   // ====== METADATA ======
@@ -160,7 +160,7 @@ GfaGraph_gpu convert_to_gpu_layout(const GfaGraph &graph) {
   return gpu;
 }
 
-// ====== REVERSE CONVERSION: GfaGraph_gpu -> GfaGraph ======
+// ====== REVERSE CONVERSION: GfaGraph_gpu -> gfaz::GfaGraph ======
 
 namespace {
 
@@ -180,9 +180,9 @@ std::vector<std::string> unflatten_strings(const FlattenedStrings &flat) {
 }
 
 // Helper: Convert GPU optional field back to CPU format
-OptionalFieldColumn
+gfaz::OptionalFieldColumn
 convert_optional_field_from_gpu(const OptionalFieldColumn_gpu &gpu_col) {
-  OptionalFieldColumn result;
+  gfaz::OptionalFieldColumn result;
   result.tag = gpu_col.tag;
   result.type = gpu_col.type;
 
@@ -218,8 +218,8 @@ convert_optional_field_from_gpu(const OptionalFieldColumn_gpu &gpu_col) {
 
 } // anonymous namespace
 
-GfaGraph convert_from_gpu_layout(const GfaGraph_gpu &gpu) {
-  GfaGraph graph;
+gfaz::GfaGraph convert_from_gpu_layout(const GfaGraph_gpu &gpu) {
+  gfaz::GfaGraph graph;
 
   // ====== METADATA ======
   graph.header_line = gpu.header_line;

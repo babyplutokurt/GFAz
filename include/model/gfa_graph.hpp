@@ -7,6 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
+namespace gfaz {
+
 // Signed node ID where sign encodes orientation: positive = forward, negative = reverse.
 // Uses 1-based indexing to allow sign to encode orientation (0 would be ambiguous).
 using NodeId = int32_t;
@@ -127,5 +129,7 @@ struct LineOffset {
   size_t offset;
   size_t length;
 };
+
+} // namespace gfaz
 
 #endif // MODEL_GFA_GRAPH_HPP

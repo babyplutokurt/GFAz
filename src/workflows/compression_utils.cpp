@@ -6,11 +6,11 @@
 #include <iostream>
 #include <stdexcept>
 
-namespace gfz::compression_utils {
+namespace gfaz::compression_utils {
 
-using gfz::runtime_utils::format_size;
+using gfaz::runtime_utils::format_size;
 
-size_t total_node_count(const std::vector<std::vector<NodeId>> &sequences) {
+size_t total_node_count(const std::vector<std::vector<gfaz::NodeId>> &sequences) {
   size_t total = 0;
   for (const auto &seq : sequences)
     total += seq.size();
@@ -36,7 +36,7 @@ void append_string_column(const std::vector<std::string> &values,
 }
 
 void flatten_traversal_sequences(
-    const std::vector<std::vector<NodeId>> &sequences,
+    const std::vector<std::vector<gfaz::NodeId>> &sequences,
     std::vector<int32_t> &flattened, std::vector<uint32_t> &lengths) {
   const size_t total = total_node_count(sequences);
 
@@ -48,12 +48,12 @@ void flatten_traversal_sequences(
   size_t offset = 0;
   for (const auto &sequence : sequences) {
     lengths.push_back(static_cast<uint32_t>(sequence.size()));
-    for (NodeId node : sequence)
+    for (gfaz::NodeId node : sequence)
       flattened[offset++] = node;
   }
 }
 
-void flatten_path_metadata(const std::vector<std::vector<NodeId>> &paths,
+void flatten_path_metadata(const std::vector<std::vector<gfaz::NodeId>> &paths,
                            const std::vector<std::string> &path_names,
                            const std::vector<std::string> &path_overlaps,
                            std::string &names_concat,
@@ -69,7 +69,7 @@ void flatten_path_metadata(const std::vector<std::vector<NodeId>> &paths,
   append_string_column(path_overlaps, overlaps_concat, overlap_lengths);
 }
 
-void flatten_walk_string_metadata(const WalkData &walks,
+void flatten_walk_string_metadata(const gfaz::WalkData &walks,
                                   std::string &sample_ids_concat,
                                   std::vector<uint32_t> &sample_id_lengths,
                                   std::string &seq_ids_concat,
@@ -100,38 +100,38 @@ void flatten_segment_sequences(const std::vector<std::string> &sequences,
   }
 }
 
-CompressedOptionalFieldColumn
-compress_optional_column(const OptionalFieldColumn &col) {
-  CompressedOptionalFieldColumn out;
+gfaz::CompressedOptionalFieldColumn
+compress_optional_column(const gfaz::OptionalFieldColumn &col) {
+  gfaz::CompressedOptionalFieldColumn out;
   out.tag = col.tag;
   out.type = col.type;
 
   switch (col.type) {
   case 'i':
     out.num_elements = col.int_values.size();
-    out.int_values_zstd = Codec::compress_varint_int64(col.int_values);
+    out.int_values_zstd = gfaz::Codec::compress_varint_int64(col.int_values);
     break;
   case 'f':
     out.num_elements = col.float_values.size();
-    out.float_values_zstd = Codec::zstd_compress_float_vector(col.float_values);
+    out.float_values_zstd = gfaz::Codec::zstd_compress_float_vector(col.float_values);
     break;
   case 'A':
     out.num_elements = col.char_values.size();
-    out.char_values_zstd = Codec::zstd_compress_char_vector(col.char_values);
+    out.char_values_zstd = gfaz::Codec::zstd_compress_char_vector(col.char_values);
     break;
   case 'Z':
   case 'J':
   case 'H':
     out.num_elements = col.string_lengths.size();
-    out.strings_zstd = Codec::zstd_compress_string(col.concatenated_strings);
+    out.strings_zstd = gfaz::Codec::zstd_compress_string(col.concatenated_strings);
     out.string_lengths_zstd =
-        Codec::zstd_compress_uint32_vector(col.string_lengths);
+        gfaz::Codec::zstd_compress_uint32_vector(col.string_lengths);
     break;
   case 'B':
     out.num_elements = col.b_subtypes.size();
-    out.b_subtypes_zstd = Codec::zstd_compress_char_vector(col.b_subtypes);
-    out.b_lengths_zstd = Codec::zstd_compress_uint32_vector(col.b_lengths);
-    out.b_concat_bytes_zstd = Codec::zstd_compress_string(
+    out.b_subtypes_zstd = gfaz::Codec::zstd_compress_char_vector(col.b_subtypes);
+    out.b_lengths_zstd = gfaz::Codec::zstd_compress_uint32_vector(col.b_lengths);
+    out.b_concat_bytes_zstd = gfaz::Codec::zstd_compress_string(
         std::string(col.b_concat_bytes.begin(), col.b_concat_bytes.end()));
     break;
   default:
@@ -143,7 +143,7 @@ compress_optional_column(const OptionalFieldColumn &col) {
   return out;
 }
 
-void flatten_paths(const std::vector<std::vector<NodeId>> &paths,
+void flatten_paths(const std::vector<std::vector<gfaz::NodeId>> &paths,
                    const std::vector<std::string> &path_names,
                    const std::vector<std::string> &path_overlaps,
                    std::vector<int32_t> &flattened,
@@ -164,7 +164,7 @@ void flatten_segments(const std::vector<std::string> &sequences,
 
 void process_rules(const std::vector<Packed2mer> &rulebook,
                    uint32_t layer_start_id,
-                   const std::vector<LayerRuleRange> &ranges,
+                   const std::vector<gfaz::LayerRuleRange> &ranges,
                    std::vector<int32_t> &first, std::vector<int32_t> &second) {
   size_t total = 0;
   for (const auto &r : ranges)
@@ -188,17 +188,17 @@ void process_rules(const std::vector<Packed2mer> &rulebook,
     }
   }
 
-  Codec::delta_encode_int32(first);
-  Codec::delta_encode_int32(second);
+  gfaz::Codec::delta_encode_int32(first);
+  gfaz::Codec::delta_encode_int32(second);
 }
 
-void flatten_walks(const std::vector<std::vector<NodeId>> &walks,
+void flatten_walks(const std::vector<std::vector<gfaz::NodeId>> &walks,
                    std::vector<int32_t> &flattened,
                    std::vector<uint32_t> &lengths) {
   flatten_traversal_sequences(walks, flattened, lengths);
 }
 
-void remap_rule_ids(std::vector<std::vector<NodeId>> &sequences,
+void remap_rule_ids(std::vector<std::vector<gfaz::NodeId>> &sequences,
                     uint32_t rules_start_id,
                     const std::vector<uint32_t> &id_map) {
 #ifdef _OPENMP
@@ -220,10 +220,10 @@ void remap_rule_ids(std::vector<std::vector<NodeId>> &sequences,
   }
 }
 
-void print_compression_stats(const CompressedData &d, size_t num_segments,
+void print_compression_stats(const gfaz::CompressedData &d, size_t num_segments,
                              bool show_stats) {
   auto sum_optional =
-      [](const std::vector<CompressedOptionalFieldColumn> &cols) {
+      [](const std::vector<gfaz::CompressedOptionalFieldColumn> &cols) {
         size_t total = 0;
         for (const auto &c : cols) {
           total += c.int_values_zstd.payload.size();
@@ -266,7 +266,7 @@ void print_compression_stats(const CompressedData &d, size_t num_segments,
   total += d.rules_second_zstd.payload.size();
   total += d.paths_zstd.payload.size();
   total += d.sequence_lengths.size() * sizeof(uint32_t);
-  total += d.layer_rule_ranges.size() * sizeof(LayerRuleRange);
+  total += d.layer_rule_ranges.size() * sizeof(gfaz::LayerRuleRange);
   total += d.names_zstd.payload.size();
   total += d.name_lengths_zstd.payload.size();
   total += d.overlaps_zstd.payload.size();
@@ -301,7 +301,7 @@ void print_compression_stats(const CompressedData &d, size_t num_segments,
   // Rules
   std::cerr << "Rules (2-mer grammar):" << std::endl;
   std::cerr << "  layer_rule_ranges:      " << std::setw(12)
-            << format_size(d.layer_rule_ranges.size() * sizeof(LayerRuleRange))
+            << format_size(d.layer_rule_ranges.size() * sizeof(gfaz::LayerRuleRange))
             << std::endl;
   std::cerr << "  rules_first_zstd:       " << std::setw(12)
             << format_size(d.rules_first_zstd.payload.size()) << std::endl;
@@ -403,4 +403,4 @@ void print_compression_stats(const CompressedData &d, size_t num_segments,
   std::cerr << "Total: " << format_size(total) << std::endl;
 }
 
-} // namespace gfz::compression_utils
+} // namespace gfaz::compression_utils

@@ -14,14 +14,14 @@ namespace gpu_decompression {
 struct GpuDirectWriterStaticFields {
   std::vector<uint32_t> segment_lengths;
   std::string segment_sequences;
-  std::vector<OptionalFieldColumn> segment_optional_fields;
+  std::vector<gfaz::OptionalFieldColumn> segment_optional_fields;
   std::vector<uint32_t> link_from_ids;
   std::vector<uint32_t> link_to_ids;
   std::vector<char> link_from_orients;
   std::vector<char> link_to_orients;
   std::vector<uint32_t> link_overlap_nums;
   std::vector<char> link_overlap_ops;
-  std::vector<OptionalFieldColumn> link_optional_fields;
+  std::vector<gfaz::OptionalFieldColumn> link_optional_fields;
   std::vector<uint32_t> jump_from_ids;
   std::vector<uint32_t> jump_to_ids;
   std::vector<char> jump_from_orients;
@@ -35,8 +35,8 @@ struct GpuDirectWriterStaticFields {
   std::vector<uint32_t> containment_positions;
   std::vector<std::string> containment_overlaps;
   std::vector<std::string> containment_rest_fields;
-  gfz::gfa_write_utils::FieldOffsets segment_offsets;
-  gfz::gfa_write_utils::FieldOffsets link_offsets;
+  gfaz::gfa_write_utils::FieldOffsets segment_offsets;
+  gfaz::gfa_write_utils::FieldOffsets link_offsets;
   double decode_ms = 0.0;
 };
 
@@ -56,14 +56,14 @@ struct GpuWalkWriterMetadata {
 };
 
 GpuDirectWriterStaticFields
-decode_gpu_direct_writer_static_fields(const CompressedData &data);
+decode_gpu_direct_writer_static_fields(const gfaz::CompressedData &data);
 
-GpuPathWriterMetadata decode_gpu_path_writer_metadata(const CompressedData &data);
+GpuPathWriterMetadata decode_gpu_path_writer_metadata(const gfaz::CompressedData &data);
 
-GpuWalkWriterMetadata decode_gpu_walk_writer_metadata(const CompressedData &data);
+GpuWalkWriterMetadata decode_gpu_walk_writer_metadata(const gfaz::CompressedData &data);
 
 void write_gpu_direct_writer_static_fields(
-    std::ofstream &out, const CompressedData &data,
+    std::ofstream &out, const gfaz::CompressedData &data,
     const GpuDirectWriterStaticFields &fields);
 
 void write_gpu_path_chunk_lines(std::ofstream &out,

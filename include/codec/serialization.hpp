@@ -4,6 +4,7 @@
 #include "model/compressed_data.hpp"
 #include <string>
 
+namespace gfaz {
 
 // GFAZ binary file format
 constexpr uint32_t GFAZ_MAGIC = 0x5A414647;  // "GFAZ" in little-endian
@@ -13,5 +14,7 @@ void serialize_compressed_data(const CompressedData &data,
                                const std::string &output_path);
 
 CompressedData deserialize_compressed_data(const std::string &input_path);
+
+} // namespace gfaz
 
 #endif
