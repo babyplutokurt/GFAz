@@ -76,29 +76,29 @@ GfaGraph_gpu convert_to_gpu_layout(const GfaGraph &graph) {
 
   // ====== METADATA ======
   gpu.header_line = graph.header_line;
-  gpu.num_segments = static_cast<uint32_t>(graph.node_id_to_name.size());
-  gpu.num_paths = static_cast<uint32_t>(graph.paths.size());
+  gpu.num_segments = static_cast<uint32_t>(graph.segments.node_id_to_name.size());
+  gpu.num_paths = static_cast<uint32_t>(graph.paths_data.traversals.size());
   gpu.num_walks = static_cast<uint32_t>(graph.walks.walks.size());
   gpu.num_links = static_cast<uint32_t>(graph.links.from_ids.size());
 
   // ====== SEGMENT DATA ======
-  gpu.node_names = flatten_string_vector(graph.node_id_to_name);
-  gpu.node_sequences = flatten_string_vector(graph.node_sequences);
+  gpu.node_names = flatten_string_vector(graph.segments.node_id_to_name);
+  gpu.node_sequences = flatten_string_vector(graph.segments.node_sequences);
 
   // ====== PATH + WALK DATA (concatenated: paths first, then walks) ======
   {
     size_t total_path_nodes = 0;
-    for (const auto &p : graph.paths)
+    for (const auto &p : graph.paths_data.traversals)
       total_path_nodes += p.size();
     size_t total_walk_nodes = 0;
     for (const auto &w : graph.walks.walks)
       total_walk_nodes += w.size();
 
     gpu.paths.data.reserve(total_path_nodes + total_walk_nodes);
-    gpu.paths.lengths.reserve(graph.paths.size() + graph.walks.walks.size());
+    gpu.paths.lengths.reserve(graph.paths_data.traversals.size() + graph.walks.walks.size());
 
     // Paths first
-    for (const auto &p : graph.paths) {
+    for (const auto &p : graph.paths_data.traversals) {
       gpu.paths.lengths.push_back(static_cast<uint32_t>(p.size()));
       gpu.paths.data.insert(gpu.paths.data.end(), p.begin(), p.end());
     }
@@ -110,8 +110,8 @@ GfaGraph_gpu convert_to_gpu_layout(const GfaGraph &graph) {
   }
 
   // ====== PATH METADATA (P-lines only) ======
-  gpu.path_names = flatten_string_vector(graph.path_names);
-  gpu.path_overlaps = flatten_string_vector(graph.path_overlaps);
+  gpu.path_names = flatten_string_vector(graph.paths_data.names);
+  gpu.path_overlaps = flatten_string_vector(graph.paths_data.overlaps);
 
   // ====== WALK METADATA (W-lines only) ======
   gpu.walk_sample_ids = flatten_string_vector(graph.walks.sample_ids);
@@ -129,8 +129,8 @@ GfaGraph_gpu convert_to_gpu_layout(const GfaGraph &graph) {
   gpu.link_overlap_ops = graph.links.overlap_ops;
 
   // ====== OPTIONAL FIELDS ======
-  gpu.segment_optional_fields.reserve(graph.segment_optional_fields.size());
-  for (const auto &col : graph.segment_optional_fields) {
+  gpu.segment_optional_fields.reserve(graph.segments.optional_fields.size());
+  for (const auto &col : graph.segments.optional_fields) {
     gpu.segment_optional_fields.push_back(convert_optional_field(col));
   }
 
@@ -225,13 +225,13 @@ GfaGraph convert_from_gpu_layout(const GfaGraph_gpu &gpu) {
   graph.header_line = gpu.header_line;
 
   // ====== SEGMENT DATA ======
-  graph.node_id_to_name = unflatten_strings(gpu.node_names);
-  graph.node_sequences = unflatten_strings(gpu.node_sequences);
+  graph.segments.node_id_to_name = unflatten_strings(gpu.node_names);
+  graph.segments.node_sequences = unflatten_strings(gpu.node_sequences);
 
   // Rebuild node_name_to_id map
-  graph.node_name_to_id.reserve(graph.node_id_to_name.size());
-  for (size_t i = 0; i < graph.node_id_to_name.size(); ++i) {
-    graph.node_name_to_id[graph.node_id_to_name[i]] = static_cast<uint32_t>(i);
+  graph.node_name_to_id.reserve(graph.segments.node_id_to_name.size());
+  for (size_t i = 0; i < graph.segments.node_id_to_name.size(); ++i) {
+    graph.node_name_to_id[graph.segments.node_id_to_name[i]] = static_cast<uint32_t>(i);
   }
 
   // ====== SPLIT PATHS AND WALKS from concatenated data ======
@@ -248,10 +248,10 @@ GfaGraph convert_from_gpu_layout(const GfaGraph_gpu &gpu) {
     // First num_paths entries are P-line paths
     uint32_t actual_paths = std::min(
         gpu.num_paths, static_cast<uint32_t>(gpu.paths.lengths.size()));
-    graph.paths.reserve(actual_paths);
+    graph.paths_data.traversals.reserve(actual_paths);
     for (uint32_t i = 0; i < actual_paths; ++i) {
       uint32_t len = gpu.paths.lengths[i];
-      graph.paths.emplace_back(gpu.paths.data.begin() + offset,
+      graph.paths_data.traversals.emplace_back(gpu.paths.data.begin() + offset,
                                gpu.paths.data.begin() + offset + len);
       offset += len;
     }
@@ -273,8 +273,8 @@ GfaGraph convert_from_gpu_layout(const GfaGraph_gpu &gpu) {
   }
 
   // ====== PATH METADATA (P-lines only) ======
-  graph.path_names = unflatten_strings(gpu.path_names);
-  graph.path_overlaps = unflatten_strings(gpu.path_overlaps);
+  graph.paths_data.names = unflatten_strings(gpu.path_names);
+  graph.paths_data.overlaps = unflatten_strings(gpu.path_overlaps);
 
   // ====== WALK METADATA (W-lines only) ======
   graph.walks.sample_ids = unflatten_strings(gpu.walk_sample_ids);
@@ -292,9 +292,9 @@ GfaGraph convert_from_gpu_layout(const GfaGraph_gpu &gpu) {
   graph.links.overlap_ops = gpu.link_overlap_ops;
 
   // ====== OPTIONAL FIELDS ======
-  graph.segment_optional_fields.reserve(gpu.segment_optional_fields.size());
+  graph.segments.optional_fields.reserve(gpu.segment_optional_fields.size());
   for (const auto &gpu_col : gpu.segment_optional_fields) {
-    graph.segment_optional_fields.push_back(
+    graph.segments.optional_fields.push_back(
         convert_optional_field_from_gpu(gpu_col));
   }
 

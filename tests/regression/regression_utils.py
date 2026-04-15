@@ -147,8 +147,8 @@ def is_gpu_runtime_unavailable(exc: Exception) -> bool:
 
 def graph_summary(graph) -> str:
   parts = [
-      f"segments={len(graph.node_sequences) - 1}",
-      f"paths={len(graph.paths)}",
+      f"segments={len(graph.segments.node_sequences) - 1}",
+      f"paths={len(graph.paths_data.traversals)}",
       f"walks={len(graph.walks.walks)}",
   ]
   if hasattr(graph, "links") and hasattr(graph.links, "from_nodes"):

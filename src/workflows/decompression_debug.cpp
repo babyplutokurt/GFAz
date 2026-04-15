@@ -69,9 +69,9 @@ void print_cpu_decompression_summary(const std::string &scope_label,
     return;
 
   std::cerr << "[" << scope_label << "] segments="
-            << (graph.node_sequences.empty() ? 0 : graph.node_sequences.size() - 1)
+            << (graph.segments.node_sequences.empty() ? 0 : graph.segments.node_sequences.size() - 1)
             << ", links=" << graph.links.from_ids.size()
-            << ", paths=" << graph.paths.size()
+            << ", paths=" << graph.paths_data.traversals.size()
             << ", walks=" << graph.walks.walks.size()
             << ", jumps=" << graph.jumps.size()
             << ", containments=" << graph.containments.size()

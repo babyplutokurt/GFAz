@@ -117,14 +117,91 @@ PYBIND11_MODULE(gfa_compression, m) {
       .def_readwrite("seq_start", &WalkLookupKey::seq_start)
       .def_readwrite("seq_end", &WalkLookupKey::seq_end);
 
+  py::class_<OptionalFieldColumn>(m, "OptionalFieldColumn")
+      .def(py::init<>())
+      .def_readwrite("tag", &OptionalFieldColumn::tag)
+      .def_readwrite("type", &OptionalFieldColumn::type)
+      .def_readwrite("int_values", &OptionalFieldColumn::int_values)
+      .def_readwrite("float_values", &OptionalFieldColumn::float_values)
+      .def_readwrite("char_values", &OptionalFieldColumn::char_values)
+      .def_readwrite("concatenated_strings",
+                     &OptionalFieldColumn::concatenated_strings)
+      .def_readwrite("string_lengths", &OptionalFieldColumn::string_lengths)
+      .def_readwrite("b_subtypes", &OptionalFieldColumn::b_subtypes)
+      .def_readwrite("b_lengths", &OptionalFieldColumn::b_lengths)
+      .def_readwrite("b_concat_bytes", &OptionalFieldColumn::b_concat_bytes);
+
+  py::class_<SegmentData>(m, "SegmentData")
+      .def(py::init<>())
+      .def_readwrite("node_id_to_name", &SegmentData::node_id_to_name)
+      .def_readwrite("node_sequences", &SegmentData::node_sequences)
+      .def_readwrite("optional_fields", &SegmentData::optional_fields);
+
+  py::class_<PathData>(m, "PathData")
+      .def(py::init<>())
+      .def_readwrite("names", &PathData::names)
+      .def_readwrite("traversals", &PathData::traversals)
+      .def_readwrite("overlaps", &PathData::overlaps);
+
   py::class_<GfaGraph>(m, "GfaGraph")
       .def(py::init<>())
       .def_readonly("node_name_to_id", &GfaGraph::node_name_to_id)
-      .def_readonly("node_id_to_name", &GfaGraph::node_id_to_name)
-      .def_readwrite("path_names", &GfaGraph::path_names)
-      .def_readwrite("paths", &GfaGraph::paths)
-      .def_readwrite("path_overlaps", &GfaGraph::path_overlaps)
-      .def_readwrite("node_sequences", &GfaGraph::node_sequences)
+      .def_readwrite("segments", &GfaGraph::segments)
+      .def_readwrite("paths_data", &GfaGraph::paths_data)
+      .def_property(
+          "node_id_to_name",
+          [](GfaGraph &graph) -> std::vector<std::string> & {
+            return graph.segments.node_id_to_name;
+          },
+          [](GfaGraph &graph, const std::vector<std::string> &value) {
+            graph.segments.node_id_to_name = value;
+          },
+          py::return_value_policy::reference_internal)
+      .def_property(
+          "node_sequences",
+          [](GfaGraph &graph) -> std::vector<std::string> & {
+            return graph.segments.node_sequences;
+          },
+          [](GfaGraph &graph, const std::vector<std::string> &value) {
+            graph.segments.node_sequences = value;
+          },
+          py::return_value_policy::reference_internal)
+      .def_property(
+          "segment_optional_fields",
+          [](GfaGraph &graph) -> std::vector<OptionalFieldColumn> & {
+            return graph.segments.optional_fields;
+          },
+          [](GfaGraph &graph, const std::vector<OptionalFieldColumn> &value) {
+            graph.segments.optional_fields = value;
+          },
+          py::return_value_policy::reference_internal)
+      .def_property(
+          "path_names",
+          [](GfaGraph &graph) -> std::vector<std::string> & {
+            return graph.paths_data.names;
+          },
+          [](GfaGraph &graph, const std::vector<std::string> &value) {
+            graph.paths_data.names = value;
+          },
+          py::return_value_policy::reference_internal)
+      .def_property(
+          "paths",
+          [](GfaGraph &graph) -> std::vector<std::vector<NodeId>> & {
+            return graph.paths_data.traversals;
+          },
+          [](GfaGraph &graph, const std::vector<std::vector<NodeId>> &value) {
+            graph.paths_data.traversals = value;
+          },
+          py::return_value_policy::reference_internal)
+      .def_property(
+          "path_overlaps",
+          [](GfaGraph &graph) -> std::vector<std::string> & {
+            return graph.paths_data.overlaps;
+          },
+          [](GfaGraph &graph, const std::vector<std::string> &value) {
+            graph.paths_data.overlaps = value;
+          },
+          py::return_value_policy::reference_internal)
       .def_readwrite("walks", &GfaGraph::walks);
 
   py::class_<LayerRuleRange>(m, "LayerRuleRange")
@@ -272,33 +349,33 @@ PYBIND11_MODULE(gfa_compression, m) {
           return false;
         }
 
-        if (original.paths.size() != decompressed.paths.size()) {
+        if (original.paths_data.traversals.size() != decompressed.paths_data.traversals.size()) {
           std::cerr << "Verification Failed: Path count mismatch. Original: "
-                    << original.paths.size()
-                    << ", Decompressed: " << decompressed.paths.size()
+                    << original.paths_data.traversals.size()
+                    << ", Decompressed: " << decompressed.paths_data.traversals.size()
                     << std::endl;
           return false;
         }
 
         // Bounds check for path_names and path_overlaps
-        if (original.path_names.size() != original.paths.size() ||
-            decompressed.path_names.size() != decompressed.paths.size()) {
+        if (original.paths_data.names.size() != original.paths_data.traversals.size() ||
+            decompressed.paths_data.names.size() != decompressed.paths_data.traversals.size()) {
           std::cerr
               << "Verification Failed: path_names size mismatch with paths."
               << std::endl;
           return false;
         }
-        if (original.path_overlaps.size() != original.paths.size() ||
-            decompressed.path_overlaps.size() != decompressed.paths.size()) {
+        if (original.paths_data.overlaps.size() != original.paths_data.traversals.size() ||
+            decompressed.paths_data.overlaps.size() != decompressed.paths_data.traversals.size()) {
           std::cerr
               << "Verification Failed: path_overlaps size mismatch with paths."
               << std::endl;
           return false;
         }
 
-        for (size_t i = 0; i < original.paths.size(); ++i) {
-          const std::vector<NodeId> &original_path = original.paths[i];
-          const std::vector<NodeId> &decompressed_path = decompressed.paths[i];
+        for (size_t i = 0; i < original.paths_data.traversals.size(); ++i) {
+          const std::vector<NodeId> &original_path = original.paths_data.traversals[i];
+          const std::vector<NodeId> &decompressed_path = decompressed.paths_data.traversals[i];
 
           if (original_path.size() != decompressed_path.size()) {
             std::cerr << "Verification Failed: Path index " << i
@@ -316,14 +393,14 @@ PYBIND11_MODULE(gfa_compression, m) {
           }
 
           // Check Overlap
-          if (original.path_overlaps[i] != decompressed.path_overlaps[i]) {
+          if (original.paths_data.overlaps[i] != decompressed.paths_data.overlaps[i]) {
             std::cerr << "Verification Failed: Path index " << i
                       << " overlap mismatch." << std::endl;
             return false;
           }
 
           // Check Name
-          if (original.path_names[i] != decompressed.path_names[i]) {
+          if (original.paths_data.names[i] != decompressed.paths_data.names[i]) {
             std::cerr << "Verification Failed: Path index " << i
                       << " name mismatch." << std::endl;
             return false;
@@ -332,19 +409,19 @@ PYBIND11_MODULE(gfa_compression, m) {
 
         // Verify Segments (Sequences)
         // IDs are 1-based, index 0 is placeholder
-        if (original.node_sequences.size() !=
-            decompressed.node_sequences.size()) {
+        if (original.segments.node_sequences.size() !=
+            decompressed.segments.node_sequences.size()) {
           std::cerr
               << "Verification Failed: Node sequence count mismatch. Original: "
-              << original.node_sequences.size()
-              << ", Decompressed: " << decompressed.node_sequences.size()
+              << original.segments.node_sequences.size()
+              << ", Decompressed: " << decompressed.segments.node_sequences.size()
               << std::endl;
           return false;
         }
 
-        for (size_t i = 1; i < original.node_sequences.size(); ++i) {
-          const std::string &orig_seq = original.node_sequences[i];
-          const std::string &dec_seq = decompressed.node_sequences[i];
+        for (size_t i = 1; i < original.segments.node_sequences.size(); ++i) {
+          const std::string &orig_seq = original.segments.node_sequences[i];
+          const std::string &dec_seq = decompressed.segments.node_sequences[i];
 
           if (orig_seq != dec_seq) {
             // Try to report ID. Since we assume ID = index, we can say Node ID
@@ -389,20 +466,20 @@ PYBIND11_MODULE(gfa_compression, m) {
         }
 
         // Verify Segment Optional Fields
-        if (original.segment_optional_fields.size() !=
-            decompressed.segment_optional_fields.size()) {
+        if (original.segments.optional_fields.size() !=
+            decompressed.segments.optional_fields.size()) {
           std::cerr << "Verification Failed: Segment optional field column "
                        "count mismatch. Original: "
-                    << original.segment_optional_fields.size()
+                    << original.segments.optional_fields.size()
                     << ", Decompressed: "
-                    << decompressed.segment_optional_fields.size() << std::endl;
+                    << decompressed.segments.optional_fields.size() << std::endl;
           return false;
         }
 
-        for (size_t col = 0; col < original.segment_optional_fields.size();
+        for (size_t col = 0; col < original.segments.optional_fields.size();
              ++col) {
-          const auto &orig_col = original.segment_optional_fields[col];
-          const auto &dec_col = decompressed.segment_optional_fields[col];
+          const auto &orig_col = original.segments.optional_fields[col];
+          const auto &dec_col = decompressed.segments.optional_fields[col];
 
           if (orig_col.tag != dec_col.tag || orig_col.type != dec_col.type) {
             std::cerr << "Verification Failed: Segment optional field column "
@@ -764,10 +841,11 @@ PYBIND11_MODULE(gfa_compression, m) {
          uint32_t start_id) {
         void *ptr = reinterpret_cast<void *>(table_ptr);
         std::vector<uint8_t> rules_used(num_rules, 0);
-        gpu_codec::apply_2mer_rules_gpu(graph.paths, ptr, rules_used, start_id);
+        gpu_codec::apply_2mer_rules_gpu(graph.paths, ptr, rules_used,
+                                        start_id);
         return rules_used;
       },
-      "Apply 2-mer rules on GPU (Modifies graph.paths). Returns rules_used "
+      "Apply 2-mer rules on GPU (modifies graph.paths). Returns rules_used "
       "vector.",
       py::arg("graph"), py::arg("table_ptr"), py::arg("num_rules"),
       py::arg("start_id"));

@@ -190,14 +190,14 @@ optional_field_columns_bytes(const std::vector<OptionalFieldColumn> &cols) {
 }
 
 size_t segment_bytes(const GfaGraph &graph) {
-  return string_vector_owned_bytes(graph.node_id_to_name) +
-         string_vector_owned_bytes(graph.node_sequences);
+  return string_vector_owned_bytes(graph.segments.node_id_to_name) +
+         string_vector_owned_bytes(graph.segments.node_sequences);
 }
 
 size_t path_bytes(const GfaGraph &graph) {
-  return nested_node_vector_bytes(graph.paths) +
-         string_vector_owned_bytes(graph.path_names) +
-         string_vector_owned_bytes(graph.path_overlaps);
+  return nested_node_vector_bytes(graph.paths_data.traversals) +
+         string_vector_owned_bytes(graph.paths_data.names) +
+         string_vector_owned_bytes(graph.paths_data.overlaps);
 }
 
 size_t walk_bytes(const GfaGraph &graph) {
@@ -254,7 +254,7 @@ void print_graph_memory_breakdown(const GfaGraph &graph) {
   const size_t jump_data = jump_bytes(graph);
   const size_t containment_data = containment_bytes(graph);
   const size_t segment_optional =
-      optional_field_columns_bytes(graph.segment_optional_fields);
+      optional_field_columns_bytes(graph.segments.optional_fields);
   const size_t link_optional =
       optional_field_columns_bytes(graph.link_optional_fields);
   const size_t node_name_map = node_name_map_bytes(graph);
@@ -331,8 +331,8 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
 
   // Index 0 is a placeholder to support 1-based node IDs.
   // This allows NodeId sign to encode orientation without ambiguity.
-  graph.node_id_to_name.push_back("");
-  graph.node_sequences.push_back("");
+  graph.segments.node_id_to_name.push_back("");
+  graph.segments.node_sequences.push_back("");
 
   int fd = open(gfa_file_path.c_str(), O_RDONLY);
   if (fd == -1) {
@@ -403,8 +403,8 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   num_links_hint_ = l_offsets.size();
   log_phase("line classification");
 
-  graph.node_id_to_name.reserve(num_segments_hint_ + 1);
-  graph.node_sequences.reserve(num_segments_hint_ + 1);
+  graph.segments.node_id_to_name.reserve(num_segments_hint_ + 1);
+  graph.segments.node_sequences.reserve(num_segments_hint_ + 1);
   node_name_lookup_.reserve(num_segments_hint_);
 
   graph.links.from_ids.reserve(num_links_hint_);
@@ -437,8 +437,8 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   }
 
   // Pad optional field columns to segment count
-  size_t num_segments = graph.node_id_to_name.size() - 1;
-  for (auto &col : graph.segment_optional_fields) {
+  size_t num_segments = graph.segments.node_id_to_name.size() - 1;
+  for (auto &col : graph.segments.optional_fields) {
     switch (col.type) {
     case 'i':
       while (col.int_values.size() < num_segments)
@@ -512,9 +512,9 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
   log_phase("parse L-lines");
 
   // Phase 3: Parse P/W-lines (parallel - each writes to pre-allocated index)
-  graph.paths.resize(p_offsets.size());
-  graph.path_names.resize(p_offsets.size());
-  graph.path_overlaps.resize(p_offsets.size());
+  graph.paths_data.traversals.resize(p_offsets.size());
+  graph.paths_data.names.resize(p_offsets.size());
+  graph.paths_data.overlaps.resize(p_offsets.size());
 
   graph.walks.walks.resize(w_offsets.size());
   graph.walks.sample_ids.resize(w_offsets.size());
@@ -573,13 +573,13 @@ GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
             .count();
     const auto snapshot = read_process_memory_snapshot();
     std::cerr << "[GfaParser] segments=" << num_segments
-              << ", links=" << num_links << ", paths=" << graph.paths.size()
+              << ", links=" << num_links << ", paths=" << graph.paths_data.traversals.size()
               << ", walks=" << graph.walks.size()
               << ", jumps=" << graph.jumps.size()
               << ", containments=" << graph.containments.size();
-    if (!graph.segment_optional_fields.empty()) {
+    if (!graph.segments.optional_fields.empty()) {
       std::cerr << ", segment_optional_columns="
-                << graph.segment_optional_fields.size();
+                << graph.segments.optional_fields.size();
     }
     if (!graph.link_optional_fields.empty()) {
       std::cerr << ", link_optional_columns="
@@ -605,7 +605,7 @@ void GfaParser::parse_s_line(std::string_view line, GfaGraph &graph) {
     if (all_segment_names_numeric_ && !is_numeric(node_name_view))
       all_segment_names_numeric_ = false;
 
-    uint32_t new_id = graph.node_id_to_name.size();
+    uint32_t new_id = graph.segments.node_id_to_name.size();
 
     // Validate fast-path: numeric segment names must match their assigned IDs
     if (all_segment_names_numeric_) {
@@ -619,9 +619,9 @@ void GfaParser::parse_s_line(std::string_view line, GfaGraph &graph) {
     // resolution during parsing already goes through node_name_lookup_.
     // Leave graph.node_name_to_id empty for now so we can measure the effect of
     // skipping this duplicate map population.
-    graph.node_id_to_name.push_back(node_name);
-    graph.node_sequences.emplace_back(sequence_view);
-    node_name_lookup_.emplace(graph.node_id_to_name.back(), new_id);
+    graph.segments.node_id_to_name.push_back(node_name);
+    graph.segments.node_sequences.emplace_back(sequence_view);
+    node_name_lookup_.emplace(graph.segments.node_id_to_name.back(), new_id);
     segment_index = new_id - 1;
   } else {
     segment_index = lookup_it->second - 1;
@@ -723,9 +723,9 @@ void GfaParser::parse_p_line(std::string_view line, GfaGraph &graph,
     }
   }
 
-  graph.paths[index] = std::move(path);
-  graph.path_names[index] = std::move(path_name);
-  graph.path_overlaps[index] = std::move(overlaps);
+  graph.paths_data.traversals[index] = std::move(path);
+  graph.paths_data.names[index] = std::move(path_name);
+  graph.paths_data.overlaps[index] = std::move(overlaps);
 }
 
 void GfaParser::parse_w_line(std::string_view line, GfaGraph &graph,
@@ -800,7 +800,7 @@ void GfaParser::parse_segment_field(std::string_view field,
 
   auto it = segment_field_meta_.find(tag_key);
   if (it == segment_field_meta_.end()) {
-    size_t col_index = graph.segment_optional_fields.size();
+    size_t col_index = graph.segments.optional_fields.size();
     segment_field_meta_[tag_key] = {type, col_index};
 
     OptionalFieldColumn col;
@@ -818,7 +818,7 @@ void GfaParser::parse_segment_field(std::string_view field,
       col.b_subtypes.reserve(num_segments_hint_);
       col.b_lengths.reserve(num_segments_hint_);
     }
-    graph.segment_optional_fields.push_back(col);
+    graph.segments.optional_fields.push_back(col);
 
     it = segment_field_meta_.find(tag_key);
   }
@@ -828,12 +828,12 @@ void GfaParser::parse_segment_field(std::string_view field,
 
   if (type != expected_type) {
     throw std::runtime_error("Type mismatch for tag '" +
-                             graph.segment_optional_fields[col_index].tag +
+                             graph.segments.optional_fields[col_index].tag +
                              "': expected '" + std::string(1, expected_type) +
                              "', got '" + std::string(1, type) + "'");
   }
 
-  OptionalFieldColumn &col = graph.segment_optional_fields[col_index];
+  OptionalFieldColumn &col = graph.segments.optional_fields[col_index];
 
   switch (type) {
   case 'i':

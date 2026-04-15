@@ -156,7 +156,7 @@ void write_gfa(const GfaGraph &graph, const std::string &output_path) {
 
   // Precompute string offsets for optional fields
   const FieldOffsets seg_offsets =
-      build_field_offsets(graph.segment_optional_fields);
+      build_field_offsets(graph.segments.optional_fields);
   const FieldOffsets link_offsets =
       build_field_offsets(graph.link_optional_fields);
 
@@ -168,14 +168,14 @@ void write_gfa(const GfaGraph &graph, const std::string &output_path) {
     out << graph.header_line << "\n";
 
   // S (Segments) - index 0 is placeholder, segments start at 1
-  size_t num_segments = graph.node_sequences.size();
+  size_t num_segments = graph.segments.node_sequences.size();
   for (size_t i = 1; i < num_segments; ++i) {
     line.clear();
     line += "S\t";
-    append_node_name(line, i, graph.node_id_to_name);
+    append_node_name(line, i, graph.segments.node_id_to_name);
     line += '\t';
-    line += graph.node_sequences[i];
-    line += format_optional_fields(graph.segment_optional_fields, seg_offsets,
+    line += graph.segments.node_sequences[i];
+    line += format_optional_fields(graph.segments.optional_fields, seg_offsets,
                                    i - 1);
     line += '\n';
     out.write(line.data(), line.size());
@@ -192,12 +192,12 @@ void write_gfa(const GfaGraph &graph, const std::string &output_path) {
     line.clear();
     line += "L\t";
 
-    append_node_name(line, graph.links.from_ids[i], graph.node_id_to_name);
+    append_node_name(line, graph.links.from_ids[i], graph.segments.node_id_to_name);
     line += '\t';
     line += graph.links.from_orients[i];
     line += '\t';
 
-    append_node_name(line, graph.links.to_ids[i], graph.node_id_to_name);
+    append_node_name(line, graph.links.to_ids[i], graph.segments.node_id_to_name);
     line += '\t';
     line += graph.links.to_orients[i];
     line += '\t';
@@ -220,13 +220,13 @@ void write_gfa(const GfaGraph &graph, const std::string &output_path) {
   }
 
   // P (Paths)
-  for (size_t p = 0; p < graph.paths.size(); ++p) {
+  for (size_t p = 0; p < graph.paths_data.traversals.size(); ++p) {
     line.clear();
     line += "P\t";
-    line += graph.path_names[p];
+    line += graph.paths_data.names[p];
     line += '\t';
 
-    const auto &path = graph.paths[p];
+    const auto &path = graph.paths_data.traversals[p];
     for (size_t n = 0; n < path.size(); ++n) {
       if (n > 0)
         line += ',';
@@ -235,13 +235,13 @@ void write_gfa(const GfaGraph &graph, const std::string &output_path) {
       bool is_reverse = (node < 0);
       uint32_t node_id = is_reverse ? static_cast<uint32_t>(-node)
                                     : static_cast<uint32_t>(node);
-      append_node_name(line, node_id, graph.node_id_to_name);
+      append_node_name(line, node_id, graph.segments.node_id_to_name);
       line += (is_reverse ? '-' : '+');
     }
 
     line += '\t';
-    if (p < graph.path_overlaps.size() && !graph.path_overlaps[p].empty())
-      line += graph.path_overlaps[p];
+    if (p < graph.paths_data.overlaps.size() && !graph.paths_data.overlaps[p].empty())
+      line += graph.paths_data.overlaps[p];
     else
       line += '*';
     line += '\n';
@@ -297,7 +297,7 @@ void write_gfa(const GfaGraph &graph, const std::string &output_path) {
       uint32_t node_id = is_reverse ? static_cast<uint32_t>(-node)
                                     : static_cast<uint32_t>(node);
       line += (is_reverse ? '<' : '>');
-      append_node_name(line, node_id, graph.node_id_to_name);
+      append_node_name(line, node_id, graph.segments.node_id_to_name);
     }
     line += '\n';
 
@@ -314,12 +314,12 @@ void write_gfa(const GfaGraph &graph, const std::string &output_path) {
     line.clear();
     line += "J\t";
 
-    append_node_name(line, graph.jumps.from_ids[i], graph.node_id_to_name);
+    append_node_name(line, graph.jumps.from_ids[i], graph.segments.node_id_to_name);
     line += '\t';
     line += graph.jumps.from_orients[i];
     line += '\t';
 
-    append_node_name(line, graph.jumps.to_ids[i], graph.node_id_to_name);
+    append_node_name(line, graph.jumps.to_ids[i], graph.segments.node_id_to_name);
     line += '\t';
     line += graph.jumps.to_orients[i];
     line += '\t';
@@ -341,13 +341,13 @@ void write_gfa(const GfaGraph &graph, const std::string &output_path) {
     line += "C\t";
 
     append_node_name(line, graph.containments.container_ids[i],
-                     graph.node_id_to_name);
+                     graph.segments.node_id_to_name);
     line += '\t';
     line += graph.containments.container_orients[i];
     line += '\t';
 
     append_node_name(line, graph.containments.contained_ids[i],
-                     graph.node_id_to_name);
+                     graph.segments.node_id_to_name);
     line += '\t';
     line += graph.containments.contained_orients[i];
     line += '\t';

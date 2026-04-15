@@ -311,7 +311,7 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   size_t num_rules = rules_first.size();
 
   // Reconstruct paths from flat array
-  reconstruct_sequences(paths_flat, data.sequence_lengths, graph.paths);
+  reconstruct_sequences(paths_flat, data.sequence_lengths, graph.paths_data.traversals);
   paths_flat.clear();
   paths_flat.shrink_to_fit();
 
@@ -319,7 +319,7 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   // Step 3: Expand paths (rule expansion)
   // =========================================================================
   t0 = Clock::now();
-  expand_sequences(graph.paths, rules_first, rules_second, min_rule_id,
+  expand_sequences(graph.paths_data.traversals, rules_first, rules_second, min_rule_id,
                    num_rules, data.original_path_lengths);
   t1 = Clock::now();
   debug_stages.push_back({"expand path traversals", elapsed_ms(t0, t1)});
@@ -329,7 +329,7 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   // =========================================================================
   t0 = Clock::now();
   for (int i = 0; i < data.delta_round; ++i)
-    Codec::inverse_delta_transform(graph.paths);
+    Codec::inverse_delta_transform(graph.paths_data.traversals);
   t1 = Clock::now();
   debug_stages.push_back({"inverse delta traversals", elapsed_ms(t0, t1)});
   log_cpu_decompression_memory_checkpoint("CPU Legacy",
@@ -346,16 +346,16 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   {
 #pragma omp section
     decompress_string_column(data.names_zstd, data.name_lengths_zstd,
-                             graph.path_names);
+                             graph.paths_data.names);
 #pragma omp section
     decompress_string_column(data.overlaps_zstd, data.overlap_lengths_zstd,
-                             graph.path_overlaps);
+                             graph.paths_data.overlaps);
   }
 #else
   decompress_string_column(data.names_zstd, data.name_lengths_zstd,
-                           graph.path_names);
+                           graph.paths_data.names);
   decompress_string_column(data.overlaps_zstd, data.overlap_lengths_zstd,
-                           graph.path_overlaps);
+                           graph.paths_data.overlaps);
 #endif
   t1 = Clock::now();
   debug_stages.push_back({"decode path metadata", elapsed_ms(t0, t1)});
@@ -446,8 +446,8 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   // segment names, because the serialized CPU representation stores segments
   // by implicit 1-based ID order only.
   t0 = Clock::now();
-  graph.node_id_to_name.push_back("");
-  graph.node_sequences.push_back("");
+  graph.segments.node_id_to_name.push_back("");
+  graph.segments.node_sequences.push_back("");
 
   size_t offset = 0;
   for (size_t i = 0; i < seg_lens.size(); ++i) {
@@ -461,8 +461,8 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
       offset += len;
     }
 
-    graph.node_id_to_name.push_back(name);
-    graph.node_sequences.push_back(seq);
+    graph.segments.node_id_to_name.push_back(name);
+    graph.segments.node_sequences.push_back(seq);
     graph.node_name_to_id[name] = id;
   }
   t1 = Clock::now();
@@ -471,7 +471,7 @@ void decompress_gfa(const CompressedData &data, GfaGraph &graph,
   // Decompress optional fields
   t0 = Clock::now();
   for (const auto &c : data.segment_optional_fields_zstd)
-    graph.segment_optional_fields.push_back(decompress_optional_column(c));
+    graph.segments.optional_fields.push_back(decompress_optional_column(c));
 
   for (const auto &c : data.link_optional_fields_zstd)
     graph.link_optional_fields.push_back(decompress_optional_column(c));

@@ -101,12 +101,12 @@ struct ContainmentCompressionInput {
 };
 
 void release_path_fields(CompressionContext &ctx) {
-  ctx.graph.paths.clear();
-  ctx.graph.paths.shrink_to_fit();
-  ctx.graph.path_names.clear();
-  ctx.graph.path_names.shrink_to_fit();
-  ctx.graph.path_overlaps.clear();
-  ctx.graph.path_overlaps.shrink_to_fit();
+  ctx.graph.paths_data.traversals.clear();
+  ctx.graph.paths_data.traversals.shrink_to_fit();
+  ctx.graph.paths_data.names.clear();
+  ctx.graph.paths_data.names.shrink_to_fit();
+  ctx.graph.paths_data.overlaps.clear();
+  ctx.graph.paths_data.overlaps.shrink_to_fit();
 }
 
 void release_walk_fields(CompressionContext &ctx) {
@@ -125,8 +125,8 @@ void release_walk_fields(CompressionContext &ctx) {
 }
 
 void release_segment_link_fields(CompressionContext &ctx) {
-  ctx.graph.node_sequences.clear();
-  ctx.graph.node_sequences.shrink_to_fit();
+  ctx.graph.segments.node_sequences.clear();
+  ctx.graph.segments.node_sequences.shrink_to_fit();
   ctx.graph.links.from_ids.clear();
   ctx.graph.links.from_ids.shrink_to_fit();
   ctx.graph.links.to_ids.clear();
@@ -142,8 +142,8 @@ void release_segment_link_fields(CompressionContext &ctx) {
 }
 
 void release_optional_fields(CompressionContext &ctx) {
-  ctx.graph.segment_optional_fields.clear();
-  ctx.graph.segment_optional_fields.shrink_to_fit();
+  ctx.graph.segments.optional_fields.clear();
+  ctx.graph.segments.optional_fields.shrink_to_fit();
   ctx.graph.link_optional_fields.clear();
   ctx.graph.link_optional_fields.shrink_to_fit();
 }
@@ -193,12 +193,12 @@ void initialize_output_metadata(CompressionContext &ctx) {
   }
   ctx.out.delta_round = ctx.delta_round;
 
-  for (const auto &p : ctx.graph.paths)
+  for (const auto &p : ctx.graph.paths_data.traversals)
     ctx.out.original_path_lengths.push_back(static_cast<uint32_t>(p.size()));
   for (const auto &w : ctx.graph.walks.walks)
     ctx.out.original_walk_lengths.push_back(static_cast<uint32_t>(w.size()));
 
-  ctx.total_elements = total_node_count(ctx.graph.paths) +
+  ctx.total_elements = total_node_count(ctx.graph.paths_data.traversals) +
                        total_node_count(ctx.graph.walks.walks);
   ctx.data_size_mb = ctx.total_elements * sizeof(int32_t) / (1024.0 * 1024.0);
 }
@@ -209,8 +209,8 @@ void prepare_id_space_for_traversal_transform(CompressionContext &ctx) {
   // parser's name metadata, which is not needed beyond parsing.
   ctx.graph.node_name_to_id.clear();
   ctx.graph.node_name_to_id.rehash(0);
-  ctx.graph.node_id_to_name.clear();
-  ctx.graph.node_id_to_name.shrink_to_fit();
+  ctx.graph.segments.node_id_to_name.clear();
+  ctx.graph.segments.node_id_to_name.shrink_to_fit();
   ctx.next_id = 0;
 }
 
@@ -219,7 +219,7 @@ double apply_delta_transform(CompressionContext &ctx) {
   ctx.max_abs = 0;
   for (int i = 0; i < ctx.delta_round; ++i) {
     const uint32_t path_max =
-        Codec::delta_transform_and_max_abs(ctx.graph.paths);
+        Codec::delta_transform_and_max_abs(ctx.graph.paths_data.traversals);
     const uint32_t walk_max =
         Codec::delta_transform_and_max_abs(ctx.graph.walks.walks);
     ctx.max_abs = std::max(ctx.max_abs, std::max(path_max, walk_max));
@@ -241,7 +241,7 @@ double apply_delta_transform(CompressionContext &ctx) {
 double run_grammar_stage(CompressionContext &ctx) {
   ctx.layer_start = ctx.next_id;
   const auto start = std::chrono::high_resolution_clock::now();
-  run_grammar_compression(ctx.graph.paths, ctx.graph.walks.walks, ctx.next_id,
+  run_grammar_compression(ctx.graph.paths_data.traversals, ctx.graph.walks.walks, ctx.next_id,
                           ctx.num_rounds, ctx.freq_threshold, ctx.layer_start,
                           ctx.rulebook, ctx.num_threads);
   const auto end = std::chrono::high_resolution_clock::now();
@@ -280,10 +280,10 @@ double compress_rule_columns(CompressionContext &ctx) {
 double compress_path_fields(CompressionContext &ctx) {
   const auto start = std::chrono::high_resolution_clock::now();
   PathCompressionInput input;
-  flatten_traversal_sequences(ctx.graph.paths, input.flat,
+  flatten_traversal_sequences(ctx.graph.paths_data.traversals, input.flat,
                               ctx.out.sequence_lengths);
-  flatten_path_metadata(ctx.graph.paths, ctx.graph.path_names,
-                        ctx.graph.path_overlaps, input.names_concat,
+  flatten_path_metadata(ctx.graph.paths_data.traversals, ctx.graph.paths_data.names,
+                        ctx.graph.paths_data.overlaps, input.names_concat,
                         input.name_lengths, input.overlaps_concat,
                         input.overlap_lengths);
 
@@ -359,7 +359,7 @@ double compress_walk_fields(CompressionContext &ctx) {
 double compress_segment_link_fields(CompressionContext &ctx) {
   SegmentCompressionInput segment_input;
   LinkCompressionInput link_input;
-  flatten_segment_sequences(ctx.graph.node_sequences,
+  flatten_segment_sequences(ctx.graph.segments.node_sequences,
                             segment_input.segment_concat,
                             segment_input.segment_lengths, ctx.next_id);
   ctx.num_segments = segment_input.segment_lengths.size();
@@ -426,7 +426,7 @@ double compress_segment_link_fields(CompressionContext &ctx) {
 
 double compress_optional_fields(CompressionContext &ctx) {
   const auto start = std::chrono::high_resolution_clock::now();
-  for (const auto &col : ctx.graph.segment_optional_fields)
+  for (const auto &col : ctx.graph.segments.optional_fields)
     ctx.out.segment_optional_fields_zstd.push_back(
         compress_optional_column(col));
   for (const auto &col : ctx.graph.link_optional_fields)
@@ -724,7 +724,7 @@ CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
       original_path_len += len;
     for (const auto &len : ctx.out.original_walk_lengths)
       original_walk_len += len;
-    for (const auto &p : ctx.graph.paths)
+    for (const auto &p : ctx.graph.paths_data.traversals)
       encoded_path_len += p.size();
     for (const auto &w : ctx.graph.walks.walks)
       encoded_walk_len += w.size();

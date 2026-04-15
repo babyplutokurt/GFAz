@@ -73,19 +73,41 @@ struct ContainmentData {
   size_t size() const { return container_ids.size(); }
 };
 
+struct SegmentData {
+  // Index 0 is a placeholder for 1-based node IDs.
+  std::vector<std::string> node_id_to_name;
+  std::vector<std::string> node_sequences;
+  std::vector<OptionalFieldColumn> optional_fields;
+
+  size_t size() const {
+    return node_sequences.empty() ? 0 : node_sequences.size() - 1;
+  }
+
+  bool valid() const { return node_id_to_name.size() == node_sequences.size(); }
+};
+
+struct PathData {
+  std::vector<std::string> names;
+  std::vector<std::vector<NodeId>> traversals;
+  std::vector<std::string> overlaps;
+
+  size_t size() const { return traversals.size(); }
+
+  bool valid() const {
+    return names.size() == traversals.size() &&
+           overlaps.size() == traversals.size();
+  }
+};
+
 struct GfaGraph {
   std::string header_line;
 
-  // Segments (S-lines) - index 0 is placeholder for 1-based node IDs.
+  // Segments (S-lines)
   std::unordered_map<std::string, uint32_t> node_name_to_id;
-  std::vector<std::string> node_id_to_name;
-  std::vector<std::string> node_sequences;
-  std::vector<OptionalFieldColumn> segment_optional_fields;
+  SegmentData segments;
 
   // Paths (P-lines)
-  std::vector<std::string> path_names;
-  std::vector<std::vector<NodeId>> paths;
-  std::vector<std::string> path_overlaps;
+  PathData paths_data;
 
   // Walks (W-lines)
   WalkData walks;

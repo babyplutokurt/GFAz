@@ -260,9 +260,9 @@ CompressedData compress_gpu_graph(const GfaGraph_gpu &gpu_graph,
   GpuMetadataCompressionDebugInfo metadata_debug;
 
   CompressedData data =
-      run_path_compression_gpu(gpu_graph.paths, gpu_graph.num_paths, num_rounds,
-                               options, g_debug_compression ? &path_debug
-                                                            : nullptr);
+      run_path_compression_gpu(gpu_graph.paths, gpu_graph.num_paths,
+                               num_rounds, options,
+                               g_debug_compression ? &path_debug : nullptr);
   log_gpu_memory_checkpoint("after path compression");
   data.header_line = gpu_graph.header_line;
   data.delta_round = 1;

@@ -74,9 +74,9 @@ def main():
     original_graph = gfac.parse(args.gfa_file)
     t_parse_end = time.perf_counter()
     print(
-        f"  Parsed: {len(original_graph.paths)} paths, "
+        f"  Parsed: {len(original_graph.paths_data.traversals)} paths, "
         f"{len(original_graph.walks.walks)} walks, "
-        f"{len(original_graph.node_sequences) - 1} segments"
+        f"{len(original_graph.segments.node_sequences) - 1} segments"
     )
     print(f"  Parse time: {t_parse_end - t_parse_start:.3f}s")
 
