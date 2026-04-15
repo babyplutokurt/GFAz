@@ -1,140 +1,250 @@
 # GFAz: State-of-the-Art Graphical Fragment Assembly Compression
 
-GFAz is a C++/CUDA library and command-line tool for compressing and decompressing Graphical Fragment Assembly (GFA) files with grammar-based transforms and a shared Zstd-backed binary container. It supports both a CPU workflow and a GPU-accelerated workflow, while producing the same `.gfaz` file format in both cases.
+GFAz is a C++/CUDA library and command-line tool for compressing and
+decompressing Graphical Fragment Assembly (GFA) files.
 
-## Features
+In our current benchmarks, it reaches up to 20x higher compression ratio than
+Gzip and 15x higher compression ratio than Zstd, with GB/s-level throughput.
 
-- **High Performance**: Achieves up to 20X higher compression ratio compared to Gzip and 15X compared to Zstd, with GB/s-level throughput.
-- **Dual Backends**: Run on CPU (with OpenMP parallelism) or GPU (CUDA).
-- **Python Extension**: Fully featured Python API (`gfa_compression`).
-- **Command-Line Interface**: Easy to use `gfaz` CLI for quick compression/decompression.
-- **Unified File Format**: CPU and GPU compression both produce the same versioned `.gfaz` container.
-- **Cross-Backend Decompression**: Files compressed on CPU can be decompressed on GPU, and files compressed on GPU can be decompressed on CPU.
+It has two execution backends:
+
+- CPU
+- GPU (experimental, CUDA build required)
+
+Both backends produce and consume the same `.gfaz` container format. The backend
+changes how transforms are computed, not the on-disk format.
 
 ## Performance
 
-| Dataset | Metrics | Gzip | Zstd | sqz | sqz+bgzip | sqz+Zstd | GBZ | gfaz(CPU) | gfaz(GPU) |
-|:---|:---|---:|---:|---:|---:|---:|---:|---:|---:|
-| chr1. | Ratio | 5.59 | 7.54 | 3.09 | 18.0 | 16.7 | 9.52 | **35.4** | **31.7** |
-| | Co. | 46.2 | 2178 | 3.95 | 3.97 | 4.00 | 12.1 | **385** | **2754** |
-| | De. | 359 | 1618 | 21.6 | 21.4 | 21.2 | 284 | **1658** | **8124** |
-| chr6. | Ratio | 5.04 | 6.99 | 5.51 | 20.8 | 19.2 | 19.2 | **35.4** | **28.18** |
-| | Co. | 41.0 | 1712 | 3.56 | 3.56 | 3.59 | 10.7 | **348** | **3791** |
-| | De. | 348 | 1515 | 20.1 | 20.4 | 20.2 | 281 | **1758** | **7230** |
-| E.coli | Ratio | 4.69 | 5.67 | 1.26 | 7.46 | 6.79 | 5.58 | **18.3** | **16.7** |
-| | Co. | 33.3 | 1356 | 4.57 | 4.53 | 4.62 | 20.2 | **190** | **678** |
-| | De. | 310 | 1258 | 34.0 | 32.2 | 34.5 | 197 | **491** | **1430** |
-| HPRCv1.1 | Ratio | 4.02 | 5.32 | - | - | - | 14.0 | **22.4** | **20.4** |
-| | Co. | 36.4 | 1657 | - | - | - | 84.5 | **231** | **4843** |
-| | De. | 319 | 1234 | - | - | - | 650 | **1058** | **9435** |
-| HPRCv2.0 | Ratio | 4.19 | 6.49 | - | - | - | 66.8 | **83.9** | **76.4** |
-| | Co. | 49.1 | 1514 | - | - | - | 130 | **367** | **-** |
-| | De. | 342 | 1240 | - | - | - | 648 | **1652** | **-** |
-| HPRCv2.1 | Ratio | 4.19 | 6.43 | - | - | - | 64.2 | **82.8** | **74.2** |
-| | Co. | 48.9 | 1540 | - | - | - | 136 | **348** | **-** |
-| | De. | 343 | 1241 | - | - | - | 652 | **1559** | **-** |
+| Dataset | Metrics | Gzip | Zstd | sqz | sqz+bgzip | GBZ | gfaz(CPU) | gfaz(GPU) |
+|:---|:---|---:|---:|---:|---:|---:|---:|---:|
+| chr1. | Ratio | 5.59 | 7.54 | 3.09 | 18.0 | 9.52 | **35.4** | **31.7** |
+| | Co. | 46.2 | 2178 | 3.95 | 3.97 | 12.1 | **385** | **2754** |
+| | De. | 359 | 1618 | 21.6 | 21.4 | 284 | **1658** | **8124** |
+| chr6. | Ratio | 5.04 | 6.99 | 5.51 | 20.8 | 19.2 | **35.4** | **28.18** |
+| | Co. | 41.0 | 1712 | 3.56 | 3.56 | 10.7 | **348** | **3791** |
+| | De. | 348 | 1515 | 20.1 | 20.4 | 281 | **1758** | **7230** |
+| E.coli | Ratio | 4.69 | 5.67 | 1.26 | 7.46 | 5.58 | **18.3** | **16.7** |
+| | Co. | 33.3 | 1356 | 4.57 | 4.53 | 20.2 | **190** | **678** |
+| | De. | 310 | 1258 | 34.0 | 32.2 | 197 | **491** | **1430** |
+| HPRCv1.1 | Ratio | 4.02 | 5.32 | - | - | 14.0 | **22.4** | **20.4** |
+| | Co. | 36.4 | 1657 | - | - | 84.5 | **231** | **4843** |
+| | De. | 319 | 1234 | - | - | 650 | **1058** | **9435** |
+| HPRCv2.0 | Ratio | 4.19 | 6.49 | - | - | 66.8 | **83.9** | **76.4** |
+| | Co. | 49.1 | 1514 | - | - | 130 | **367** | **-** |
+| | De. | 342 | 1240 | - | - | 648 | **1652** | **-** |
+| HPRCv2.1 | Ratio | 4.19 | 6.43 | - | - | 64.2 | **82.8** | **74.2** |
+| | Co. | 48.9 | 1540 | - | - | 136 | **348** | **-** |
+| | De. | 343 | 1241 | - | - | 652 | **1559** | **-** |
 
-> **Note**: `Ratio` indicates compression ratio, `Co.` indicates compression speed/time, and `De.` indicates decompression speed/time. Bold values indicate the best performance. The system configuration used: AMD Ryzen Threadripper PRO 9955WX (16 cores), an NVIDIA RTX Pro 6000 GPU, and 512 GB of DDR5 6400 MHz memory.
+`Ratio` indicates compression ratio, `Co.` indicates compression speed/time, and
+`De.` indicates decompression speed/time. Bold values indicate the best result
+in each row. System configuration: AMD Ryzen Threadripper PRO 9955WX
+(16 cores), NVIDIA RTX Pro 6000, and 512 GB DDR5-6400 memory.
 
-## Quick Start
+## What It Does
 
-First, install the prerequisites using conda:
+- Compresses GFA text into a shared `CompressedData` / `.gfaz` representation.
+- Supports CPU and GPU compression against the same file format.
+- Supports cross-backend decompression:
+  CPU-compressed files can be decompressed with the GPU path, and GPU-compressed
+  files can be decompressed with the CPU path.
+- Exposes both a CLI (`gfaz`) and Python bindings (`gfa_compression`).
+- Supports path and walk extraction from `.gfaz` without full round-trip
+  conversion.
+- Supports appending path-only or walk-only haplotypes to an existing `.gfaz`
+  file using the stored rulebook.
+
+## Current Model
+
+- Shared container: CPU and GPU workflows both serialize to the same `.gfaz`
+  file format.
+- CPU decompression default: streaming direct-writer mode, which reduces peak
+  memory usage.
+- CPU in-memory decompression is still available through `decompress_gfa(...)`
+  and `gfaz decompress --legacy`.
+- GPU backend is still experimental.
+- Segment names are reconstructed canonically during decompression as dense
+  1-based numeric IDs.
+
+## Build
+
+Initialize the environment first:
+
 ```bash
-conda create -n gfa python=3.11
 conda activate gfa
-conda install -c conda-forge pybind11 numpy
-```
-
-Then, clone the repository and initialize submodules:
-```bash
 git submodule update --init --recursive
 ```
 
-### Build
+CPU-only build:
 
-**CPU-only build (default):**
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
 ```
 
-**CPU + GPU build:**
+CPU + GPU build:
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_CUDA=ON -DCUDA_PATH=/usr/local/cuda-12.8
 cmake --build build -j"$(nproc)"
 ```
 
-Once built, the CLI tool `gfaz` can be found in `build/bin/gfaz`.
+The CLI binary is:
 
-### CLI examples
+```bash
+build/bin/gfaz
+```
+
+## CLI
+
+Compression:
 
 ```bash
 # CPU compression
-gfaz compress example.gfa
+build/bin/gfaz compress example.gfa
 
 # GPU compression; still writes the same .gfaz container
-gfaz compress --gpu example.gfa
-
-# CPU decompression
-gfaz decompress example.gfa.gfaz
-
-# GPU decompression of the same file format
-gfaz decompress --gpu example.gfa.gfaz
+build/bin/gfaz compress --gpu example.gfa
 ```
 
-The backend only changes how transforms are computed. The serialized output format is the same in both cases.
+Decompression:
 
-## Python API Usage
+```bash
+# CPU default: streaming direct-writer path
+build/bin/gfaz decompress example.gfa.gfaz
 
-The library can also be used directly from Python via the `gfa_compression` module:
+# CPU legacy: full in-memory graph reconstruction
+build/bin/gfaz decompress --legacy example.gfa.gfaz
+
+# GPU default: rolling-output GPU path
+build/bin/gfaz decompress --gpu example.gfa.gfaz
+
+# GPU legacy: whole-graph GPU decompression path
+build/bin/gfaz decompress --gpu --gpu-legacy example.gfa.gfaz
+```
+
+Extraction and append workflows:
+
+```bash
+# Extract P-lines by path name
+build/bin/gfaz extract-path example.gfa.gfaz chr1
+
+# Extract a W-line by full identifier tuple
+build/bin/gfaz extract-walk example.gfa.gfaz sample 0 seq1 0 1000
+
+# Append path-only or walk-only haplotypes
+build/bin/gfaz add-haplotypes example.gfa.gfaz new_paths.gfa
+```
+
+Notes:
+
+- In CPU-only builds, `--gpu` falls back to CPU with a warning.
+- CPU decompression defaults to streaming direct-writer mode.
+- GPU decompression defaults to rolling traversal expansion.
+- `extract-path`, `extract-walk`, and `add-haplotypes` all operate on the shared
+  `.gfaz` representation.
+
+## Python
+
+Basic CPU workflow:
 
 ```python
 import gfa_compression as gfac
 
-# Check backend availability
-has_gpu = gfac.has_gpu_backend()
-print(f"GPU Backend Available: {has_gpu}")
-
-# CPU compression workflow
 graph = gfac.parse("example.gfa")
-compressed_data = gfac.compress(graph, num_rounds=8, num_threads=0)
-gfac.serialize(compressed_data, "example_output.gfaz")
+compressed = gfac.compress_file("example.gfa", rounds=8, threshold=2, delta_round=1)
+gfac.serialize(compressed, "example.gfaz")
 
-# CPU decompression workflow
-deserialized_data = gfac.deserialize("example_output.gfaz")
-decompressed_graph = gfac.decompress(deserialized_data)
-gfac.write_gfa(decompressed_graph, "example_output.gfa")
-
-# GPU compression workflow; still emits the same CompressedData container
-if has_gpu:
-    gpu_graph = gfac.convert_to_gpu_layout(graph)
-    gpu_compressed = gfac.compress_gpu_graph(gpu_graph)
-    gfac.serialize(gpu_compressed, "example_gpu_output.gfaz")
-
-    # GPU decompression can read files produced by either backend
-    shared_data = gfac.deserialize("example_output.gfaz")
-    gpu_roundtrip = gfac.decompress_gpu(shared_data)
+data = gfac.deserialize("example.gfaz")
+roundtrip_graph = gfac.decompress_data(data)
+gfac.write_gfa(roundtrip_graph, "example.roundtrip.gfa")
 ```
 
-## Format and Backend Model
+Lower-memory CPU write path:
 
-GFAz now has a single compressed representation:
+```python
+import gfa_compression as gfac
 
-- CPU compression and GPU compression both serialize to the same `.gfaz` container.
-- CPU decompression and GPU decompression can both read that same container.
-- The backend difference is in the transform pipeline, not the file format.
-- The final entropy coding layer is shared Zstd in both paths.
+data = gfac.deserialize("example.gfaz")
+gfac.write_gfa_from_compressed_data(data, "example.streamed.gfa")
+```
+
+GPU workflow:
+
+```python
+import gfa_compression as gfac
+
+if gfac.has_gpu_backend():
+    graph = gfac.parse("example.gfa")
+    gpu_graph = gfac.convert_to_gpu_layout(graph)
+    compressed = gfac.compress_gpu_graph(gpu_graph, 8)
+    gfac.serialize(compressed, "example_gpu.gfaz")
+```
+
+Useful Python entry points:
+
+- `parse(...)` / `parse_gfa(...)`
+- `compress_file(...)`
+- `decompress_data(...)`
+- `serialize(...)`
+- `deserialize(...)`
+- `write_gfa(...)`
+- `write_gfa_from_compressed_data(...)`
+- `extract_path_line(...)` / `extract_path_lines(...)`
+- `extract_walk_line(...)`
+- `extract_walk_line_by_name(...)`
+- `extract_walk_lines(...)`
+- `extract_walk_lines_by_name(...)`
+- `add_haplotypes(...)`
+
+CUDA builds also expose:
+
+- `has_gpu_backend()`
+- `convert_to_gpu_layout(...)`
+- `convert_from_gpu_layout(...)`
+- `compress_gfa_gpu(...)`
+- `compress_gpu_graph(...)`
+- `decompress_to_gpu_layout(...)`
+
+## Internal Data Model
+
+The current in-memory CPU graph groups record families as follows:
+
+- `segments` (`SegmentData`) for S-line state
+- `paths_data` (`PathData`) for P-line state
+- `walks` (`WalkData`) for W-line state
+- `links` (`LinkData`) for L-line state
+- `jumps` (`JumpData`) for J-line state
+- `containments` (`ContainmentData`) for C-line state
+
+The serialized `.gfaz` format remains shared across CPU and GPU backends.
+
+## Validation
+
+Typical checks:
+
+```bash
+conda activate gfa
+python tests/cpu/test_roundtrip.py example.gfa
+python tests/cpu/test_streaming_roundtrip.py example.gfa
+python tests/gpu/test_roundtrip.py example.gfa
+python tests/regression/test_example_regression.py example.gfa
+build/bin/gfaz compress example.gfa
+```
 
 ## Documentation
 
-- **[Build Guide](BUILD_GUIDE.md)**: Full instructions on how to build the project, including CMake flags (`ENABLE_CUDA`, `ENABLE_PROFILING`).
-- **[Workflow Reference](workflow.md)**: An overview of the internal architecture, compression pipelines, and serialization contracts.
+- [BUILD_GUIDE.md](BUILD_GUIDE.md): build instructions and CMake options
+- [workflow.md](workflow.md): internal workflow and serialization reference
 
-## Known Limitations
+## Limitations
 
-- The GPU backend still requires a CUDA-enabled build and runtime environment.
-- Segment names are reconstructed canonically during decompression as dense 1-based numeric IDs; round-trip verification is based on graph semantics rather than original segment-name strings.
+- GPU backend requires a CUDA-enabled build and runtime environment.
+- GPU backend is still experimental.
+- Decompression reconstructs canonical dense numeric segment IDs rather than the
+  original segment-name strings.
 
 ## License
 
-This project is licensed under the MIT License.
+MIT

@@ -1,35 +1,72 @@
-# Build Guide - GFA Compression
+# Build Guide - GFAz
 
 ## Overview
 
-This project has two build modes:
+GFAz supports two backend configurations:
 
-- CPU-only (default)
+- CPU-only
 - CPU + GPU (`ENABLE_CUDA=ON`)
 
-Both modes build the Python module (`gfa_compression`) and the CLI (`gfaz`). In both cases, the compressed on-disk format is the same versioned `.gfaz` container. The GPU build adds GPU implementations for compression and decompression; it does not introduce a second file format.
+Both backends use the same shared `.gfaz` container format. GPU support adds GPU
+implementations for compression and decompression, but it does not introduce a
+second file format.
 
-## Build Flags (Current)
+The build can also independently enable or disable:
 
-| Flag | Default | Effect |
+- Python bindings (`gfa_compression`)
+- CLI executable (`gfaz`)
+- system Zstd vs vendored Zstd
+- optional CLI profiling support
+
+## Current CMake Options
+
+| Option | Default | Effect |
 |---|---:|---|
-| `ENABLE_CUDA` | `OFF` | Enables CUDA backend, GPU workflows, and GPU Python APIs. |
-| `ENABLE_PROFILING` | `OFF` | Links `gfaz` with gperftools profiler. |
+| `ENABLE_CUDA` | `OFF` | Enable CUDA backend and GPU code paths. |
+| `ENABLE_PROFILING` | `OFF` | Link `gfaz` with gperftools profiler support. |
+| `GFAZ_USE_SYSTEM_ZSTD` | `ON` | Use system-installed Zstd instead of the vendored copy in `extern/zstd`. |
+| `BUILD_PYTHON_BINDINGS` | `ON` | Build the `gfa_compression` Python extension module. |
+| `BUILD_CLI` | `ON` | Build the `gfaz` CLI executable. |
 | `CUDA_PATH` | empty | Optional CUDA toolkit root used to locate `nvcc`. |
 
-Related standard CMake options you may set:
+Related standard CMake settings:
 
-- `CMAKE_BUILD_TYPE` (e.g. `Release`, `Debug`)
-- `CMAKE_CUDA_ARCHITECTURES` (GPU builds only)
+- `CMAKE_BUILD_TYPE`
+- `CMAKE_CUDA_ARCHITECTURES`
+- `CMAKE_INSTALL_PREFIX`
 
-## Optional Dependencies
+Notes:
 
-- OpenMP: optional. If found, CPU k-mer collection is parallelized.
-- CUDA Toolkit: required only when `ENABLE_CUDA=ON`.
+- When `ENABLE_CUDA=ON`, the build requires CMake `3.23.1` or newer.
+- If CUDA is enabled and `CMAKE_CUDA_ARCHITECTURES` is not set explicitly, the
+  project uses `native`.
+
+## Dependencies
+
+Required for the default build:
+
+- CMake >= 3.15
+- C++17 compiler
+- Python 3 development headers if `BUILD_PYTHON_BINDINGS=ON`
+- pybind11 submodule
+- Zstd
+
+Optional:
+
+- OpenMP
+- CUDA toolkit for `ENABLE_CUDA=ON`
+- gperftools for `ENABLE_PROFILING=ON`
 
 ## Environment Setup
 
-Example Conda setup:
+Typical project environment:
+
+```bash
+conda activate gfa
+git submodule update --init --recursive
+```
+
+If you need to create the environment first:
 
 ```bash
 conda create -n gfa python=3.11
@@ -37,171 +74,216 @@ conda activate gfa
 conda install -c conda-forge pybind11 numpy
 ```
 
-Additional GPU-related packages used in some environments:
+## Common Builds
 
-```bash
-conda install -c conda-forge cudatoolkit
-```
+### Default Build
 
-## Build Instructions
+Builds:
 
-```bash
-git submodule update --init --recursive
-```
+- core library
+- Python bindings
+- CLI
 
-### CPU-only (default)
+Command:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
 ```
 
-CMake should report:
+Expected configure behavior:
 
-- `CUDA disabled - building CPU-only version`
+- CUDA disabled
+- system Zstd preferred
+- Python bindings enabled
+- CLI enabled
 
-### CPU + GPU
+### CPU-only Build Without Python Bindings
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_CUDA=ON
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_PYTHON_BINDINGS=OFF
 cmake --build build -j"$(nproc)"
 ```
 
-If CUDA is not in default location, provide `CUDA_PATH`:
+### CPU-only Build Without CLI
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_CUDA=ON -DCUDA_PATH=/usr/local/cuda-12.8
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_CLI=OFF
+cmake --build build -j"$(nproc)"
 ```
+
+### CPU + GPU Build
+
+```bash
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DENABLE_CUDA=ON
+cmake --build build -j"$(nproc)"
+```
+
+If CUDA is not in the default search path, provide `CUDA_PATH`:
+
+```bash
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DENABLE_CUDA=ON \
+  -DCUDA_PATH=/usr/local/cuda-12.8
+cmake --build build -j"$(nproc)"
+```
+
+### Build With Vendored Zstd
+
+```bash
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DGFAZ_USE_SYSTEM_ZSTD=OFF
+cmake --build build -j"$(nproc)"
+```
+
+### Build With CLI Profiling
+
+```bash
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DENABLE_PROFILING=ON
+cmake --build build -j"$(nproc)"
+```
+
+This only affects the `gfaz` executable.
 
 ## Outputs
 
-- Python extension module: `gfa_compression` (in build tree)
-- CLI executable: `build/bin/gfaz`
+### Core library
 
-## Backend Responsibilities
+- `gfa_compression_core` static library
 
-### CPU backend
+### Python bindings
 
-- Parse GFA text into `GfaGraph`
-- CPU grammar compression/decompression workflow
-- Shared `.gfaz` serialization/deserialization
-- Baseline path for all builds
+If `BUILD_PYTHON_BINDINGS=ON`:
 
-### GPU backend (`ENABLE_CUDA=ON`)
+- `gfa_compression` Python extension module in the build tree
 
-- GPU-friendly graph layout conversion (`GfaGraph <-> GfaGraph_gpu`)
-- GPU compression/decompression workflows over the shared `.gfaz` format
-- Reuses the same serialized `CompressedData` schema and Zstd-based entropy layer as CPU
+### CLI
 
-## File Format Versions
+If `BUILD_CLI=ON`:
 
-Current binary format in code:
+- `build/bin/gfaz`
 
-- Shared CPU/GPU format
-  - Magic: `GFAZ`
-  - Version: `5`
+## Dependency Resolution Behavior
 
-## Python API Capabilities by Build Mode
+### Zstd
 
-### Available in all builds (stable root APIs)
+If `GFAZ_USE_SYSTEM_ZSTD=ON`:
 
-- `parse()`, `parse_gfa()`
-- `compress()`, `decompress()`
-- `serialize()`, `deserialize()`
-- `write_gfa()`
-- `verify_round_trip()` (alias `verify_roundtrip`)
+- CMake first tries `find_package(ZSTD)`
+- if that does not provide `ZSTD::ZSTD`, it falls back to `pkg-config`
+
+If `GFAZ_USE_SYSTEM_ZSTD=OFF`:
+
+- the vendored source under `extern/zstd` is built as `zstd_static`
+
+### OpenMP
+
+OpenMP is optional.
+
+- If found, CPU OpenMP regions are enabled.
+- If not found, the project still builds, but CPU parallel regions fall back to
+  single-threaded execution.
+
+### CUDA
+
+If `ENABLE_CUDA=ON`:
+
+- CUDA language is enabled
+- `find_package(CUDAToolkit REQUIRED)` is used
+- `extern/cuCollections` is added to the build
+
+## What Each Build Contains
+
+### CPU build
+
+- GFA parser and writer
+- CPU compression workflow
+- CPU decompression workflow
+- extraction workflows
+- add-haplotypes workflow
+- shared serializer/deserializer
+
+### CUDA build
+
+Includes everything from the CPU build, plus:
+
+- `GfaGraph <-> GfaGraph_gpu` conversion
+- GPU compression pipeline
+- GPU decompression pipeline
+- GPU direct-writer path
+- GPU serializer compatibility aliases over the shared `.gfaz` format
+
+## Python API Availability by Build Mode
+
+### Available in all builds
+
+- `parse(...)` / `parse_gfa(...)`
+- `compress_file(...)`
+- `decompress_data(...)`
+- `serialize(...)`
+- `deserialize(...)`
+- `write_gfa(...)`
+- `write_gfa_from_compressed_data(...)`
+- extraction helpers
+- `add_haplotypes(...)`
+- `verify_round_trip(...)`
 - `has_gpu_backend()`
 
-### CUDA builds only (stable GPU root APIs)
+### CUDA builds only
 
-- `compress_gfa_gpu()`
-- `compress_gpu_graph()`
-- `decompress_to_gpu_layout()`
-- `verify_gpu_round_trip()`
-- `serialize_gpu()`, `deserialize_gpu()` (compatibility aliases over the shared serializer)
-- `convert_to_gpu_layout()`, `convert_from_gpu_layout()`
-
-### Experimental GPU helpers (CUDA builds only)
-
+- `convert_to_gpu_layout(...)`
+- `convert_from_gpu_layout(...)`
+- `compress_gfa_gpu(...)`
+- `compress_gpu_graph(...)`
+- `decompress_to_gpu_layout(...)`
+- `serialize_gpu(...)`
+- `deserialize_gpu(...)`
+- GPU verification helpers
 - `gfa_compression.experimental.gpu.*`
 
-Backward-compatible top-level aliases for several legacy GPU helpers are still exported in CUDA builds.
-
-### Runtime check
+Runtime check:
 
 ```python
 import gfa_compression as gfac
 print(gfac.has_gpu_backend())
 ```
 
-## CLI Usage
+## CLI Notes
 
-### Compress
+The CLI is built only when `BUILD_CLI=ON`.
 
-```bash
-gfaz compress [OPTIONS] <input.gfa> [output.gfaz]
-```
+Key behavior:
 
-Options:
-
-- `-r, --rounds <N>` default `8`
-- `-d, --delta <N>` default `1` (CPU backend)
-- `-t, --threshold <N>` default `2` (CPU backend)
-- `-j, --threads <N>` default `0` (auto)
-- `-g, --gpu` use GPU backend if available
-
-### Decompress
-
-```bash
-gfaz decompress [OPTIONS] <input.gfaz> [output.gfa]
-```
-
-Options:
-
-- `-j, --threads <N>` default `0` (auto, CPU backend)
-- `-g, --gpu` use GPU backend if available
-
-### CLI behavior notes
-
-- CPU-only build + `--gpu`: prints warning and falls back to CPU backend.
-- CPU-produced `.gfaz` can be decompressed with `--gpu`.
-- GPU-produced `.gfaz` can be decompressed without `--gpu`.
+- CPU-only build + `--gpu`: warns and falls back to CPU.
+- CPU and GPU backends read and write the same `.gfaz` format.
+- CPU decompression defaults to streaming direct-writer mode.
+- GPU decompression defaults to rolling traversal expansion.
 - CPU `threads=0` uses auto policy:
-  - `GFAZ_NUM_THREADS` if set
-  - else `OMP_NUM_THREADS` if set
-  - else `min(8, logical_cpus/2)`
-- The same CPU thread policy is applied consistently across:
-  - parser parallel sections (P/W line parsing)
-  - CPU grammar compression/decompression OpenMP regions
-- In CUDA build, GPU mode ignores CPU-only tuning knobs:
-  - compress: `--delta`, `--threshold`, `--threads`
-  - decompress: `--threads`
-- Default output names:
-  - CPU compress: `<input>.gfaz`
-  - GPU compress: `<input>.gfaz`
-  - Decompress without output strips `.gfaz` when present.
+  `GFAZ_NUM_THREADS` -> `OMP_NUM_THREADS` -> `min(8, logical_cpus/2)`.
+- Some CPU tuning knobs are ignored in GPU mode by design.
 
-### Examples
+## Format Version
 
-```bash
-# CPU compress/decompress
-gfaz compress input.gfa
-gfaz decompress input.gfa.gfaz
+Current shared binary format:
 
-# GPU compress/decompress (CUDA build)
-gfaz compress --gpu input.gfa
-gfaz decompress --gpu input.gfa.gfaz
-```
-
-## Known Limitations
-
-- CPU and GPU backends share the same `.gfaz` container; `--gpu` selects the GPU implementation, not a different format.
-- GPU backend currently uses a different tuning surface than CPU backend; some CLI knobs are intentionally ignored in GPU mode.
-- Decompression reconstructs segment names canonically as dense 1-based numeric IDs rather than preserving original segment-name strings.
+- magic: `GFAZ`
+- version: `5`
 
 ## Troubleshooting
 
 ### CUDA not found
+
+Check:
 
 ```bash
 which nvcc
@@ -214,14 +296,47 @@ export PATH=/usr/local/cuda/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 ```
 
-### CPU-only build accidentally requested GPU path
-
-Reconfigure explicitly:
+Or configure with:
 
 ```bash
-cmake .. -DENABLE_CUDA=OFF
+cmake -S . -B build -DENABLE_CUDA=ON -DCUDA_PATH=/usr/local/cuda-12.8
+```
+
+### Python build fails
+
+If `BUILD_PYTHON_BINDINGS=ON`, CMake requires:
+
+- Python interpreter
+- Python development headers/libraries
+
+Disable bindings if you only need the core library or CLI:
+
+```bash
+cmake -S . -B build -DBUILD_PYTHON_BINDINGS=OFF
+```
+
+### System Zstd not found
+
+Either install system Zstd development packages, or switch to vendored Zstd:
+
+```bash
+cmake -S . -B build -DGFAZ_USE_SYSTEM_ZSTD=OFF
 ```
 
 ### Profiling build fails
 
-`ENABLE_PROFILING=ON` requires `libgoogle-perftools-dev` (or equivalent package providing `libprofiler`).
+`ENABLE_PROFILING=ON` requires a system `profiler` library from gperftools.
+
+On Debian/Ubuntu:
+
+```bash
+sudo apt install libgoogle-perftools-dev
+```
+
+### CPU-only build accidentally configured after a CUDA build
+
+Reconfigure explicitly:
+
+```bash
+cmake -S . -B build -DENABLE_CUDA=OFF
+```
