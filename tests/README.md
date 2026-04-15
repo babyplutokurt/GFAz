@@ -13,8 +13,11 @@
 
 `tests/regression/`
 - Fixture-driven end-to-end regressions. The main entry point is
-- `tests/regression/test_example_regression.py`, which runs the explicit CPU/GPU
+- `tests/regression/test_compression_regression.py`, which runs the explicit CPU/GPU
 - path matrix and cross-backend compatibility checks against `example.gfa`.
+- `tests/regression/test_cli_commands.py`, which covers `extract-path`,
+- `extract-walk`, and `add-haplotypes` using compact fixtures under
+- `tests/fixtures/`.
 
 Legacy root-level test scripts remain as wrappers so older commands still
 run, but new commands should use the files under `tests/`.

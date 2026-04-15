@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Regression suite for example.gfa.
+Compression regression suite.
 
 This suite explicitly covers each CPU/GPU compression and decompression path
 that matters for backend compatibility:
@@ -43,7 +43,7 @@ DEFAULT_GPU_TRAVERSALS_PER_CHUNK = 16
 
 def parse_args():
   parser = argparse.ArgumentParser(
-      description="Explicit backend/path regression suite for example.gfa"
+      description="Explicit compression regression suite across CPU/GPU paths"
   )
   parser.add_argument(
       "gfa_file",

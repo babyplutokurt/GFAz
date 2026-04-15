@@ -229,7 +229,7 @@ conda activate gfa
 python tests/cpu/test_roundtrip.py example.gfa
 python tests/cpu/test_streaming_roundtrip.py example.gfa
 python tests/gpu/test_roundtrip.py example.gfa
-python tests/regression/test_example_regression.py example.gfa
+python tests/regression/test_compression_regression.py example.gfa
 build/bin/gfaz compress example.gfa
 ```
 
