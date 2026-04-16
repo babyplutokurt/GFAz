@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <iostream>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -47,20 +48,45 @@ inline int resolve_omp_thread_count(int num_threads) {
 #endif
 }
 
+inline bool gfaz_threading_debug_enabled() {
+  if (const char *env = std::getenv("GFAZ_THREADING_DEBUG")) {
+    return env[0] != '\0' && env[0] != '0';
+  }
+  return false;
+}
+
 // RAII wrapper to set/restore OpenMP thread count.
 class ScopedOMPThreads {
 public:
   explicit ScopedOMPThreads(int num_threads) : set_(false), resolved_threads_(1) {
 #ifdef _OPENMP
     original_threads_ = omp_get_max_threads();
+    const char *mode = "auto";
     if (num_threads < 0) {
       resolved_threads_ = std::max(1, original_threads_);
+      mode = "inherit";
     } else {
       resolved_threads_ = resolve_omp_thread_count(num_threads);
+      mode = num_threads > 0 ? "explicit" : "auto";
       if (resolved_threads_ > 0 && original_threads_ != resolved_threads_) {
         omp_set_num_threads(resolved_threads_);
         set_ = true;
       }
+    }
+
+    if (gfaz_threading_debug_enabled()) {
+      std::cerr << "[GFAZ Threading] requested=" << num_threads
+                << " mode=" << mode
+                << " original_omp_max=" << original_threads_
+                << " effective_threads=" << resolved_threads_
+                << " changed_runtime=" << (set_ ? "yes" : "no") << std::endl;
+    }
+#else
+    if (gfaz_threading_debug_enabled()) {
+      std::cerr << "[GFAZ Threading] requested=" << num_threads
+                << " mode=serial"
+                << " effective_threads=1"
+                << " changed_runtime=no" << std::endl;
     }
 #endif
     (void)num_threads;
