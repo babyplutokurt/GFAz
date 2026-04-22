@@ -5,6 +5,7 @@
 #include "grammar/rule_generator.hpp"
 #include "io/gfa_parser.hpp"
 #include "utils/debug_log.hpp"
+#include "utils/threading_utils.hpp"
 #include "workflows/compression_debug.hpp"
 #include "workflows/compression_utils.hpp"
 
@@ -216,7 +217,12 @@ void prepare_id_space_for_traversal_transform(CompressionContext &ctx) {
 uint32_t max_abs_symbol(
     const std::vector<std::vector<gfaz::NodeId>> &sequences) {
   uint32_t max_abs = 0;
-  for (const auto &sequence : sequences) {
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic) reduction(max : max_abs)
+#endif
+  for (size_t i = 0; i < sequences.size(); ++i) {
+    const auto &sequence = sequences[i];
     for (gfaz::NodeId node : sequence) {
       const uint32_t abs_id = static_cast<uint32_t>(std::abs(node));
       if (abs_id > max_abs)
