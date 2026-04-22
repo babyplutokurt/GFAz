@@ -1,6 +1,7 @@
 #ifndef GROWTH_WORKFLOW_HPP
 #define GROWTH_WORKFLOW_HPP
 
+#include "cli/common.hpp"
 #include "model/compressed_data.hpp"
 
 #include <cstdint>
@@ -19,7 +20,8 @@ struct GrowthResult {
   std::vector<double> growth;
 };
 
-GrowthResult compute_growth(const CompressedData &data);
+GrowthResult compute_growth(const CompressedData &data,
+                            int num_threads = cli::kDefaultNumThreads);
 
 } // namespace gfaz
 

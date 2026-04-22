@@ -216,6 +216,7 @@ USAGE:
     gfaz growth [OPTIONS] <input.gfaz>
 
 OPTIONS:
+    -j, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP
     -h, --help              Show this help message
 
 OUTPUT:
@@ -224,9 +225,10 @@ OUTPUT:
     Equivalent to Panacus 'growth' with count=node, coverage>=1, quorum>=0.
 
 NOTES:
-    Single-threaded, decode-one path/walk at a time. Uses the existing
-    grammar rule expansion + inverse-delta on each haplotype, builds a
-    per-node coverage histogram, and evaluates the closed-form growth curve.
+    Decodes haplotypes in parallel using OpenMP; each thread keeps its own
+    per-node coverage + last-seen-stamp arrays (memory ~ 2 * num_nodes * 4
+    bytes per thread). Coverages are reduced into a histogram and the
+    closed-form growth curve is evaluated in parallel over k.
 
 )";
 }

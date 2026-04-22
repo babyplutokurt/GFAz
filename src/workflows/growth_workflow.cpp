@@ -1,12 +1,17 @@
 #include "workflows/growth_workflow.hpp"
 
 #include "codec/codec.hpp"
+#include "utils/threading_utils.hpp"
 
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <stdexcept>
 #include <vector>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace gfaz {
 
@@ -109,47 +114,34 @@ uint32_t infer_num_nodes(const CompressedData &data) {
   return static_cast<uint32_t>(seg_lens.size());
 }
 
-void accumulate_haplotypes(const std::vector<int32_t> &flat,
-                           const std::vector<uint32_t> &lengths,
-                           const std::vector<uint32_t> &original_lengths,
-                           int delta_round, uint32_t min_rule_id,
-                           const std::vector<int32_t> &rules_first,
-                           const std::vector<int32_t> &rules_second,
-                           uint32_t num_nodes, std::vector<uint32_t> &cov,
-                           std::vector<uint32_t> &last_seen, uint32_t &hap_id) {
-  std::vector<NodeId> decoded;
-  decoded.reserve(1024);
+// Slice descriptor for one haplotype (path or walk) in the flat encoded array.
+struct HapSlice {
+  const int32_t *encoded;
+  uint32_t enc_len;
+  uint32_t orig_len;
+};
 
+void build_slices(const std::vector<int32_t> &flat,
+                  const std::vector<uint32_t> &lengths,
+                  const std::vector<uint32_t> &original_lengths,
+                  std::vector<HapSlice> &out) {
   size_t offset = 0;
   for (size_t i = 0; i < lengths.size(); ++i) {
-    ++hap_id;
-    const size_t enc_len = lengths[i];
+    const uint32_t enc_len = lengths[i];
     const uint32_t orig_len = (i < original_lengths.size())
                                   ? original_lengths[i]
-                                  : static_cast<uint32_t>(enc_len);
+                                  : enc_len;
     if (offset + enc_len > flat.size()) {
       throw std::runtime_error("growth: encoded haplotype block is truncated");
     }
-    decode_one_haplotype(flat.data() + offset, enc_len, orig_len, delta_round,
-                         min_rule_id, rules_first, rules_second, decoded);
+    out.push_back(HapSlice{flat.data() + offset, enc_len, orig_len});
     offset += enc_len;
-
-    for (NodeId node : decoded) {
-      const uint32_t v =
-          static_cast<uint32_t>(node < 0 ? -static_cast<int64_t>(node) : node);
-      if (v == 0 || v > num_nodes)
-        continue;
-      if (last_seen[v] != hap_id) {
-        last_seen[v] = hap_id;
-        cov[v] += 1;
-      }
-    }
   }
 }
 
 } // namespace
 
-GrowthResult compute_growth(const CompressedData &data) {
+GrowthResult compute_growth(const CompressedData &data, int num_threads) {
   GrowthResult result;
 
   const uint32_t num_nodes = infer_num_nodes(data);
@@ -179,35 +171,89 @@ GrowthResult compute_growth(const CompressedData &data) {
       Codec::zstd_decompress_int32_vector(data.walks_zstd);
 
   const uint32_t min_rule_id = data.min_rule_id();
+  const int delta_round = data.delta_round;
 
-  std::vector<uint32_t> cov(static_cast<size_t>(num_nodes) + 1, 0);
-  std::vector<uint32_t> last_seen(static_cast<size_t>(num_nodes) + 1, 0);
+  std::vector<HapSlice> slices;
+  slices.reserve(total_haps);
+  build_slices(paths_flat, data.sequence_lengths, data.original_path_lengths,
+               slices);
+  build_slices(walks_flat, data.walk_lengths, data.original_walk_lengths,
+               slices);
 
-  uint32_t hap_id = 0;
-  accumulate_haplotypes(paths_flat, data.sequence_lengths,
-                        data.original_path_lengths, data.delta_round,
-                        min_rule_id, rules_first, rules_second, num_nodes, cov,
-                        last_seen, hap_id);
-  accumulate_haplotypes(walks_flat, data.walk_lengths,
-                        data.original_walk_lengths, data.delta_round,
-                        min_rule_id, rules_first, rules_second, num_nodes, cov,
-                        last_seen, hap_id);
+  ScopedOMPThreads omp_scope(num_threads);
+  const int T = std::max(1, omp_scope.effective_threads());
 
-  result.hist.assign(static_cast<size_t>(N) + 1, 0);
-  for (uint32_t v = 1; v <= num_nodes; ++v) {
-    result.hist[cov[v]] += 1;
+  // Single shared coverage array; per-thread last-seen stamp filters duplicate
+  // updates within one hap. Memory is 4 * num_nodes (cov) + T * num_nodes
+  // (last_seen), instead of 2T * 4 * num_nodes.
+  const size_t cov_len = static_cast<size_t>(num_nodes) + 1;
+  std::vector<uint32_t> cov(cov_len, 0);
+
+#pragma omp parallel num_threads(T)
+  {
+    // uint8_t stamps cycle 1..255; wrap forces a reset of last_seen. With ~N
+    // haps total per thread (N << 1e6 in practice), resets are rare.
+    std::vector<uint8_t> last_seen(cov_len, 0);
+    uint8_t stamp = 0;
+    std::vector<NodeId> decoded;
+    decoded.reserve(1024);
+
+#pragma omp for schedule(dynamic, 16)
+    for (long long i = 0; i < static_cast<long long>(slices.size()); ++i) {
+      if (stamp == 255) {
+        std::fill(last_seen.begin(), last_seen.end(), 0);
+        stamp = 0;
+      }
+      ++stamp;
+
+      const HapSlice &s = slices[static_cast<size_t>(i)];
+      decode_one_haplotype(s.encoded, s.enc_len, s.orig_len, delta_round,
+                           min_rule_id, rules_first, rules_second, decoded);
+      for (NodeId node : decoded) {
+        const uint32_t v = static_cast<uint32_t>(
+            node < 0 ? -static_cast<int64_t>(node) : node);
+        if (v == 0 || v > num_nodes)
+          continue;
+        if (last_seen[v] != stamp) {
+          last_seen[v] = stamp;
+#pragma omp atomic
+          cov[v] += 1;
+        }
+      }
+    }
   }
 
+  // Build coverage histogram from the shared cov[] array.
+  result.hist.assign(static_cast<size_t>(N) + 1, 0);
+#pragma omp parallel num_threads(T)
+  {
+    std::vector<uint64_t> local_hist(static_cast<size_t>(N) + 1, 0);
+#pragma omp for schedule(static) nowait
+    for (long long v = 1; v <= static_cast<long long>(num_nodes); ++v) {
+      const uint32_t c = cov[static_cast<size_t>(v)];
+      if (c <= N)
+        local_hist[c] += 1;
+    }
+#pragma omp critical
+    {
+      for (size_t c = 0; c <= N; ++c)
+        result.hist[c] += local_hist[c];
+    }
+  }
+
+  // Closed-form expectation: per k, sum over c of hist[c] * P(covered).
   result.growth.assign(static_cast<size_t>(N) + 1, 0.0);
-  for (uint32_t k = 1; k <= N; ++k) {
+#pragma omp parallel for num_threads(T) schedule(dynamic, 16)
+  for (long long k = 1; k <= static_cast<long long>(N); ++k) {
     double sum = 0.0;
     for (uint32_t c = 1; c <= N; ++c) {
       const uint64_t hc = result.hist[c];
       if (hc == 0)
         continue;
-      sum += static_cast<double>(hc) * frac_covered_union(N, c, k);
+      sum += static_cast<double>(hc) *
+             frac_covered_union(N, c, static_cast<uint32_t>(k));
     }
-    result.growth[k] = sum;
+    result.growth[static_cast<size_t>(k)] = sum;
   }
 
   return result;

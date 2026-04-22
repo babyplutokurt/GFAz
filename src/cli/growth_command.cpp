@@ -12,13 +12,19 @@
 namespace gfaz::cli {
 
 int do_growth(int argc, char *argv[]) {
-  static struct option long_options[] = {{"help", no_argument, 0, 'h'},
+  int num_threads = kDefaultNumThreads;
+
+  static struct option long_options[] = {{"threads", required_argument, 0, 'j'},
+                                         {"help", no_argument, 0, 'h'},
                                          {0, 0, 0, 0}};
 
   int opt;
   optind = 1;
-  while ((opt = getopt_long(argc, argv, "h", long_options, nullptr)) != -1) {
+  while ((opt = getopt_long(argc, argv, "j:h", long_options, nullptr)) != -1) {
     switch (opt) {
+    case 'j':
+      num_threads = std::stoi(optarg);
+      break;
     case 'h':
       print_growth_help();
       return 0;
@@ -39,7 +45,7 @@ int do_growth(int argc, char *argv[]) {
   try {
     const gfaz::CompressedData data =
         gfaz::deserialize_compressed_data(input_path);
-    const gfaz::GrowthResult result = gfaz::compute_growth(data);
+    const gfaz::GrowthResult result = gfaz::compute_growth(data, num_threads);
 
     std::cout << "# gfaz growth (count=node, coverage>=1, quorum>=0)\n";
     std::cout << "# num_haplotypes=" << result.num_haplotypes
