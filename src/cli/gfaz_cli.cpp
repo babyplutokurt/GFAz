@@ -28,6 +28,8 @@ int main(int argc, char *argv[]) {
     return gfaz::cli::do_extract_walk(argc - 1, argv + 1);
   } else if (command == "add-haplotypes") {
     return gfaz::cli::do_add_haplotypes(argc - 1, argv + 1);
+  } else if (command == "growth") {
+    return gfaz::cli::do_growth(argc - 1, argv + 1);
   } else {
     std::cerr << "Unknown command: " << command << std::endl;
     gfaz::cli::print_usage();

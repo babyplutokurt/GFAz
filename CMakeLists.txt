@@ -136,6 +136,7 @@ set(GFA_CORE_SOURCES
   src/workflows/compression_debug.cpp
   src/workflows/decompression_workflow.cpp
   src/workflows/decompression_debug.cpp
+  src/workflows/growth_workflow.cpp
   src/utils/runtime_utils.cpp
   src/codec/codec.cpp
   src/codec/serialization.cpp
@@ -243,6 +244,7 @@ if(BUILD_CLI)
     src/cli/extract_path_command.cpp
     src/cli/extract_walk_command.cpp
     src/cli/add_haplotypes_command.cpp
+    src/cli/growth_command.cpp
   )
   set_target_properties(gfaz PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/bin"

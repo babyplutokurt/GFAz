@@ -75,6 +75,7 @@ USAGE:
                       <sample_id> <hap_index> <seq_id> <seq_start> <seq_end>
                       [<sample_id> <hap_index> <seq_id> <seq_start> <seq_end> ...]
     gfaz add-haplotypes [OPTIONS] <input.gfaz> <paths_or_walks.gfa> [output.gfaz]
+    gfaz growth [OPTIONS] <input.gfaz>
 
 SUBCOMMANDS:
     compress      Compress a GFA file to GFAZ format
@@ -82,6 +83,7 @@ SUBCOMMANDS:
     extract-path  Extract a single P-line to stdout
     extract-walk  Extract a single W-line to stdout
     add-haplotypes  Append path-only or walk-only haplotypes using the existing rulebook
+    growth        Compute pangenome growth curve (Panacus-equivalent, count=node)
 
 OPTIONS (compress):
     -r, --rounds <N>        Number of compression rounds (default: 8)
@@ -202,6 +204,29 @@ BEHAVIOR:
     - If no output path is provided, writes <input>.updated.gfaz.
     - If delta encoding causes appended IDs to collide with the stored rule
       region, the command fails without writing output.
+
+)";
+}
+
+void print_growth_help() {
+  std::cout << R"(
+gfaz growth - Compute pangenome growth curve from a GFAZ file
+
+USAGE:
+    gfaz growth [OPTIONS] <input.gfaz>
+
+OPTIONS:
+    -h, --help              Show this help message
+
+OUTPUT:
+    Tab-separated table of expected number of distinct nodes covered by a
+    random subset of size k, for k = 1..N (N = number of paths + walks).
+    Equivalent to Panacus 'growth' with count=node, coverage>=1, quorum>=0.
+
+NOTES:
+    Single-threaded, decode-one path/walk at a time. Uses the existing
+    grammar rule expansion + inverse-delta on each haplotype, builds a
+    per-node coverage histogram, and evaluates the closed-form growth curve.
 
 )";
 }
