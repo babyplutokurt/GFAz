@@ -54,9 +54,9 @@ int do_compress(int argc, char *argv[]) {
       break;
     case 'd':
       delta_round = std::stoi(optarg);
-      if (delta_round < 1) {
-        std::cerr << "Warning: --delta must be >= 1, clamping to 1" << std::endl;
-        delta_round = 1;
+      if (delta_round < 0) {
+        std::cerr << "Warning: --delta must be >= 0, clamping to 0" << std::endl;
+        delta_round = 0;
       }
       break;
     case 't':

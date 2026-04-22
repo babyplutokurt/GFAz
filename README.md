@@ -161,6 +161,9 @@ roundtrip_graph = gfac.decompress_data(data)
 gfac.write_gfa(roundtrip_graph, "example.roundtrip.gfa")
 ```
 
+`delta_round=0` is supported on the CPU path and disables delta encoding.
+The default remains `1`.
+
 Lower-memory CPU write path:
 
 ```python

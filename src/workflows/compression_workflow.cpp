@@ -183,13 +183,12 @@ void release_containment_fields(CompressionContext &ctx) {
 void initialize_output_metadata(CompressionContext &ctx) {
   ctx.out.header_line = ctx.graph.header_line;
 
-  // Delta round must be >= 1: without delta encoding, the max-abs guard
-  // would set next_id = 1 which collides with raw node IDs still in the
-  // path stream, causing silent data corruption during rule expansion.
-  if (ctx.delta_round < 1) {
+  // Negative delta rounds are invalid. Zero rounds are supported, but require
+  // seeding rule IDs from the raw traversal symbol space.
+  if (ctx.delta_round < 0) {
     std::cerr << "Warning: delta_round=" << ctx.delta_round
-              << " is invalid, clamping to 1" << std::endl;
-    ctx.delta_round = 1;
+              << " is invalid, clamping to 0" << std::endl;
+    ctx.delta_round = 0;
   }
   ctx.out.delta_round = ctx.delta_round;
 
@@ -214,9 +213,30 @@ void prepare_id_space_for_traversal_transform(CompressionContext &ctx) {
   ctx.next_id = 0;
 }
 
+uint32_t max_abs_symbol(
+    const std::vector<std::vector<gfaz::NodeId>> &sequences) {
+  uint32_t max_abs = 0;
+  for (const auto &sequence : sequences) {
+    for (gfaz::NodeId node : sequence) {
+      const uint32_t abs_id = static_cast<uint32_t>(std::abs(node));
+      if (abs_id > max_abs)
+        max_abs = abs_id;
+    }
+  }
+  return max_abs;
+}
+
 double apply_delta_transform(CompressionContext &ctx) {
   const auto start = std::chrono::high_resolution_clock::now();
+  // With delta_round == 0 the grammar sees raw node IDs, so reserve rule IDs
+  // above that raw symbol space. For delta_round > 0 we keep the current fast
+  // path and let the fused delta transform compute the relevant bound.
   ctx.max_abs = 0;
+  if (ctx.delta_round == 0) {
+    const uint32_t path_max = max_abs_symbol(ctx.graph.paths_data.traversals);
+    const uint32_t walk_max = max_abs_symbol(ctx.graph.walks.walks);
+    ctx.max_abs = std::max(path_max, walk_max);
+  }
   for (int i = 0; i < ctx.delta_round; ++i) {
     const uint32_t path_max =
         gfaz::Codec::delta_transform_and_max_abs(ctx.graph.paths_data.traversals);

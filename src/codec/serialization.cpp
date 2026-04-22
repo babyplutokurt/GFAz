@@ -271,10 +271,10 @@ CompressedData deserialize_compressed_data(const std::string &input_path) {
   data.rules_second_zstd = read_block(in);
   data.paths_zstd = read_block(in);
   data.delta_round = read_val<int>(in);
-  if (data.delta_round < 1) {
+  if (data.delta_round < 0) {
     std::cerr << "Warning: serialized delta_round=" << data.delta_round
-              << " is invalid, clamping to 1" << std::endl;
-    data.delta_round = 1;
+              << " is invalid, clamping to 0" << std::endl;
+    data.delta_round = 0;
   }
 
   // Path names and overlaps

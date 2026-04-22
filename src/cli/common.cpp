@@ -85,7 +85,7 @@ SUBCOMMANDS:
 
 OPTIONS (compress):
     -r, --rounds <N>        Number of compression rounds (default: 8)
-    -d, --delta <N>         Delta encoding rounds (default: 1)
+    -d, --delta <N>         Delta encoding rounds, >= 0 (default: 1)
     -t, --threshold <N>     Frequency threshold (default: 2)
     -j, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP
     -g, --gpu               Use GPU backend (if available)
@@ -215,7 +215,7 @@ USAGE:
 
 OPTIONS:
     -r, --rounds <N>        Number of compression rounds (default: 8)
-    -d, --delta <N>         Delta encoding rounds (default: 1)
+    -d, --delta <N>         Delta encoding rounds, >= 0 (default: 1)
     -t, --threshold <N>     Frequency threshold (default: 2)
     -j, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP
     -g, --gpu               Use GPU backend (if available)
