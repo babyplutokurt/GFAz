@@ -13,18 +13,36 @@ namespace gfaz::cli {
 
 int do_growth(int argc, char *argv[]) {
   int num_threads = kDefaultNumThreads;
+  gfaz::GroupingMode grouping = gfaz::GroupingMode::PerPathWalk;
 
-  static struct option long_options[] = {{"threads", required_argument, 0, 'j'},
-                                         {"help", no_argument, 0, 'h'},
-                                         {0, 0, 0, 0}};
+  static struct option long_options[] = {
+      {"threads", required_argument, 0, 'j'},
+      {"group-by", required_argument, 0, 'G'},
+      {"help", no_argument, 0, 'h'},
+      {0, 0, 0, 0}};
 
   int opt;
   optind = 1;
-  while ((opt = getopt_long(argc, argv, "j:h", long_options, nullptr)) != -1) {
+  while ((opt = getopt_long(argc, argv, "j:G:h", long_options, nullptr)) !=
+         -1) {
     switch (opt) {
     case 'j':
       num_threads = std::stoi(optarg);
       break;
+    case 'G': {
+      const std::string v = optarg;
+      if (v == "path" || v == "per-line") {
+        grouping = gfaz::GroupingMode::PerPathWalk;
+      } else if (v == "sample-hap-seq" || v == "panacus") {
+        grouping = gfaz::GroupingMode::SampleHapSeq;
+      } else {
+        std::cerr << "Error: unknown --group-by value '" << v
+                  << "'. Expected 'path' or 'sample-hap-seq'.\n";
+        print_growth_help();
+        return 1;
+      }
+      break;
+    }
     case 'h':
       print_growth_help();
       return 0;
@@ -45,9 +63,15 @@ int do_growth(int argc, char *argv[]) {
   try {
     const gfaz::CompressedData data =
         gfaz::deserialize_compressed_data(input_path);
-    const gfaz::GrowthResult result = gfaz::compute_growth(data, num_threads);
+    const gfaz::GrowthResult result =
+        gfaz::compute_growth(data, num_threads, grouping);
 
     std::cout << "# gfaz growth (count=node, coverage>=1, quorum>=0)\n";
+    std::cout << "# group-by="
+              << (grouping == gfaz::GroupingMode::SampleHapSeq
+                      ? "sample-hap-seq"
+                      : "path")
+              << "\n";
     std::cout << "# num_haplotypes=" << result.num_haplotypes
               << " num_nodes=" << result.num_nodes << "\n";
     std::cout << "k\tgrowth\n";

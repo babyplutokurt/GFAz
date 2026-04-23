@@ -217,12 +217,24 @@ USAGE:
 
 OPTIONS:
     -j, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP
+    -G, --group-by <mode>   How P/W-lines map to haplotype identity:
+                              path            Each P-line and W-line is its
+                                              own haplotype (default).
+                              sample-hap-seq  Group P/W-lines by
+                                              (sample, hap, seqid), after
+                                              stripping PanSN ":start-end"
+                                              suffixes. Matches Panacus's
+                                              default grouping.
+                            Alias: 'panacus' == 'sample-hap-seq'.
     -h, --help              Show this help message
 
 OUTPUT:
     Tab-separated table of expected number of distinct nodes covered by a
-    random subset of size k, for k = 1..N (N = number of paths + walks).
-    Equivalent to Panacus 'growth' with count=node, coverage>=1, quorum>=0.
+    random subset of size k, for k = 1..N.
+      --group-by path           N = num_paths + num_walks (default).
+      --group-by sample-hap-seq N = number of distinct (sample,hap,seqid)
+                                 tuples, matching Panacus 'growth' default
+                                 (count=node, coverage>=1, quorum>=0).
 
 NOTES:
     Decodes haplotypes in parallel using OpenMP; each thread keeps its own

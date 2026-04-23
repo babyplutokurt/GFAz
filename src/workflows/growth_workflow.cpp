@@ -4,10 +4,13 @@
 #include "utils/threading_utils.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #ifdef _OPENMP
@@ -126,6 +129,67 @@ struct HapSlice {
   uint32_t orig_len;
 };
 
+// Strip a trailing ":start-end" suffix in place (digits on both sides of '-',
+// preceded by ':'). Mirrors Panacus's PATHID_COORDS = ^(.+):([0-9]+)-([0-9]+)$.
+void strip_pansn_coords_inplace(std::string &s) {
+  const size_t colon = s.rfind(':');
+  if (colon == std::string::npos || colon == 0)
+    return;
+  const size_t dash = s.find('-', colon + 1);
+  if (dash == std::string::npos)
+    return;
+  if (colon + 1 == dash || dash + 1 == s.size())
+    return;
+  for (size_t i = colon + 1; i < dash; ++i)
+    if (!std::isdigit(static_cast<unsigned char>(s[i])))
+      return;
+  for (size_t i = dash + 1; i < s.size(); ++i)
+    if (!std::isdigit(static_cast<unsigned char>(s[i])))
+      return;
+  s.erase(colon);
+}
+
+// Replicate Panacus PathSegment::from_str + clear_coords + id() for a P-line
+// name. Panacus regex is ^([^#]+)(#[^#]+)?(#[^#].*)?$, with optional
+// ":start-end" coord suffix stripped from the last populated field.
+std::string pansn_group_key_from_path_name(const std::string &name) {
+  const size_t h1 = name.find('#');
+  if (h1 == std::string::npos) {
+    // No '#': single field. id() = sample, after coord strip.
+    std::string s = name;
+    strip_pansn_coords_inplace(s);
+    return s;
+  }
+  const std::string sample = name.substr(0, h1);
+  const size_t h2 = name.find('#', h1 + 1);
+  // 2-field case ("sample#hap"): either no second '#', or the '#' is directly
+  // adjacent (invalid for a third group per `#[^#]`), or the tail after h2
+  // begins with another '#' (also invalid). Fall back to 2-field form.
+  auto two_field = [&]() {
+    std::string hap = name.substr(h1 + 1);
+    if (hap.empty())
+      return name; // invalid, preserve original
+    strip_pansn_coords_inplace(hap);
+    return sample + "#" + hap;
+  };
+  if (h2 == std::string::npos)
+    return two_field();
+  if (h2 == h1 + 1)
+    return name; // "sample##..." doesn't match PanSN
+  // 3-field candidate. The third group must start with a non-'#'.
+  const std::string hap = name.substr(h1 + 1, h2 - h1 - 1);
+  std::string seq = name.substr(h2 + 1);
+  if (seq.empty() || seq[0] == '#') {
+    // Group-3 regex fails; regex backtracks to the 2-field form, keeping only
+    // the first '#hap' and discarding the rest (Panacus does the same).
+    std::string hap_only = hap;
+    strip_pansn_coords_inplace(hap_only);
+    return sample + "#" + hap_only;
+  }
+  strip_pansn_coords_inplace(seq);
+  return sample + "#" + hap + "#" + seq;
+}
+
 void build_slices(const std::vector<int32_t> &flat,
                   const std::vector<uint32_t> &lengths,
                   const std::vector<uint32_t> &original_lengths,
@@ -145,7 +209,8 @@ void build_slices(const std::vector<int32_t> &flat,
 
 } // namespace
 
-GrowthResult compute_growth(const CompressedData &data, int num_threads) {
+GrowthResult compute_growth(const CompressedData &data, int num_threads,
+                            GroupingMode mode) {
   GrowthResult result;
 
   const uint32_t num_nodes = infer_num_nodes(data);
@@ -153,14 +218,9 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads) {
 
   const size_t num_paths = data.sequence_lengths.size();
   const size_t num_walks = data.walk_lengths.size();
-  const size_t total_haps = num_paths + num_walks;
-  if (total_haps == 0)
+  const size_t total_slices = num_paths + num_walks;
+  if (total_slices == 0)
     return result;
-  if (total_haps > UINT32_MAX) {
-    throw std::runtime_error("growth: number of haplotypes exceeds 2^32-1");
-  }
-  const uint32_t N = static_cast<uint32_t>(total_haps);
-  result.num_haplotypes = N;
 
   std::vector<int32_t> rules_first =
       Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
@@ -179,20 +239,113 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads) {
       min_rule_id + static_cast<uint32_t>(rules_first.size());
   const int delta_round = data.delta_round;
 
-  std::vector<HapSlice> path_slices;
-  path_slices.reserve(num_paths);
+  // Unified slice vector: [paths ... walks]. Index order is preserved so the
+  // slice-to-group mapping below can address walks with offset num_paths.
+  std::vector<HapSlice> slices;
+  slices.reserve(total_slices);
   build_slices(paths_flat, data.sequence_lengths, data.original_path_lengths,
-               path_slices);
-  std::vector<HapSlice> walk_slices;
-  walk_slices.reserve(num_walks);
+               slices);
   build_slices(walks_flat, data.walk_lengths, data.original_walk_lengths,
-               walk_slices);
+               slices);
+
+  // Build groups[] -- each group is a list of slice indices sharing the same
+  // haplotype identity per the selected GroupingMode. Each group is processed
+  // as a unit downstream so nodes visited across its slices are only counted
+  // once toward that group's coverage.
+  std::vector<std::vector<uint32_t>> groups;
+  if (mode == GroupingMode::PerPathWalk) {
+    groups.resize(total_slices);
+    for (size_t i = 0; i < total_slices; ++i)
+      groups[i].push_back(static_cast<uint32_t>(i));
+  } else {
+    // SampleHapSeq: derive a key per slice, then deduplicate first-seen.
+    std::vector<std::string> keys;
+    keys.reserve(total_slices);
+
+    // Paths: decompress P-line names and parse PanSN to reach id()-equivalent.
+    std::string names_concat;
+    std::vector<uint32_t> name_lens;
+    if (num_paths > 0) {
+      names_concat = Codec::zstd_decompress_string(data.names_zstd);
+      name_lens = Codec::zstd_decompress_uint32_vector(data.name_lengths_zstd);
+      if (name_lens.size() != num_paths) {
+        throw std::runtime_error(
+            "growth: path name count does not match number of paths");
+      }
+    }
+    size_t name_off = 0;
+    for (size_t i = 0; i < num_paths; ++i) {
+      const uint32_t L = name_lens[i];
+      std::string name = (name_off + L <= names_concat.size())
+                             ? names_concat.substr(name_off, L)
+                             : std::string();
+      name_off += L;
+      keys.push_back(pansn_group_key_from_path_name(name));
+    }
+
+    // Walks: already have (sample, hap, seqid) as separate columns.
+    std::string sample_concat, seq_concat;
+    std::vector<uint32_t> sample_lens, seq_lens;
+    std::vector<uint32_t> hap_indices;
+    if (num_walks > 0) {
+      sample_concat = Codec::zstd_decompress_string(data.walk_sample_ids_zstd);
+      sample_lens =
+          Codec::zstd_decompress_uint32_vector(data.walk_sample_id_lengths_zstd);
+      seq_concat = Codec::zstd_decompress_string(data.walk_seq_ids_zstd);
+      seq_lens =
+          Codec::zstd_decompress_uint32_vector(data.walk_seq_id_lengths_zstd);
+      hap_indices =
+          Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
+      if (sample_lens.size() != num_walks || seq_lens.size() != num_walks ||
+          hap_indices.size() != num_walks) {
+        throw std::runtime_error(
+            "growth: walk metadata column count does not match number of walks");
+      }
+    }
+    size_t s_off = 0, q_off = 0;
+    for (size_t i = 0; i < num_walks; ++i) {
+      const uint32_t SL = sample_lens[i];
+      const uint32_t QL = seq_lens[i];
+      std::string sample = (s_off + SL <= sample_concat.size())
+                               ? sample_concat.substr(s_off, SL)
+                               : std::string();
+      std::string seq = (q_off + QL <= seq_concat.size())
+                            ? seq_concat.substr(q_off, QL)
+                            : std::string();
+      s_off += SL;
+      q_off += QL;
+      keys.push_back(sample + "#" + std::to_string(hap_indices[i]) + "#" + seq);
+    }
+
+    std::unordered_map<std::string, uint32_t> key_to_gid;
+    key_to_gid.reserve(total_slices * 2);
+    for (uint32_t i = 0; i < total_slices; ++i) {
+      auto it = key_to_gid.find(keys[i]);
+      uint32_t gid;
+      if (it == key_to_gid.end()) {
+        gid = static_cast<uint32_t>(groups.size());
+        key_to_gid.emplace(std::move(keys[i]), gid);
+        groups.emplace_back();
+      } else {
+        gid = it->second;
+      }
+      groups[gid].push_back(i);
+    }
+  }
+
+  if (groups.empty())
+    return result;
+  if (groups.size() > UINT32_MAX) {
+    throw std::runtime_error("growth: number of haplotype groups exceeds 2^32-1");
+  }
+  const uint32_t N = static_cast<uint32_t>(groups.size());
+  result.num_haplotypes = N;
 
   ScopedOMPThreads omp_scope(num_threads);
   const int T = std::max(1, omp_scope.effective_threads());
 
   // Single shared coverage array; per-thread last-seen stamp filters duplicate
-  // updates within one hap.
+  // updates within one group (all slices of the group share one stamp).
   const size_t cov_len = static_cast<size_t>(num_nodes) + 1;
   std::vector<uint32_t> cov(cov_len, 0);
 
@@ -213,7 +366,7 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads) {
       ++stamp;
     };
 
-    // Per-hap inline coverage update; lambda body so the OMP atomic binds to
+    // Per-group inline coverage update; lambda body so the OMP atomic binds to
     // the enclosing parallel region.
     auto cov_update = [&](int32_t signed_v) {
       const uint32_t a = static_cast<uint32_t>(
@@ -227,8 +380,7 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads) {
       }
     };
 
-    auto process_one = [&](const HapSlice &s) {
-      bump_stamp();
+    auto process_slice = [&](const HapSlice &s) {
       if (delta_round == 0) {
         auto visit = [&](int32_t leaf) { cov_update(leaf); };
         stream_hap_leaves(s.encoded, s.enc_len, min_rule_id, max_rule_id,
@@ -251,32 +403,17 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads) {
     };
 
 #pragma omp for schedule(dynamic, 1)
-    for (long long i = 0; i < static_cast<long long>(path_slices.size()); ++i) {
-      process_one(path_slices[static_cast<size_t>(i)]);
-    }
-    // Implicit barrier at end of `for`; safe to release paths_flat and reset
-    // per-thread stamps before the walks pass.
-
-#pragma omp single
-    {
-      paths_flat = std::vector<int32_t>{};
-      path_slices = std::vector<HapSlice>{};
-    }
-    // Implicit barrier at end of `single`.
-
-    // Stamps from the path pass are still live in last_seen; with only 255
-    // distinct values, a stale path-stamp could collide with a fresh
-    // walk-stamp and falsely suppress an increment. Reset per-thread state.
-    std::fill(last_seen.begin(), last_seen.end(), 0);
-    stamp = 0;
-
-#pragma omp for schedule(dynamic, 1)
-    for (long long i = 0; i < static_cast<long long>(walk_slices.size()); ++i) {
-      process_one(walk_slices[static_cast<size_t>(i)]);
+    for (long long g = 0; g < static_cast<long long>(groups.size()); ++g) {
+      bump_stamp();
+      const auto &group = groups[static_cast<size_t>(g)];
+      for (uint32_t si : group) {
+        process_slice(slices[si]);
+      }
     }
   }
+  paths_flat = std::vector<int32_t>{};
   walks_flat = std::vector<int32_t>{};
-  walk_slices = std::vector<HapSlice>{};
+  slices = std::vector<HapSlice>{};
 
   // Build coverage histogram from the shared cov[] array.
   result.hist.assign(static_cast<size_t>(N) + 1, 0);
