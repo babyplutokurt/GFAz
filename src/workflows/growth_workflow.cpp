@@ -3,6 +3,7 @@
 #include "codec/codec.hpp"
 #include "utils/threading_utils.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -17,13 +18,14 @@ namespace gfaz {
 
 namespace {
 
-// Recursively expand a rule into delta-domain leaves.
-// Mirrors expand_rule in extraction_workflow.cpp; isolated here so the growth
-// workflow does not depend on the extraction translation unit.
-void expand_rule(uint32_t rule_id, bool reverse,
-                 const std::vector<int32_t> &first,
-                 const std::vector<int32_t> &second, uint32_t min_id,
-                 uint32_t max_id, std::vector<NodeId> &out) {
+// Recursively expand a rule, calling `visit` once per leaf in expansion order
+// (left-to-right of the original rule, possibly reversed). Templated on the
+// visitor so the compiler can inline the per-leaf action through recursion.
+template <typename Visitor>
+void expand_rule_visit(uint32_t rule_id, bool reverse,
+                       const std::vector<int32_t> &first,
+                       const std::vector<int32_t> &second, uint32_t min_id,
+                       uint32_t max_id, Visitor &visit) {
   const uint32_t idx = rule_id - min_id;
   const int32_t a = first[idx];
   const int32_t b = second[idx];
@@ -31,56 +33,63 @@ void expand_rule(uint32_t rule_id, bool reverse,
   if (!reverse) {
     const uint32_t abs_a = static_cast<uint32_t>(std::abs(a));
     if (abs_a >= min_id && abs_a < max_id)
-      expand_rule(abs_a, a < 0, first, second, min_id, max_id, out);
+      expand_rule_visit(abs_a, a < 0, first, second, min_id, max_id, visit);
     else
-      out.push_back(a);
+      visit(a);
 
     const uint32_t abs_b = static_cast<uint32_t>(std::abs(b));
     if (abs_b >= min_id && abs_b < max_id)
-      expand_rule(abs_b, b < 0, first, second, min_id, max_id, out);
+      expand_rule_visit(abs_b, b < 0, first, second, min_id, max_id, visit);
     else
-      out.push_back(b);
+      visit(b);
   } else {
     const uint32_t abs_b = static_cast<uint32_t>(std::abs(b));
     if (abs_b >= min_id && abs_b < max_id)
-      expand_rule(abs_b, b >= 0, first, second, min_id, max_id, out);
+      expand_rule_visit(abs_b, b >= 0, first, second, min_id, max_id, visit);
     else
-      out.push_back(-b);
+      visit(static_cast<int32_t>(-b));
 
     const uint32_t abs_a = static_cast<uint32_t>(std::abs(a));
     if (abs_a >= min_id && abs_a < max_id)
-      expand_rule(abs_a, a >= 0, first, second, min_id, max_id, out);
+      expand_rule_visit(abs_a, a >= 0, first, second, min_id, max_id, visit);
     else
-      out.push_back(-a);
+      visit(static_cast<int32_t>(-a));
   }
 }
 
-// Decode one encoded slice into original signed node IDs. The encoded slice
-// holds delta-domain values mixed with rule references; we expand rules into
-// delta-domain leaves and then run inverse delta `delta_round` times.
-void decode_one_haplotype(const int32_t *encoded, size_t encoded_len,
-                          uint32_t original_len, int delta_round,
-                          uint32_t min_rule_id,
-                          const std::vector<int32_t> &rules_first,
-                          const std::vector<int32_t> &rules_second,
-                          std::vector<NodeId> &decoded) {
-  decoded.clear();
-  decoded.reserve(original_len);
-
-  const uint32_t max_rule_id =
-      min_rule_id + static_cast<uint32_t>(rules_first.size());
-
+// Stream the leaves of one haplotype's encoded slice through `visit` in
+// path order (delta-domain leaves; visitor is responsible for inverse-delta).
+template <typename Visitor>
+void stream_hap_leaves(const int32_t *encoded, size_t encoded_len,
+                       uint32_t min_rule_id, uint32_t max_rule_id,
+                       const std::vector<int32_t> &rules_first,
+                       const std::vector<int32_t> &rules_second,
+                       Visitor &visit) {
   for (size_t i = 0; i < encoded_len; ++i) {
     const NodeId node = encoded[i];
     const uint32_t abs_id = static_cast<uint32_t>(std::abs(node));
     if (abs_id >= min_rule_id && abs_id < max_rule_id) {
-      expand_rule(abs_id, node < 0, rules_first, rules_second, min_rule_id,
-                  max_rule_id, decoded);
+      expand_rule_visit(abs_id, node < 0, rules_first, rules_second,
+                        min_rule_id, max_rule_id, visit);
     } else {
-      decoded.push_back(node);
+      visit(node);
     }
   }
+}
 
+// Fallback materializer for delta_round >= 2: expands rules into `decoded`,
+// then runs `delta_round` inverse-delta passes.
+void decode_one_haplotype_general(const int32_t *encoded, size_t encoded_len,
+                                  uint32_t original_len, int delta_round,
+                                  uint32_t min_rule_id, uint32_t max_rule_id,
+                                  const std::vector<int32_t> &rules_first,
+                                  const std::vector<int32_t> &rules_second,
+                                  std::vector<NodeId> &decoded) {
+  decoded.clear();
+  decoded.reserve(original_len);
+  auto push = [&](int32_t v) { decoded.push_back(v); };
+  stream_hap_leaves(encoded, encoded_len, min_rule_id, max_rule_id,
+                    rules_first, rules_second, push);
   for (int r = 0; r < delta_round; ++r) {
     for (size_t i = 1; i < decoded.size(); ++i) {
       decoded[i] = decoded[i] + decoded[i - 1];
@@ -105,16 +114,12 @@ double frac_covered_union(uint32_t N, uint32_t c, uint32_t k) {
   return 1.0 - ratio;
 }
 
-// Number of segments == number of original 1-based node IDs. The segment
-// sequence-length column is small relative to the segment sequences themselves
-// and decompresses to a uint32 vector whose size is num_segments.
 uint32_t infer_num_nodes(const CompressedData &data) {
   std::vector<uint32_t> seg_lens =
       Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
   return static_cast<uint32_t>(seg_lens.size());
 }
 
-// Slice descriptor for one haplotype (path or walk) in the flat encoded array.
 struct HapSlice {
   const int32_t *encoded;
   uint32_t enc_len;
@@ -128,9 +133,8 @@ void build_slices(const std::vector<int32_t> &flat,
   size_t offset = 0;
   for (size_t i = 0; i < lengths.size(); ++i) {
     const uint32_t enc_len = lengths[i];
-    const uint32_t orig_len = (i < original_lengths.size())
-                                  ? original_lengths[i]
-                                  : enc_len;
+    const uint32_t orig_len =
+        (i < original_lengths.size()) ? original_lengths[i] : enc_len;
     if (offset + enc_len > flat.size()) {
       throw std::runtime_error("growth: encoded haplotype block is truncated");
     }
@@ -171,57 +175,108 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads) {
       Codec::zstd_decompress_int32_vector(data.walks_zstd);
 
   const uint32_t min_rule_id = data.min_rule_id();
+  const uint32_t max_rule_id =
+      min_rule_id + static_cast<uint32_t>(rules_first.size());
   const int delta_round = data.delta_round;
 
-  std::vector<HapSlice> slices;
-  slices.reserve(total_haps);
+  std::vector<HapSlice> path_slices;
+  path_slices.reserve(num_paths);
   build_slices(paths_flat, data.sequence_lengths, data.original_path_lengths,
-               slices);
+               path_slices);
+  std::vector<HapSlice> walk_slices;
+  walk_slices.reserve(num_walks);
   build_slices(walks_flat, data.walk_lengths, data.original_walk_lengths,
-               slices);
+               walk_slices);
 
   ScopedOMPThreads omp_scope(num_threads);
   const int T = std::max(1, omp_scope.effective_threads());
 
   // Single shared coverage array; per-thread last-seen stamp filters duplicate
-  // updates within one hap. Memory is 4 * num_nodes (cov) + T * num_nodes
-  // (last_seen), instead of 2T * 4 * num_nodes.
+  // updates within one hap.
   const size_t cov_len = static_cast<size_t>(num_nodes) + 1;
   std::vector<uint32_t> cov(cov_len, 0);
 
 #pragma omp parallel num_threads(T)
   {
-    // uint8_t stamps cycle 1..255; wrap forces a reset of last_seen. With ~N
-    // haps total per thread (N << 1e6 in practice), resets are rare.
     std::vector<uint8_t> last_seen(cov_len, 0);
     uint8_t stamp = 0;
+    // Materialization buffer used only when delta_round >= 2.
     std::vector<NodeId> decoded;
-    decoded.reserve(1024);
+    if (delta_round >= 2)
+      decoded.reserve(1024);
 
-#pragma omp for schedule(dynamic, 16)
-    for (long long i = 0; i < static_cast<long long>(slices.size()); ++i) {
+    auto bump_stamp = [&]() {
       if (stamp == 255) {
         std::fill(last_seen.begin(), last_seen.end(), 0);
         stamp = 0;
       }
       ++stamp;
+    };
 
-      const HapSlice &s = slices[static_cast<size_t>(i)];
-      decode_one_haplotype(s.encoded, s.enc_len, s.orig_len, delta_round,
-                           min_rule_id, rules_first, rules_second, decoded);
-      for (NodeId node : decoded) {
-        const uint32_t v = static_cast<uint32_t>(
-            node < 0 ? -static_cast<int64_t>(node) : node);
-        if (v == 0 || v > num_nodes)
-          continue;
-        if (last_seen[v] != stamp) {
-          last_seen[v] = stamp;
+    // Per-hap inline coverage update; lambda body so the OMP atomic binds to
+    // the enclosing parallel region.
+    auto cov_update = [&](int32_t signed_v) {
+      const uint32_t a = static_cast<uint32_t>(
+          signed_v < 0 ? -static_cast<int64_t>(signed_v) : signed_v);
+      if (a == 0 || a > num_nodes)
+        return;
+      if (last_seen[a] != stamp) {
+        last_seen[a] = stamp;
 #pragma omp atomic
-          cov[v] += 1;
-        }
+        cov[a] += 1;
       }
+    };
+
+    auto process_one = [&](const HapSlice &s) {
+      bump_stamp();
+      if (delta_round == 0) {
+        auto visit = [&](int32_t leaf) { cov_update(leaf); };
+        stream_hap_leaves(s.encoded, s.enc_len, min_rule_id, max_rule_id,
+                          rules_first, rules_second, visit);
+      } else if (delta_round == 1) {
+        int32_t prev = 0;
+        auto visit = [&](int32_t leaf) {
+          prev += leaf;
+          cov_update(prev);
+        };
+        stream_hap_leaves(s.encoded, s.enc_len, min_rule_id, max_rule_id,
+                          rules_first, rules_second, visit);
+      } else {
+        decode_one_haplotype_general(s.encoded, s.enc_len, s.orig_len,
+                                     delta_round, min_rule_id, max_rule_id,
+                                     rules_first, rules_second, decoded);
+        for (NodeId node : decoded)
+          cov_update(node);
+      }
+    };
+
+#pragma omp for schedule(dynamic, 1)
+    for (long long i = 0; i < static_cast<long long>(path_slices.size()); ++i) {
+      process_one(path_slices[static_cast<size_t>(i)]);
+    }
+    // Implicit barrier at end of `for`; safe to release paths_flat and reset
+    // per-thread stamps before the walks pass.
+
+#pragma omp single
+    {
+      paths_flat = std::vector<int32_t>{};
+      path_slices = std::vector<HapSlice>{};
+    }
+    // Implicit barrier at end of `single`.
+
+    // Stamps from the path pass are still live in last_seen; with only 255
+    // distinct values, a stale path-stamp could collide with a fresh
+    // walk-stamp and falsely suppress an increment. Reset per-thread state.
+    std::fill(last_seen.begin(), last_seen.end(), 0);
+    stamp = 0;
+
+#pragma omp for schedule(dynamic, 1)
+    for (long long i = 0; i < static_cast<long long>(walk_slices.size()); ++i) {
+      process_one(walk_slices[static_cast<size_t>(i)]);
     }
   }
+  walks_flat = std::vector<int32_t>{};
+  walk_slices = std::vector<HapSlice>{};
 
   // Build coverage histogram from the shared cov[] array.
   result.hist.assign(static_cast<size_t>(N) + 1, 0);
