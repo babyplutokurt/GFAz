@@ -149,45 +149,94 @@ void strip_pansn_coords_inplace(std::string &s) {
   s.erase(colon);
 }
 
-// Replicate Panacus PathSegment::from_str + clear_coords + id() for a P-line
-// name. Panacus regex is ^([^#]+)(#[^#]+)?(#[^#].*)?$, with optional
-// ":start-end" coord suffix stripped from the last populated field.
-std::string pansn_group_key_from_path_name(const std::string &name) {
+// Parts of a PanSN path name after Panacus's from_str + clear_coords().
+// `has_hap`/`has_seq` mirror PathSegment's Option<haplotype>/Option<seqid>.
+struct PansnParts {
+  std::string sample;
+  std::string hap;
+  std::string seq;
+  bool has_hap = false;
+  bool has_seq = false;
+};
+
+// Panacus regex: ^([^#]+)(#[^#]+)?(#[^#].*)?$; ":start-end" is stripped from
+// the last populated field (sample | hap | seq).
+PansnParts parse_pansn_path_name(const std::string &name) {
+  PansnParts p;
   const size_t h1 = name.find('#');
   if (h1 == std::string::npos) {
-    // No '#': single field. id() = sample, after coord strip.
-    std::string s = name;
-    strip_pansn_coords_inplace(s);
-    return s;
+    p.sample = name;
+    strip_pansn_coords_inplace(p.sample);
+    return p;
   }
-  const std::string sample = name.substr(0, h1);
+  p.sample = name.substr(0, h1);
   const size_t h2 = name.find('#', h1 + 1);
-  // 2-field case ("sample#hap"): either no second '#', or the '#' is directly
-  // adjacent (invalid for a third group per `#[^#]`), or the tail after h2
-  // begins with another '#' (also invalid). Fall back to 2-field form.
-  auto two_field = [&]() {
-    std::string hap = name.substr(h1 + 1);
-    if (hap.empty())
-      return name; // invalid, preserve original
-    strip_pansn_coords_inplace(hap);
-    return sample + "#" + hap;
+  auto take_two_field = [&](const std::string &hap_raw) {
+    if (hap_raw.empty()) {
+      // Invalid PanSN ("sample#"): fall back to single-field key.
+      return;
+    }
+    p.hap = hap_raw;
+    p.has_hap = true;
+    strip_pansn_coords_inplace(p.hap);
   };
-  if (h2 == std::string::npos)
-    return two_field();
-  if (h2 == h1 + 1)
-    return name; // "sample##..." doesn't match PanSN
-  // 3-field candidate. The third group must start with a non-'#'.
-  const std::string hap = name.substr(h1 + 1, h2 - h1 - 1);
-  std::string seq = name.substr(h2 + 1);
-  if (seq.empty() || seq[0] == '#') {
-    // Group-3 regex fails; regex backtracks to the 2-field form, keeping only
-    // the first '#hap' and discarding the rest (Panacus does the same).
-    std::string hap_only = hap;
-    strip_pansn_coords_inplace(hap_only);
-    return sample + "#" + hap_only;
+  if (h2 == std::string::npos) {
+    take_two_field(name.substr(h1 + 1));
+    return p;
   }
-  strip_pansn_coords_inplace(seq);
-  return sample + "#" + hap + "#" + seq;
+  if (h2 == h1 + 1) {
+    // "sample##...": doesn't match PanSN at all; keep sample only.
+    return p;
+  }
+  const std::string hap_raw = name.substr(h1 + 1, h2 - h1 - 1);
+  std::string seq_raw = name.substr(h2 + 1);
+  if (seq_raw.empty() || seq_raw[0] == '#') {
+    // Group-3 regex fails; Panacus backtracks to the 2-field match.
+    take_two_field(hap_raw);
+    return p;
+  }
+  p.hap = hap_raw;
+  p.has_hap = true;
+  p.seq = std::move(seq_raw);
+  p.has_seq = true;
+  strip_pansn_coords_inplace(p.seq);
+  return p;
+}
+
+// Build the group key for a P-line under the requested grouping mode. Mirrors
+// Panacus: default uses id(), -H uses "{sample}#{hap_or_empty}", -S uses
+// "{sample}". `SampleHapSeq` here is Panacus default (PathSegment::id()).
+std::string path_group_key(const PansnParts &p, GroupingMode mode) {
+  switch (mode) {
+  case GroupingMode::Sample:
+    return p.sample;
+  case GroupingMode::SampleHap:
+    // Matches Panacus: format!("{}#{}", sample, hap.unwrap_or("")).
+    return p.sample + "#" + (p.has_hap ? p.hap : std::string());
+  case GroupingMode::SampleHapSeq:
+  default:
+    if (p.has_hap) {
+      return p.has_seq ? (p.sample + "#" + p.hap + "#" + p.seq)
+                       : (p.sample + "#" + p.hap);
+    }
+    if (p.has_seq)
+      return p.sample + "#*#" + p.seq;
+    return p.sample;
+  }
+}
+
+// Build the group key for a W-line (sample/hap/seq already separate columns).
+std::string walk_group_key(const std::string &sample, uint32_t hap,
+                           const std::string &seq, GroupingMode mode) {
+  switch (mode) {
+  case GroupingMode::Sample:
+    return sample;
+  case GroupingMode::SampleHap:
+    return sample + "#" + std::to_string(hap);
+  case GroupingMode::SampleHapSeq:
+  default:
+    return sample + "#" + std::to_string(hap) + "#" + seq;
+  }
 }
 
 void build_slices(const std::vector<int32_t> &flat,
@@ -258,11 +307,11 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads,
     for (size_t i = 0; i < total_slices; ++i)
       groups[i].push_back(static_cast<uint32_t>(i));
   } else {
-    // SampleHapSeq: derive a key per slice, then deduplicate first-seen.
+    // Derive a key per slice under the requested mode, then dedup first-seen.
     std::vector<std::string> keys;
     keys.reserve(total_slices);
 
-    // Paths: decompress P-line names and parse PanSN to reach id()-equivalent.
+    // Paths: decompress P-line names and parse PanSN parts.
     std::string names_concat;
     std::vector<uint32_t> name_lens;
     if (num_paths > 0) {
@@ -280,7 +329,7 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads,
                              ? names_concat.substr(name_off, L)
                              : std::string();
       name_off += L;
-      keys.push_back(pansn_group_key_from_path_name(name));
+      keys.push_back(path_group_key(parse_pansn_path_name(name), mode));
     }
 
     // Walks: already have (sample, hap, seqid) as separate columns.
@@ -314,7 +363,7 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads,
                             : std::string();
       s_off += SL;
       q_off += QL;
-      keys.push_back(sample + "#" + std::to_string(hap_indices[i]) + "#" + seq);
+      keys.push_back(walk_group_key(sample, hap_indices[i], seq, mode));
     }
 
     std::unordered_map<std::string, uint32_t> key_to_gid;

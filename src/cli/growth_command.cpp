@@ -35,9 +35,14 @@ int do_growth(int argc, char *argv[]) {
         grouping = gfaz::GroupingMode::PerPathWalk;
       } else if (v == "sample-hap-seq" || v == "panacus") {
         grouping = gfaz::GroupingMode::SampleHapSeq;
+      } else if (v == "sample-hap" || v == "haplotype") {
+        grouping = gfaz::GroupingMode::SampleHap;
+      } else if (v == "sample") {
+        grouping = gfaz::GroupingMode::Sample;
       } else {
         std::cerr << "Error: unknown --group-by value '" << v
-                  << "'. Expected 'path' or 'sample-hap-seq'.\n";
+                  << "'. Expected 'path', 'sample-hap-seq', 'sample-hap', "
+                     "or 'sample'.\n";
         print_growth_help();
         return 1;
       }
@@ -67,11 +72,22 @@ int do_growth(int argc, char *argv[]) {
         gfaz::compute_growth(data, num_threads, grouping);
 
     std::cout << "# gfaz growth (count=node, coverage>=1, quorum>=0)\n";
-    std::cout << "# group-by="
-              << (grouping == gfaz::GroupingMode::SampleHapSeq
-                      ? "sample-hap-seq"
-                      : "path")
-              << "\n";
+    const char *mode_label = "path";
+    switch (grouping) {
+    case gfaz::GroupingMode::SampleHapSeq:
+      mode_label = "sample-hap-seq";
+      break;
+    case gfaz::GroupingMode::SampleHap:
+      mode_label = "sample-hap";
+      break;
+    case gfaz::GroupingMode::Sample:
+      mode_label = "sample";
+      break;
+    case gfaz::GroupingMode::PerPathWalk:
+      mode_label = "path";
+      break;
+    }
+    std::cout << "# group-by=" << mode_label << "\n";
     std::cout << "# num_haplotypes=" << result.num_haplotypes
               << " num_nodes=" << result.num_nodes << "\n";
     std::cout << "k\tgrowth\n";

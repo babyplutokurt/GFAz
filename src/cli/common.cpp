@@ -218,23 +218,28 @@ USAGE:
 OPTIONS:
     -j, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP
     -G, --group-by <mode>   How P/W-lines map to haplotype identity:
-                              path            Each P-line and W-line is its
-                                              own haplotype (default).
-                              sample-hap-seq  Group P/W-lines by
-                                              (sample, hap, seqid), after
-                                              stripping PanSN ":start-end"
-                                              suffixes. Matches Panacus's
-                                              default grouping.
-                            Alias: 'panacus' == 'sample-hap-seq'.
+                              path            Each P-line / W-line is its own
+                                              haplotype (default).
+                              sample-hap-seq  Group by (sample, hap, seqid),
+                                              stripping PanSN ":start-end".
+                                              Matches Panacus default.
+                              sample-hap      Group by (sample, hap).
+                                              Matches Panacus -H /
+                                              --groupby-haplotype.
+                              sample          Group by sample. Matches
+                                              Panacus -S / --groupby-sample.
+                            Aliases: 'panacus' == 'sample-hap-seq';
+                                     'haplotype' == 'sample-hap';
+                                     'per-line' == 'path'.
     -h, --help              Show this help message
 
 OUTPUT:
     Tab-separated table of expected number of distinct nodes covered by a
-    random subset of size k, for k = 1..N.
-      --group-by path           N = num_paths + num_walks (default).
-      --group-by sample-hap-seq N = number of distinct (sample,hap,seqid)
-                                 tuples, matching Panacus 'growth' default
-                                 (count=node, coverage>=1, quorum>=0).
+    random subset of size k, for k = 1..N. N depends on --group-by:
+      path            N = num_paths + num_walks (default).
+      sample-hap-seq  N = #distinct (sample, hap, seqid) — Panacus default.
+      sample-hap      N = #distinct (sample, hap)        — Panacus -H.
+      sample          N = #distinct samples              — Panacus -S.
 
 NOTES:
     Decodes haplotypes in parallel using OpenMP; each thread keeps its own

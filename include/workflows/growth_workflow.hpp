@@ -10,15 +10,19 @@
 namespace gfaz {
 
 // How to map P/W-lines to "haplotype" identity before coverage counting.
-//   PerPathWalk: each P-line and each W-line is its own haplotype (GFAz
-//                default; simple, but inflates N when one haplotype is split
-//                into multiple walks/paths).
-//   SampleHapSeq: group P/W-lines by (sample, hap, seqid), after stripping
-//                 any PanSN ":start-end" suffix. Matches Panacus's default
-//                 grouping (PathSegment::id() after clear_coords()).
+//   PerPathWalk:  each P-line and each W-line is its own haplotype (GFAz
+//                 default; simple, but inflates N when one haplotype is split
+//                 into multiple walks/paths).
+//   SampleHapSeq: group by (sample, hap, seqid) after stripping PanSN
+//                 ":start-end". Matches Panacus default (id() + clear_coords).
+//   SampleHap:    group by (sample, hap). Matches Panacus --groupby-haplotype
+//                 (-H). Typical HPRC "per-haplotype" growth curve.
+//   Sample:       group by sample. Matches Panacus --groupby-sample (-S).
 enum class GroupingMode {
   PerPathWalk,
   SampleHapSeq,
+  SampleHap,
+  Sample,
 };
 
 // Pangenome growth result, Panacus-style.
