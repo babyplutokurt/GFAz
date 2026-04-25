@@ -76,6 +76,7 @@ USAGE:
                       [<sample_id> <hap_index> <seq_id> <seq_start> <seq_end> ...]
     gfaz add-haplotypes [OPTIONS] <input.gfaz> <paths_or_walks.gfa> [output.gfaz]
     gfaz growth [OPTIONS] <input.gfaz>
+    gfaz pav -i <input.gfaz> -b <ranges.bed> [OPTIONS]
 
 SUBCOMMANDS:
     compress      Compress a GFA file to GFAZ format
@@ -84,6 +85,7 @@ SUBCOMMANDS:
     extract-walk  Extract a single W-line to stdout
     add-haplotypes  Append path-only or walk-only haplotypes using the existing rulebook
     growth        Compute pangenome growth curve (Panacus-equivalent, count=node)
+    pav           Compute PAV ratios over BED ranges from compressed traversals
 
 OPTIONS (compress):
     -r, --rounds <N>        Number of compression rounds (default: 8)
@@ -246,6 +248,41 @@ NOTES:
     per-node coverage + last-seen-stamp arrays (memory ~ 2 * num_nodes * 4
     bytes per thread). Coverages are reduced into a histogram and the
     closed-form growth curve is evaluated in parallel over k.
+
+)";
+}
+
+void print_pav_help() {
+  std::cout << R"(
+gfaz pav - Compute PAV ratios from a GFAZ file
+
+USAGE:
+    gfaz pav -i <input.gfaz> -b <ranges.bed> [OPTIONS]
+    gfaz pav [OPTIONS] <input.gfaz>
+
+OPTIONS:
+    -i, --idx <FILE>        Input .gfaz file. --input is also accepted.
+    -b, --bed-file <FILE>   BED ranges. The chrom column must match P-line
+                            path names in this initial implementation.
+    -S, --group-by-sample   Group P/W traversals by sample.
+    -H, --group-by-haplotype
+                            Group P/W traversals by sample#hap.
+    -M, --matrix-output     Emit matrix form: ranges as rows, groups as columns.
+    -B, --binary-values <T> Emit 1 if PAV ratio >= T, else 0.
+    -t, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP.
+    -j, --threads <N>       Alias for -t.
+    -h, --help              Show this help message.
+
+OUTPUT:
+    PAV is computed with odgi-compatible node semantics:
+      numerator   = sum of full node lengths for unique nodes in the BED range
+                    that are touched by the query group.
+      denominator = sum of full node lengths for unique nodes in the BED range.
+
+NOTES:
+    The implementation builds a temporary reference-window index from BED
+    ranges, then streams compressed P/W traversals to fill the matrix. It does
+    not materialize a full graph or a persistent node-to-step index.
 
 )";
 }

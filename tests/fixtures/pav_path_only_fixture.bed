@@ -1,0 +1,4 @@
+pathA	0	6	pathA_all
+pathB	0	6	pathB_all
+pathA	0	2	pathA_first_node
+pathB	4	6	pathB_tail

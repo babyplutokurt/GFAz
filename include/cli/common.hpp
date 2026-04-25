@@ -32,6 +32,7 @@ void print_extract_path_help();
 void print_extract_walk_help();
 void print_add_haplotypes_help();
 void print_growth_help();
+void print_pav_help();
 
 } // namespace gfaz::cli
 
