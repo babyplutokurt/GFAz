@@ -5,6 +5,8 @@
 - `decompress_modes.py`: compare CPU streaming vs legacy decompression.
 - `extract_queries.py`: benchmark `extract-path` / `extract-walk` queries.
 - `add_haplotypes.py`: benchmark `gfaz add-haplotypes`.
+- `pav_compare_gfaz_odgi.py`: run a path-only GFA whole-path PAV comparison
+  between GFAz and ODGI.
 
 `scripts/eval/`
 - Evaluation workflow helpers split into `benchmark/`, `plot/`, `table/`, and `validate/`.

@@ -257,8 +257,18 @@ std::string walk_group_key(const std::string &sample, uint32_t hap,
   }
 }
 
+std::string walk_reference_name(const std::string &sample, uint32_t hap,
+                                const std::string &seq, int64_t start,
+                                int64_t end) {
+  std::string name = sample + "#" + std::to_string(hap) + "#" + seq;
+  if (start != -1 || end != -1)
+    name += ":" + std::to_string(start) + "-" + std::to_string(end);
+  return name;
+}
+
 struct TraversalMetadata {
   std::vector<std::string> path_names;
+  std::vector<std::string> walk_names;
   std::vector<std::string> group_names;
   std::vector<std::vector<uint32_t>> groups;
 };
@@ -291,11 +301,20 @@ TraversalMetadata build_metadata(const CompressedData &data,
                            data.walk_seq_id_lengths_zstd, "walk seq");
     std::vector<uint32_t> haps =
         Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
+    std::vector<int64_t> starts =
+        Codec::decompress_varint_int64(data.walk_seq_starts_zstd, num_walks);
+    std::vector<int64_t> ends =
+        Codec::decompress_varint_int64(data.walk_seq_ends_zstd, num_walks);
     if (samples.size() != num_walks || seqs.size() != num_walks ||
-        haps.size() != num_walks)
+        haps.size() != num_walks || starts.size() != num_walks ||
+        ends.size() != num_walks)
       throw std::runtime_error("pav: walk metadata count mismatch");
-    for (size_t i = 0; i < num_walks; ++i)
+    meta.walk_names.reserve(num_walks);
+    for (size_t i = 0; i < num_walks; ++i) {
+      meta.walk_names.push_back(
+          walk_reference_name(samples[i], haps[i], seqs[i], starts[i], ends[i]));
       keys.push_back(walk_group_key(samples[i], haps[i], seqs[i], grouping));
+    }
   }
 
   std::unordered_map<std::string, uint32_t> key_to_gid;
@@ -429,8 +448,6 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
   result.group_names = std::move(meta.group_names);
   if (result.group_names.empty())
     return result;
-  if (meta.path_names.empty())
-    throw std::runtime_error("pav: BED references require P-line paths");
 
   const uint32_t min_rule_id = data.min_rule_id();
   const uint32_t max_rule_id =
@@ -438,9 +455,15 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
   const int delta_round = data.delta_round;
 
   std::unordered_map<std::string, uint32_t> path_name_to_slice;
-  path_name_to_slice.reserve(meta.path_names.size() * 2 + 1);
+  path_name_to_slice.reserve((meta.path_names.size() + meta.walk_names.size()) *
+                                 2 +
+                             1);
   for (uint32_t i = 0; i < static_cast<uint32_t>(meta.path_names.size()); ++i)
     path_name_to_slice.emplace(meta.path_names[i], i);
+  const uint32_t walk_slice_offset =
+      static_cast<uint32_t>(meta.path_names.size());
+  for (uint32_t i = 0; i < static_cast<uint32_t>(meta.walk_names.size()); ++i)
+    path_name_to_slice.emplace(meta.walk_names[i], walk_slice_offset + i);
 
   std::unordered_map<std::string, std::vector<uint32_t>> ranges_by_chrom;
   for (uint32_t i = 0; i < static_cast<uint32_t>(result.ranges.size()); ++i) {

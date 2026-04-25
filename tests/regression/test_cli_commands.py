@@ -27,6 +27,7 @@ DEFAULT_APPEND_WALKS = FIXTURE_DIR / "append_walks.gfa"
 DEFAULT_APPEND_MIXED = FIXTURE_DIR / "append_mixed.gfa"
 DEFAULT_PAV_BED = FIXTURE_DIR / "pav_fixture.bed"
 DEFAULT_PAV_PATH_ONLY_BED = FIXTURE_DIR / "pav_path_only_fixture.bed"
+DEFAULT_PAV_WALK_BED = FIXTURE_DIR / "pav_walk_fixture.bed"
 
 
 def parse_args():
@@ -67,6 +68,11 @@ def parse_args():
       "--pav-path-only-bed",
       default=str(DEFAULT_PAV_PATH_ONLY_BED),
       help="BED fixture that exercises the pav node-to-groups plan",
+  )
+  parser.add_argument(
+      "--pav-walk-bed",
+      default=str(DEFAULT_PAV_WALK_BED),
+      help="BED fixture that uses W-line-derived reference names",
   )
   return parser.parse_args()
 
@@ -266,6 +272,29 @@ def test_pav_matrix_grouped_path_only_plan(
   assert_stdout(result, expected, "pav grouped matrix")
 
 
+def test_pav_matrix_walk_references(cli_path: Path, gfaz_path: Path, pav_bed: Path):
+  result = run_command(
+      [
+          str(cli_path),
+          "pav",
+          "-i",
+          str(gfaz_path),
+          "-b",
+          str(pav_bed),
+          "-M",
+          "-t",
+          "2",
+      ]
+  )
+  require_success(result, "pav matrix with W references")
+  expected = (
+      "chrom\tstart\tend\tname\tpathA\tpathB\tsampleA#0#chr1\tsampleB#1#chr2\n"
+      "sampleA#0#chr1:0-6\t0\t6\tsampleA_walk\t1\t0.83333\t1\t0.83333\n"
+      "sampleB#1#chr2\t0\t6\tsampleB_walk\t0.83333\t1\t0.83333\t1\n"
+  )
+  assert_stdout(result, expected, "pav matrix with W references")
+
+
 def main():
   args = parse_args()
   cli_path = Path(args.gfaz)
@@ -275,6 +304,7 @@ def main():
   append_mixed = Path(args.append_mixed)
   pav_bed = Path(args.pav_bed)
   pav_path_only_bed = Path(args.pav_path_only_bed)
+  pav_walk_bed = Path(args.pav_walk_bed)
 
   ensure_cli_exists(cli_path)
 
@@ -283,6 +313,7 @@ def main():
     test_extract_path(cli_path, gfaz_path)
     test_extract_walk(cli_path, gfaz_path)
     test_pav_matrix(cli_path, gfaz_path, pav_bed)
+    test_pav_matrix_walk_references(cli_path, gfaz_path, pav_walk_bed)
     test_pav_matrix_grouped_path_only_plan(
         cli_path, gfaz_path, pav_path_only_bed
     )
