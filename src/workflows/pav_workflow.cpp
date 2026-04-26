@@ -7,8 +7,8 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
-#include <iomanip>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -23,37 +23,138 @@
 namespace gfaz {
 namespace {
 
+// Bottom-up cache of fully-expanded rule leaf sequences (forward direction).
+// A rule is "ready" iff its leaf sequence fits in budget after recursively
+// expanding its children. Reverse expansion is derived by iterating the
+// cached leaves in reverse and negating each sign.
+struct RuleLeafCache {
+  std::vector<std::vector<int32_t>> forward;
+  std::vector<uint8_t> ready;
+  uint32_t min_rule_id = 0;
+  uint32_t max_rule_id = 0;
+  size_t bytes_used = 0;
+  size_t budget_bytes = 0;
+};
+
+bool build_rule_recursive(uint32_t rule_id, RuleLeafCache &cache,
+                          const std::vector<int32_t> &first,
+                          const std::vector<int32_t> &second) {
+  const uint32_t idx = rule_id - cache.min_rule_id;
+  if (cache.ready[idx])
+    return true;
+
+  const int32_t a = first[idx];
+  const int32_t b = second[idx];
+
+  std::vector<int32_t> leaves;
+
+  auto append_child = [&](int32_t child) -> bool {
+    const uint32_t abs_c = static_cast<uint32_t>(std::abs(child));
+    if (abs_c >= cache.min_rule_id && abs_c < cache.max_rule_id) {
+      if (!build_rule_recursive(abs_c, cache, first, second))
+        return false;
+      const uint32_t cidx = abs_c - cache.min_rule_id;
+      const std::vector<int32_t> &cl = cache.forward[cidx];
+      const size_t projected = leaves.size() + cl.size();
+      if (projected * sizeof(int32_t) > cache.budget_bytes)
+        return false;
+      if (child >= 0) {
+        leaves.insert(leaves.end(), cl.begin(), cl.end());
+      } else {
+        leaves.reserve(projected);
+        for (auto it = cl.rbegin(); it != cl.rend(); ++it)
+          leaves.push_back(-*it);
+      }
+    } else {
+      leaves.push_back(child);
+    }
+    return true;
+  };
+
+  if (!append_child(a))
+    return false;
+  if (!append_child(b))
+    return false;
+
+  const size_t needed = leaves.size() * sizeof(int32_t);
+  if (cache.bytes_used + needed > cache.budget_bytes)
+    return false;
+
+  cache.bytes_used += needed;
+  cache.forward[idx] = std::move(leaves);
+  cache.ready[idx] = 1;
+  return true;
+}
+
+void build_rule_cache(RuleLeafCache &cache,
+                      const std::vector<int32_t> &first,
+                      const std::vector<int32_t> &second) {
+  if (cache.budget_bytes == 0)
+    return;
+  for (uint32_t rid = cache.min_rule_id; rid < cache.max_rule_id; ++rid) {
+    build_rule_recursive(rid, cache, first, second);
+  }
+}
+
+size_t resolve_rule_cache_budget() {
+  if (const char *env = std::getenv("GFAZ_PAV_RULE_CACHE_BYTES")) {
+    char *end = nullptr;
+    const long long parsed = std::strtoll(env, &end, 10);
+    if (end != env && *end == '\0' && parsed >= 0)
+      return static_cast<size_t>(parsed);
+  }
+  // Default: 1 GiB. Plenty for HPRC-scale grammars; small grammars use less.
+  return static_cast<size_t>(1) << 30;
+}
+
 template <typename Visitor>
 void expand_rule_visit(uint32_t rule_id, bool reverse,
                        const std::vector<int32_t> &first,
                        const std::vector<int32_t> &second, uint32_t min_id,
-                       uint32_t max_id, Visitor &visit) {
+                       uint32_t max_id, const RuleLeafCache &cache,
+                       Visitor &visit) {
   const uint32_t idx = rule_id - min_id;
+  if (cache.ready[idx]) {
+    const std::vector<int32_t> &leaves = cache.forward[idx];
+    if (!reverse) {
+      for (int32_t leaf : leaves)
+        visit(leaf);
+    } else {
+      for (auto it = leaves.rbegin(); it != leaves.rend(); ++it)
+        visit(static_cast<int32_t>(-*it));
+    }
+    return;
+  }
+
   const int32_t a = first[idx];
   const int32_t b = second[idx];
 
   if (!reverse) {
     const uint32_t abs_a = static_cast<uint32_t>(std::abs(a));
     if (abs_a >= min_id && abs_a < max_id)
-      expand_rule_visit(abs_a, a < 0, first, second, min_id, max_id, visit);
+      expand_rule_visit(abs_a, a < 0, first, second, min_id, max_id, cache,
+                        visit);
     else
       visit(a);
 
     const uint32_t abs_b = static_cast<uint32_t>(std::abs(b));
     if (abs_b >= min_id && abs_b < max_id)
-      expand_rule_visit(abs_b, b < 0, first, second, min_id, max_id, visit);
+      expand_rule_visit(abs_b, b < 0, first, second, min_id, max_id, cache,
+                        visit);
     else
       visit(b);
   } else {
     const uint32_t abs_b = static_cast<uint32_t>(std::abs(b));
     if (abs_b >= min_id && abs_b < max_id)
-      expand_rule_visit(abs_b, b >= 0, first, second, min_id, max_id, visit);
+      expand_rule_visit(abs_b, b >= 0, first, second, min_id, max_id, cache,
+                        visit);
     else
       visit(static_cast<int32_t>(-b));
 
     const uint32_t abs_a = static_cast<uint32_t>(std::abs(a));
     if (abs_a >= min_id && abs_a < max_id)
-      expand_rule_visit(abs_a, a >= 0, first, second, min_id, max_id, visit);
+      expand_rule_visit(abs_a, a >= 0, first, second, min_id, max_id, cache,
+                        visit);
     else
       visit(static_cast<int32_t>(-a));
   }
@@ -64,13 +165,13 @@ void stream_hap_leaves(const int32_t *encoded, size_t encoded_len,
                        uint32_t min_rule_id, uint32_t max_rule_id,
                        const std::vector<int32_t> &rules_first,
                        const std::vector<int32_t> &rules_second,
-                       Visitor &visit) {
+                       const RuleLeafCache &cache, Visitor &visit) {
   for (size_t i = 0; i < encoded_len; ++i) {
     const NodeId node = encoded[i];
     const uint32_t abs_id = static_cast<uint32_t>(std::abs(node));
     if (abs_id >= min_rule_id && abs_id < max_rule_id) {
       expand_rule_visit(abs_id, node < 0, rules_first, rules_second,
-                        min_rule_id, max_rule_id, visit);
+                        min_rule_id, max_rule_id, cache, visit);
     } else {
       visit(node);
     }
@@ -82,12 +183,13 @@ void decode_one_haplotype_general(const int32_t *encoded, size_t encoded_len,
                                   uint32_t min_rule_id, uint32_t max_rule_id,
                                   const std::vector<int32_t> &rules_first,
                                   const std::vector<int32_t> &rules_second,
+                                  const RuleLeafCache &cache,
                                   std::vector<NodeId> &decoded) {
   decoded.clear();
   decoded.reserve(original_len);
   auto push = [&](int32_t v) { decoded.push_back(v); };
   stream_hap_leaves(encoded, encoded_len, min_rule_id, max_rule_id,
-                    rules_first, rules_second, push);
+                    rules_first, rules_second, cache, push);
   for (int r = 0; r < delta_round; ++r) {
     for (size_t i = 1; i < decoded.size(); ++i)
       decoded[i] = decoded[i] + decoded[i - 1];
@@ -228,7 +330,6 @@ std::string path_group_key(const std::string &name, GroupingMode mode) {
   case GroupingMode::Sample:
     return p.sample;
   case GroupingMode::SampleHap:
-    // Match odgi pav -H for common PanSN: sample#hap#ctg -> sample#hap.
     return p.has_hap ? (p.sample + "#" + p.hap) : p.sample;
   case GroupingMode::SampleHapSeq:
     if (p.has_hap && p.has_seq)
@@ -270,6 +371,8 @@ struct TraversalMetadata {
   std::vector<std::string> path_names;
   std::vector<std::string> walk_names;
   std::vector<std::string> group_names;
+  // group_of_slice[s] = group id assigned to slice s.
+  std::vector<uint32_t> group_of_slice;
   std::vector<std::vector<uint32_t>> groups;
 };
 
@@ -317,6 +420,7 @@ TraversalMetadata build_metadata(const CompressedData &data,
     }
   }
 
+  meta.group_of_slice.assign(total, 0);
   std::unordered_map<std::string, uint32_t> key_to_gid;
   key_to_gid.reserve(total * 2 + 1);
   for (uint32_t i = 0; i < static_cast<uint32_t>(total); ++i) {
@@ -332,6 +436,7 @@ TraversalMetadata build_metadata(const CompressedData &data,
       gid = it->second;
     }
     meta.groups[gid].push_back(i);
+    meta.group_of_slice[i] = gid;
   }
 
   return meta;
@@ -342,11 +447,12 @@ void stream_decoded_nodes(const HapSlice &slice, int delta_round,
                           uint32_t min_rule_id, uint32_t max_rule_id,
                           const std::vector<int32_t> &rules_first,
                           const std::vector<int32_t> &rules_second,
+                          const RuleLeafCache &cache,
                           std::vector<NodeId> &decoded, Visitor &visit) {
   if (delta_round == 0) {
     auto leaf_visit = [&](int32_t leaf) { visit(leaf); };
     stream_hap_leaves(slice.encoded, slice.enc_len, min_rule_id, max_rule_id,
-                      rules_first, rules_second, leaf_visit);
+                      rules_first, rules_second, cache, leaf_visit);
   } else if (delta_round == 1) {
     int32_t prev = 0;
     auto leaf_visit = [&](int32_t leaf) {
@@ -354,65 +460,14 @@ void stream_decoded_nodes(const HapSlice &slice, int delta_round,
       visit(prev);
     };
     stream_hap_leaves(slice.encoded, slice.enc_len, min_rule_id, max_rule_id,
-                      rules_first, rules_second, leaf_visit);
+                      rules_first, rules_second, cache, leaf_visit);
   } else {
     decode_one_haplotype_general(slice.encoded, slice.enc_len, slice.orig_len,
                                  delta_round, min_rule_id, max_rule_id,
-                                 rules_first, rules_second, decoded);
+                                 rules_first, rules_second, cache, decoded);
     for (NodeId node : decoded)
       visit(node);
   }
-}
-
-struct NodeWindowHit {
-  uint32_t window_id = 0;
-};
-
-std::vector<std::vector<uint32_t>>
-build_node_to_groups(const std::vector<HapSlice> &slices,
-                     const TraversalMetadata &meta, uint32_t num_nodes,
-                     int delta_round, uint32_t min_rule_id,
-                     uint32_t max_rule_id,
-                     const std::vector<int32_t> &rules_first,
-                     const std::vector<int32_t> &rules_second,
-                     int num_threads) {
-  std::vector<std::vector<uint32_t>> node_to_groups(
-      static_cast<size_t>(num_nodes) + 1);
-
-  ScopedOMPThreads omp_scope(num_threads);
-  const int T = std::max(1, omp_scope.effective_threads());
-
-#pragma omp parallel num_threads(T)
-  {
-    std::vector<uint32_t> local_nodes;
-    std::vector<NodeId> local_decoded;
-
-#pragma omp for schedule(dynamic, 1)
-    for (long long gll = 0; gll < static_cast<long long>(meta.groups.size());
-         ++gll) {
-      const uint32_t gid = static_cast<uint32_t>(gll);
-      local_nodes.clear();
-      for (uint32_t slice_id : meta.groups[gid]) {
-        auto visit = [&](NodeId signed_node) {
-          const uint32_t node = abs_node_id(signed_node);
-          if (node != 0 && node <= num_nodes)
-            local_nodes.push_back(node);
-        };
-        stream_decoded_nodes(slices[slice_id], delta_round, min_rule_id,
-                             max_rule_id, rules_first, rules_second,
-                             local_decoded, visit);
-      }
-      std::sort(local_nodes.begin(), local_nodes.end());
-      local_nodes.erase(std::unique(local_nodes.begin(), local_nodes.end()),
-                        local_nodes.end());
-      for (uint32_t node : local_nodes) {
-#pragma omp critical (node_to_groups_update)
-        node_to_groups[node].push_back(gid);
-      }
-    }
-  }
-
-  return node_to_groups;
 }
 
 } // namespace
@@ -445,7 +500,7 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
                slices);
 
   TraversalMetadata meta = build_metadata(data, options.grouping);
-  result.group_names = std::move(meta.group_names);
+  result.group_names = meta.group_names;
   if (result.group_names.empty())
     return result;
 
@@ -454,6 +509,17 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
       min_rule_id + static_cast<uint32_t>(rules_first.size());
   const int delta_round = data.delta_round;
 
+  // Tier 2 #5: bottom-up rule-leaf cache. Built single-threaded; read-only
+  // during slice decoding so no synchronisation is needed.
+  RuleLeafCache rule_cache;
+  rule_cache.min_rule_id = min_rule_id;
+  rule_cache.max_rule_id = max_rule_id;
+  rule_cache.budget_bytes = resolve_rule_cache_budget();
+  rule_cache.forward.assign(rules_first.size(), {});
+  rule_cache.ready.assign(rules_first.size(), 0);
+  build_rule_cache(rule_cache, rules_first, rules_second);
+
+  // Map BED chrom -> reference slice id.
   std::unordered_map<std::string, uint32_t> path_name_to_slice;
   path_name_to_slice.reserve((meta.path_names.size() + meta.walk_names.size()) *
                                  2 +
@@ -475,35 +541,164 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
   result.denominators.assign(num_windows, 0);
   result.numerators.assign(num_windows * num_groups, 0);
 
-  // Whole-path BEDs produce many more windows than groups under common -S/-H
-  // usage. In that shape, node->windows explodes. Build node->groups instead:
-  // stream each query group once, then scan reference BED ranges.
-  if (num_windows >= num_groups) {
-    std::vector<std::vector<uint32_t>> node_to_groups =
-        build_node_to_groups(slices, meta, num_nodes, delta_round, min_rule_id,
-                             max_rule_id, rules_first, rules_second,
-                             options.num_threads);
+  // Validate every BED chrom resolves to a slice; collect (chrom, slice_id)
+  // and a per-slice flag identifying reference targets.
+  const size_t num_slices = slices.size();
+  std::vector<std::vector<uint32_t> *> slice_to_ref_stream(num_slices, nullptr);
+  std::vector<std::vector<uint32_t>> ref_streams; // one per distinct chrom
+  ref_streams.reserve(ranges_by_chrom.size());
+  std::vector<std::pair<std::string, uint32_t>> chrom_list;
+  chrom_list.reserve(ranges_by_chrom.size());
 
+  for (const auto &entry : ranges_by_chrom) {
+    auto pit = path_name_to_slice.find(entry.first);
+    if (pit == path_name_to_slice.end())
+      throw std::runtime_error("pav: BED reference path not found: " +
+                               entry.first);
+    chrom_list.emplace_back(entry.first, pit->second);
+  }
+  ref_streams.resize(chrom_list.size());
+  for (size_t i = 0; i < chrom_list.size(); ++i) {
+    slice_to_ref_stream[chrom_list[i].second] = &ref_streams[i];
+  }
+
+  // -------------------------------------------------------------------------
+  // Pass 1 (Tier 1 #1, #3): parallel over slices, lock-free.
+  //   - For every slice produce a sorted-unique list of visited node ids.
+  //   - For reference slices additionally emit the ordered node-id stream so
+  //     the BED sweep in pass 3 needs no further rule expansion.
+  // -------------------------------------------------------------------------
+  std::vector<std::vector<uint32_t>> slice_nodes(num_slices);
+
+  {
     ScopedOMPThreads omp_scope(options.num_threads);
     const int T = std::max(1, omp_scope.effective_threads());
 
 #pragma omp parallel num_threads(T)
     {
       std::vector<NodeId> local_decoded;
+      std::vector<uint32_t> local_nodes;
+
+#pragma omp for schedule(dynamic, 16)
+      for (long long sll = 0; sll < static_cast<long long>(num_slices); ++sll) {
+        const uint32_t s = static_cast<uint32_t>(sll);
+        std::vector<uint32_t> *ref_stream = slice_to_ref_stream[s];
+        local_nodes.clear();
+
+        if (ref_stream) {
+          auto visit = [&](NodeId signed_node) {
+            const uint32_t node = abs_node_id(signed_node);
+            if (node == 0 || node > num_nodes)
+              return;
+            local_nodes.push_back(node);
+            ref_stream->push_back(node);
+          };
+          stream_decoded_nodes(slices[s], delta_round, min_rule_id,
+                               max_rule_id, rules_first, rules_second,
+                               rule_cache, local_decoded, visit);
+        } else {
+          auto visit = [&](NodeId signed_node) {
+            const uint32_t node = abs_node_id(signed_node);
+            if (node == 0 || node > num_nodes)
+              return;
+            local_nodes.push_back(node);
+          };
+          stream_decoded_nodes(slices[s], delta_round, min_rule_id,
+                               max_rule_id, rules_first, rules_second,
+                               rule_cache, local_decoded, visit);
+        }
+
+        std::sort(local_nodes.begin(), local_nodes.end());
+        local_nodes.erase(
+            std::unique(local_nodes.begin(), local_nodes.end()),
+            local_nodes.end());
+        slice_nodes[s] = std::move(local_nodes);
+        local_nodes = std::vector<uint32_t>();
+      }
+    }
+  }
+
+  // We no longer need the rule cache after slice decoding.
+  rule_cache.forward = std::vector<std::vector<int32_t>>();
+  rule_cache.ready = std::vector<uint8_t>();
+  rule_cache.bytes_used = 0;
+
+  // -------------------------------------------------------------------------
+  // Pass 2 (Tier 2 #4): build per-group sorted-unique node lists, then a
+  // CSR-shaped node->groups index. CSR avoids the per-node vector overhead
+  // (24 bytes empty * num_nodes) of the previous representation.
+  // -------------------------------------------------------------------------
+  std::vector<std::vector<uint32_t>> group_nodes(num_groups);
+  {
+    ScopedOMPThreads omp_scope(options.num_threads);
+    const int T = std::max(1, omp_scope.effective_threads());
+
+#pragma omp parallel for schedule(dynamic, 1) num_threads(T)
+    for (long long gll = 0; gll < static_cast<long long>(num_groups); ++gll) {
+      const uint32_t gid = static_cast<uint32_t>(gll);
+      auto &gn = group_nodes[gid];
+      size_t total = 0;
+      for (uint32_t s : meta.groups[gid])
+        total += slice_nodes[s].size();
+      gn.reserve(total);
+      for (uint32_t s : meta.groups[gid])
+        gn.insert(gn.end(), slice_nodes[s].begin(), slice_nodes[s].end());
+      std::sort(gn.begin(), gn.end());
+      gn.erase(std::unique(gn.begin(), gn.end()), gn.end());
+    }
+  }
+
+  // Free per-slice node lists; they are no longer needed.
+  slice_nodes = std::vector<std::vector<uint32_t>>();
+
+  // Build CSR: node_offsets[node..node+1] indexes into node_to_group_ids.
+  std::vector<uint64_t> node_offsets(static_cast<size_t>(num_nodes) + 2, 0);
+  for (const auto &gn : group_nodes) {
+    for (uint32_t node : gn) {
+      if (node != 0 && node <= num_nodes)
+        ++node_offsets[node + 1];
+    }
+  }
+  for (size_t i = 1; i < node_offsets.size(); ++i)
+    node_offsets[i] += node_offsets[i - 1];
+
+  const uint64_t total_entries = node_offsets[node_offsets.size() - 1];
+  std::vector<uint32_t> node_to_group_ids(total_entries);
+  {
+    std::vector<uint64_t> cursor(node_offsets.begin(),
+                                 node_offsets.end() - 1);
+    for (uint32_t gid = 0; gid < static_cast<uint32_t>(num_groups); ++gid) {
+      for (uint32_t node : group_nodes[gid]) {
+        if (node != 0 && node <= num_nodes)
+          node_to_group_ids[cursor[node]++] = gid;
+      }
+    }
+  }
+  group_nodes = std::vector<std::vector<uint32_t>>();
+
+  // -------------------------------------------------------------------------
+  // Pass 3 (Tier 1 #1 payoff): parallel over distinct BED chroms, sweep using
+  // the cached reference node streams. No rule expansion happens here.
+  // -------------------------------------------------------------------------
+  {
+    ScopedOMPThreads omp_scope(options.num_threads);
+    const int T = std::max(1, omp_scope.effective_threads());
+
+#pragma omp parallel num_threads(T)
+    {
       std::vector<std::pair<uint32_t, uint32_t>> local_window_nodes;
 
 #pragma omp for schedule(dynamic, 1)
-      for (long long ell = 0;
-           ell < static_cast<long long>(ranges_by_chrom.size()); ++ell) {
-        auto it = ranges_by_chrom.begin();
-        std::advance(it, ell);
-        const std::string &chrom = it->first;
-        auto pit = path_name_to_slice.find(chrom);
-        if (pit == path_name_to_slice.end())
-          throw std::runtime_error("pav: BED reference path not found: " +
-                                   chrom);
+      for (long long cll = 0;
+           cll < static_cast<long long>(chrom_list.size()); ++cll) {
+        const std::string &chrom = chrom_list[cll].first;
+        const std::vector<uint32_t> &ref_stream = ref_streams[cll];
 
-        std::vector<uint32_t> range_ids = it->second;
+        auto rit = ranges_by_chrom.find(chrom);
+        if (rit == ranges_by_chrom.end())
+          continue;
+
+        std::vector<uint32_t> range_ids = rit->second;
         std::sort(range_ids.begin(), range_ids.end(),
                   [&](uint32_t a, uint32_t b) {
                     return std::tie(result.ranges[a].start,
@@ -512,13 +707,12 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
                                     result.ranges[b].end, b);
                   });
 
-        size_t next_range = 0;
         local_window_nodes.clear();
+        size_t next_range = 0;
         uint64_t offset = 0;
-        auto visit = [&](NodeId signed_node) {
-          const uint32_t node = abs_node_id(signed_node);
+        for (uint32_t node : ref_stream) {
           if (node == 0 || node > num_nodes)
-            return;
+            continue;
           const uint64_t len = segment_lengths[node - 1];
           const uint64_t node_start = offset;
           const uint64_t node_end = offset + len;
@@ -534,118 +728,30 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
               local_window_nodes.emplace_back(range_ids[j], node);
           }
           offset = node_end;
-        };
-        stream_decoded_nodes(slices[pit->second], delta_round, min_rule_id,
-                             max_rule_id, rules_first, rules_second,
-                             local_decoded, visit);
+        }
 
         std::sort(local_window_nodes.begin(), local_window_nodes.end());
         local_window_nodes.erase(
-            std::unique(local_window_nodes.begin(), local_window_nodes.end()),
+            std::unique(local_window_nodes.begin(),
+                        local_window_nodes.end()),
             local_window_nodes.end());
 
-        for (const auto &[wid, node] : local_window_nodes) {
+        for (const auto &wn : local_window_nodes) {
+          const uint32_t wid = wn.first;
+          const uint32_t node = wn.second;
           const uint64_t len = segment_lengths[node - 1];
 #pragma omp atomic
           result.denominators[wid] += len;
-          for (uint32_t gid : node_to_groups[node])
-          {
-            const size_t idx = static_cast<size_t>(wid) * num_groups + gid;
+          const uint64_t start = node_offsets[node];
+          const uint64_t end = node_offsets[node + 1];
+          for (uint64_t k = start; k < end; ++k) {
+            const uint32_t gid = node_to_group_ids[k];
+            const size_t idx =
+                static_cast<size_t>(wid) * num_groups + gid;
 #pragma omp atomic
             result.numerators[idx] += len;
           }
         }
-      }
-    }
-
-    return result;
-  }
-
-  std::vector<std::vector<NodeWindowHit>> node_to_windows(
-      static_cast<size_t>(num_nodes) + 1);
-
-  std::vector<NodeId> decoded;
-  for (auto &entry : ranges_by_chrom) {
-    const std::string &chrom = entry.first;
-    auto pit = path_name_to_slice.find(chrom);
-    if (pit == path_name_to_slice.end())
-      throw std::runtime_error("pav: BED reference path not found: " + chrom);
-
-    std::vector<uint32_t> range_ids = entry.second;
-    std::sort(range_ids.begin(), range_ids.end(), [&](uint32_t a, uint32_t b) {
-      return std::tie(result.ranges[a].start, result.ranges[a].end, a) <
-             std::tie(result.ranges[b].start, result.ranges[b].end, b);
-    });
-
-    size_t next_range = 0;
-    std::vector<std::pair<uint32_t, uint32_t>> window_nodes;
-    uint64_t offset = 0;
-    auto visit = [&](NodeId signed_node) {
-      const uint32_t node = abs_node_id(signed_node);
-      if (node == 0 || node > num_nodes)
-        return;
-      const uint64_t len = segment_lengths[node - 1];
-      const uint64_t node_start = offset;
-      const uint64_t node_end = offset + len;
-      while (next_range < range_ids.size() &&
-             result.ranges[range_ids[next_range]].end <= node_start) {
-        ++next_range;
-      }
-      for (size_t j = next_range; j < range_ids.size(); ++j) {
-        const PavRange &r = result.ranges[range_ids[j]];
-        if (r.start >= node_end)
-          break;
-        if (r.end > node_start && r.start < node_end)
-          window_nodes.emplace_back(range_ids[j], node);
-      }
-      offset = node_end;
-    };
-    stream_decoded_nodes(slices[pit->second], delta_round, min_rule_id,
-                         max_rule_id, rules_first, rules_second, decoded,
-                         visit);
-
-    std::sort(window_nodes.begin(), window_nodes.end());
-    window_nodes.erase(std::unique(window_nodes.begin(), window_nodes.end()),
-                       window_nodes.end());
-    for (const auto &[wid, node] : window_nodes) {
-      node_to_windows[node].push_back(NodeWindowHit{wid});
-      result.denominators[wid] += segment_lengths[node - 1];
-    }
-  }
-
-  ScopedOMPThreads omp_scope(options.num_threads);
-  const int T = std::max(1, omp_scope.effective_threads());
-
-#pragma omp parallel num_threads(T)
-  {
-    std::vector<std::pair<uint32_t, uint32_t>> local_pairs;
-    std::vector<NodeId> local_decoded;
-
-#pragma omp for schedule(dynamic, 1)
-    for (long long gll = 0; gll < static_cast<long long>(meta.groups.size());
-         ++gll) {
-      const uint32_t gid = static_cast<uint32_t>(gll);
-      local_pairs.clear();
-      for (uint32_t slice_id : meta.groups[gid]) {
-        auto visit = [&](NodeId signed_node) {
-          const uint32_t node = abs_node_id(signed_node);
-          if (node == 0 || node > num_nodes)
-            return;
-          const auto &hits = node_to_windows[node];
-          for (const NodeWindowHit &hit : hits)
-            local_pairs.emplace_back(hit.window_id, node);
-        };
-        stream_decoded_nodes(slices[slice_id], delta_round, min_rule_id,
-                             max_rule_id, rules_first, rules_second,
-                             local_decoded, visit);
-      }
-      std::sort(local_pairs.begin(), local_pairs.end());
-      local_pairs.erase(std::unique(local_pairs.begin(), local_pairs.end()),
-                        local_pairs.end());
-      for (const auto &[wid, node] : local_pairs) {
-        const size_t idx = static_cast<size_t>(wid) * num_groups + gid;
-#pragma omp atomic
-        result.numerators[idx] += segment_lengths[node - 1];
       }
     }
   }
