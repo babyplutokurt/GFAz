@@ -137,6 +137,21 @@ build/bin/gfaz extract-walk example.gfa.gfaz sample 0 seq1 0 1000
 build/bin/gfaz add-haplotypes example.gfa.gfaz new_paths.gfa
 ```
 
+Temporary downstream workflows:
+
+```bash
+# Compute growth curves directly from compressed paths/walks
+build/bin/gfaz growth -i example.gfa.gfaz -j 8
+
+# Compute PAV ratios over BED ranges directly from compressed paths/walks
+build/bin/gfaz pav -i example.gfa.gfaz -b ranges.bed -S -M -t 8
+```
+
+`growth` computes expected node accumulation curves from path/walk group
+coverage. `pav` computes presence/absence ratios for BED intervals by building
+node-to-group membership from compressed traversals. Both operate on `.gfaz`
+without materializing the original GFA.
+
 Notes:
 
 - In CPU-only builds, `--gpu` falls back to CPU with a warning.
@@ -240,6 +255,9 @@ build/bin/gfaz compress example.gfa
 
 - [BUILD_GUIDE.md](BUILD_GUIDE.md): build instructions and CMake options
 - [workflow.md](workflow.md): internal workflow and serialization reference
+- [GROWTH_WORKFLOW.md](GROWTH_WORKFLOW.md): growth workflow and comparison with
+  Panacus
+- [PAV_WORKFLOW.md](PAV_WORKFLOW.md): PAV workflow and comparison with odgi
 
 ## Limitations
 
