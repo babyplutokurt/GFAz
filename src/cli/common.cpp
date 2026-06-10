@@ -77,6 +77,7 @@ USAGE:
     gfaz add-haplotypes [OPTIONS] <input.gfaz> <paths_or_walks.gfa> [output.gfaz]
     gfaz growth [OPTIONS] <input.gfaz>
     gfaz pav -i <input.gfaz> -b <ranges.bed> [OPTIONS]
+    gfaz deconstruct -i <input.gfaz> -r <reference-name> [OPTIONS]
 
 SUBCOMMANDS:
     compress      Compress a GFA file to GFAZ format
@@ -86,6 +87,7 @@ SUBCOMMANDS:
     add-haplotypes  Append path-only or walk-only haplotypes using the existing rulebook
     growth        Compute pangenome growth curve (Panacus-equivalent, count=node)
     pav           Compute PAV ratios over BED ranges from compressed traversals
+    deconstruct   Derive a VCF (GFA -> VCF) relative to a reference path
 
 OPTIONS (compress):
     -r, --rounds <N>        Number of compression rounds (default: 8)
@@ -283,6 +285,61 @@ NOTES:
     The implementation builds a temporary reference-window index from BED
     ranges, then streams compressed P/W traversals to fill the matrix. It does
     not materialize a full graph or a persistent node-to-step index.
+
+)";
+}
+
+void print_deconstruct_help() {
+  std::cout << R"(
+gfaz deconstruct - Derive a VCF from a GFAZ file (GFA -> VCF)
+
+USAGE:
+    gfaz deconstruct -i <input.gfaz> -r <reference-name> [OPTIONS] > out.vcf
+
+OPTIONS:
+    -i, --input <FILE>      Input .gfaz file. --idx is also accepted.
+    -r, --reference <NAME>  Reference path/walk name to deconstruct against.
+                            May be repeated; each becomes a VCF CHROM.
+    -S, --group-by-sample   One VCF column per sample (default); a sample's
+                            haplotypes form a phased genotype.
+    -H, --group-by-haplotype
+                            One VCF column per sample#hap.
+    -p, --per-path          One VCF column per path/walk (haploid).
+        --snarl             Find sites by topology (superbubbles + inversions)
+                            enumerated from the stored L-line links, like
+                            `vg deconstruct`, instead of the linear
+                            reference-anchor heuristic. Requires links in the
+                            container.
+        --vg-compat         Implies --snarl. Emit one record per top-level snarl
+                            (the global biconnected decomposition), matching
+                            `vg deconstruct`'s default granularity, and drop
+                            snarls with a cyclic reference traversal as vg does.
+        --vg-compact        Alias for --vg-compat.
+                            Default snarl mode keeps a superset: per-leaf-bubble
+                            records plus extra well-formed sites in
+                            cyclic/repetitive regions (e.g. chrY satellites) that
+                            vg collapses or skips.
+    -m, --max-site-length <bp>
+                            Sites spanning more than <bp> on the reference are
+                            emitted as a single <CPX> record. 0 disables.
+    -G, --no-gt             Emit sites + INFO (AC/AN/AF/NS) only, no GT columns.
+    -t, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP.
+    -j, --threads <N>       Alias for -t.
+    -h, --help              Show this help message.
+
+OUTPUT:
+    A VCFv4.2 stream on stdout. Variant sites are found by an anchor/breakpoint
+    decomposition of haplotype traversals relative to the chosen reference path,
+    computed directly on the compressed traversals without materializing the
+    GFA. REF/ALT alleles are spelled from segment sequences (reverse-complement
+    aware), with the standard left-anchor base for indels. Genotypes are phased
+    (each haplotype is its own traversal).
+
+NOTES:
+    Default mode is a flat anchor/breakpoint decomposition. --snarl switches to
+    topology-driven sites (superbubbles + inversions from the L-line links) that
+    track `vg deconstruct`'s snarl boundaries; alleles are still observed by
+    streaming each traversal once. See DECONSTRUCT_WORKFLOW.md for details.
 
 )";
 }

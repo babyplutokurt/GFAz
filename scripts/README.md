@@ -7,6 +7,10 @@
 - `add_haplotypes.py`: benchmark `gfaz add-haplotypes`.
 - `pav_compare_gfaz_odgi.py`: run a path-only GFA whole-path PAV comparison
   between GFAz and ODGI.
+- `compare_deconstruct_perf.py`: take a GFA, compress it to `.gfaz` (timed
+  separately), then benchmark `vg deconstruct` against `gfaz deconstruct`
+  (snarl / linear / vg-compat modes) for wall time, peak RSS, and VCF record
+  count; writes JSON + CSV and prints speedup/RSS ratios.
 
 `scripts/eval/`
 - Evaluation workflow helpers split into `benchmark/`, `plot/`, `table/`, and `validate/`.

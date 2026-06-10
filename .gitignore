@@ -32,9 +32,13 @@ env/
 #
 *gfa
 !gfa_analyzer.py
+!tests/fixtures/deconstruct_inversion_fixture.gfa
+!tests/fixtures/deconstruct_pansn_ref_fixture.gfa
+!tests/fixtures/deconstruct_reverse_path_fixture.gfa
 
 # cache
 .cache/
+benchmark_results/
 
 ./scripts/eval_results.csv
 ./scripts/Ecoli*
@@ -45,6 +49,8 @@ AGENTS.md
 test_data/
 
 rebuttal.md
+
+paper_compute_engine/
 
 extract_benchmark.csv
 
@@ -63,3 +69,5 @@ output.gfaz
 review.md
 
 chrY*
+
+reference_repo/

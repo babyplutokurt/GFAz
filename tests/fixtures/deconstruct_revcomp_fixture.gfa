@@ -1,0 +1,7 @@
+H	VN:Z:1.1
+S	1	TT	LN:i:2
+S	2	GG	LN:i:2
+S	3	CC	LN:i:2
+S	4	AC	LN:i:2
+P	ref	1+,2+,3+	*
+P	HGX#0#chr1	1+,4-,3+	*

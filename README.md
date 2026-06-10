@@ -145,12 +145,29 @@ build/bin/gfaz growth -i example.gfa.gfaz -j 8
 
 # Compute PAV ratios over BED ranges directly from compressed paths/walks
 build/bin/gfaz pav -i example.gfa.gfaz -b ranges.bed -S -M -t 8
+
+# Derive a VCF relative to a reference path directly from compressed traversals
+build/bin/gfaz deconstruct -i example.gfa.gfaz -r chr1 -S > example.vcf
+
+# Topology-based sites matching `vg deconstruct` (one record per top-level snarl)
+build/bin/gfaz deconstruct -i example.gfa.gfaz -r chr1 -S --vg-compat -t 16 > example.vcf
 ```
 
 `growth` computes expected node accumulation curves from path/walk group
 coverage. `pav` computes presence/absence ratios for BED intervals by building
-node-to-group membership from compressed traversals. Both operate on `.gfaz`
-without materializing the original GFA.
+node-to-group membership from compressed traversals. `deconstruct` emits a VCF
+of variant sites relative to a chosen reference path, with per-sample phased
+genotypes (see [DECONSTRUCT_WORKFLOW.md](DECONSTRUCT_WORKFLOW.md)). All three
+operate on `.gfaz` without materializing the original GFA.
+
+`deconstruct` has three site-finding modes. The default is a linear
+reference-anchor heuristic. `--snarl` finds sites by graph topology
+(superbubbles + inversions from the stored L-line links). `--vg-compat` (implies
+`--snarl`) emits **one record per top-level snarl** via a global biconnected
+decomposition, matching `vg deconstruct`'s default granularity: on full human
+chromosomes it reproduces vg's calls at **99.99% position concordance** and
+within **±0.13%** record count, while running **17–24× faster** with **1.4–1.7×
+less memory** (chr1: 1,593,899 vs vg 1,593,956 records, 28.5 s vs 696 s).
 
 Notes:
 
@@ -258,6 +275,8 @@ build/bin/gfaz compress example.gfa
 - [GROWTH_WORKFLOW.md](GROWTH_WORKFLOW.md): growth workflow and comparison with
   Panacus
 - [PAV_WORKFLOW.md](PAV_WORKFLOW.md): PAV workflow and comparison with odgi
+- [DECONSTRUCT_WORKFLOW.md](DECONSTRUCT_WORKFLOW.md): GFA→VCF deconstruct
+  workflow, algorithm, and limitations
 
 ## Limitations
 

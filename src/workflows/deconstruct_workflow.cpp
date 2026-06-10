@@ -1,0 +1,1031 @@
+#include "workflows/deconstruct_workflow.hpp"
+
+#include "codec/codec.hpp"
+#include "utils/sequence_utils.hpp"
+#include "utils/threading_utils.hpp"
+#include "workflows/snarl_finder.hpp"
+#include "workflows/traversal_query.hpp"
+
+#include <algorithm>
+#include <cctype>
+#include <cstdint>
+#include <cstdio>
+#include <iostream>
+#include <map>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+namespace gfaz {
+namespace {
+
+using namespace gfaz::tquery;
+
+// ---------------------------------------------------------------------------
+// Segment sequence access (forward storage; reverse handled per node id sign).
+// ---------------------------------------------------------------------------
+struct SegmentSeqs {
+  std::string concat;
+  std::vector<uint64_t> offset; // offset[n] = start of node (n+1) in concat
+  std::vector<uint32_t> lengths;
+  uint32_t num_nodes = 0;
+
+  uint32_t length_of(NodeId signed_node) const {
+    const uint32_t n = abs_node_id(signed_node);
+    if (n == 0 || n > num_nodes)
+      return 0;
+    return lengths[n - 1];
+  }
+
+  // Append the (uppercased, orientation-resolved) sequence of one node.
+  void append(std::string &out, NodeId signed_node) const {
+    const uint32_t n = abs_node_id(signed_node);
+    if (n == 0 || n > num_nodes)
+      return;
+    const char *s = concat.data() + offset[n - 1];
+    const size_t len = offset[n] - offset[n - 1];
+    if (signed_node >= 0) {
+      const size_t base = out.size();
+      out.append(s, len);
+      for (size_t i = base; i < out.size(); ++i)
+        out[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(out[i])));
+    } else {
+      std::string sub(s, len);
+      for (char &c : sub)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+      reverse_complement_inplace(sub);
+      out += sub;
+    }
+  }
+
+  // Last base of a node as seen along its traversal orientation.
+  char last_base(NodeId signed_node) const {
+    const uint32_t n = abs_node_id(signed_node);
+    if (n == 0 || n > num_nodes)
+      return 'N';
+    const char *s = concat.data() + offset[n - 1];
+    const size_t len = offset[n] - offset[n - 1];
+    if (len == 0)
+      return 'N';
+    if (signed_node >= 0)
+      return static_cast<char>(std::toupper(static_cast<unsigned char>(s[len - 1])));
+    return complement_base(
+        static_cast<char>(std::toupper(static_cast<unsigned char>(s[0]))));
+  }
+};
+
+SegmentSeqs load_segments(const CompressedData &data) {
+  SegmentSeqs seg;
+  seg.concat = Codec::zstd_decompress_string(data.segment_sequences_zstd);
+  seg.lengths = Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
+  seg.num_nodes = static_cast<uint32_t>(seg.lengths.size());
+  seg.offset.assign(seg.num_nodes + 1, 0);
+  for (uint32_t i = 0; i < seg.num_nodes; ++i)
+    seg.offset[i + 1] = seg.offset[i] + seg.lengths[i];
+  if (seg.offset[seg.num_nodes] != seg.concat.size())
+    throw std::runtime_error(
+        "deconstruct: segment sequence length sum does not match payload");
+  return seg;
+}
+
+// Per-slice identity used to form VCF sample columns.
+struct SliceIdentity {
+  std::vector<std::string> names;   // reference-lookup name per slice
+  std::vector<std::string> samples; // grouping key per slice
+  std::vector<uint32_t> haps;       // haplotype index per slice
+  size_t num_paths = 0;
+};
+
+SliceIdentity build_slice_identity(const CompressedData &data,
+                                   GroupingMode grouping) {
+  SliceIdentity id;
+  const size_t num_paths = data.sequence_lengths.size();
+  const size_t num_walks = data.walk_lengths.size();
+  id.num_paths = num_paths;
+  id.names.reserve(num_paths + num_walks);
+  id.samples.reserve(num_paths + num_walks);
+  id.haps.reserve(num_paths + num_walks);
+
+  if (num_paths) {
+    std::vector<std::string> path_names =
+        decompress_strings(data.names_zstd, data.name_lengths_zstd, "path name");
+    if (path_names.size() != num_paths)
+      throw std::runtime_error("deconstruct: path name count mismatch");
+    for (const std::string &name : path_names) {
+      const PansnParts p = parse_pansn_path_name(name);
+      uint32_t hap = 0;
+      if (p.has_hap) {
+        try {
+          hap = static_cast<uint32_t>(std::stoul(p.hap));
+        } catch (...) {
+          hap = 0;
+        }
+      }
+      id.names.push_back(name);
+      id.samples.push_back(path_group_key(name, grouping));
+      id.haps.push_back(hap);
+    }
+  }
+
+  if (num_walks) {
+    std::vector<std::string> samples = decompress_strings(
+        data.walk_sample_ids_zstd, data.walk_sample_id_lengths_zstd,
+        "walk sample");
+    std::vector<std::string> seqs = decompress_strings(
+        data.walk_seq_ids_zstd, data.walk_seq_id_lengths_zstd, "walk seq");
+    std::vector<uint32_t> haps =
+        Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
+    std::vector<int64_t> starts =
+        Codec::decompress_varint_int64(data.walk_seq_starts_zstd, num_walks);
+    std::vector<int64_t> ends =
+        Codec::decompress_varint_int64(data.walk_seq_ends_zstd, num_walks);
+    if (samples.size() != num_walks || seqs.size() != num_walks ||
+        haps.size() != num_walks || starts.size() != num_walks ||
+        ends.size() != num_walks)
+      throw std::runtime_error("deconstruct: walk metadata count mismatch");
+    for (size_t i = 0; i < num_walks; ++i) {
+      id.names.push_back(
+          walk_reference_name(samples[i], haps[i], seqs[i], starts[i], ends[i]));
+      id.samples.push_back(walk_group_key(samples[i], haps[i], seqs[i], grouping));
+      id.haps.push_back(haps[i]);
+    }
+  }
+
+  return id;
+}
+
+struct DecodedHaplotype {
+  std::vector<NodeId> nodes;
+  // Ordered (anchor ordinal, position-in-nodes) for same-orientation reference
+  // anchors and opposite-orientation anchors, respectively. Opposite anchors are
+  // only used when a whole local block runs reverse to the reference.
+  std::vector<std::pair<uint32_t, uint32_t>> anchor_hits;
+  std::vector<std::pair<uint32_t, uint32_t>> reverse_anchor_hits;
+  std::unordered_map<uint32_t, uint32_t> forward_anchor_pos;
+  std::unordered_map<uint32_t, uint32_t> reverse_anchor_pos;
+};
+
+struct VcfRecord {
+  uint64_t pos = 0;
+  std::string line;
+};
+
+std::string vcf_contig_name_for_reference(const std::string &reference_name) {
+  const PansnParts p = parse_pansn_path_name(reference_name);
+  if (p.has_seq && !p.seq.empty())
+    return p.seq;
+  return reference_name;
+}
+
+std::string format_af(uint64_t ac, uint64_t an) {
+  if (an == 0)
+    return "0";
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%g", static_cast<double>(ac) /
+                                            static_cast<double>(an));
+  return std::string(buf);
+}
+
+// Deconstruct one reference contig. Appends VCF records to `records`, returns
+// the contig length (sum of reference segment lengths).
+uint64_t deconstruct_contig(
+    const SegmentSeqs &seg,
+    const std::vector<HapSlice> &slices, uint32_t ref_slice,
+    const std::vector<uint32_t> &sample_slices, // non-ref slices to decode
+    // columns[c][slot] = local slice ids covering haplotype `slot` of column c
+    const std::vector<std::vector<std::vector<uint32_t>>> &columns,
+    const std::vector<int32_t> &rules_first,
+    const std::vector<int32_t> &rules_second, const RuleLeafCache &rule_cache,
+    uint32_t min_rule_id, uint32_t max_rule_id, int delta_round,
+    const DeconstructOptions &options, const std::string &contig_name,
+    std::vector<VcfRecord> &records) {
+  // --- Pass 1: reference profile ---
+  std::vector<NodeId> ref_nodes;
+  {
+    std::vector<NodeId> scratch;
+    auto visit = [&](NodeId node) { ref_nodes.push_back(node); };
+    stream_decoded_nodes(slices[ref_slice], delta_round, min_rule_id,
+                         max_rule_id, rules_first, rules_second, rule_cache,
+                         scratch, visit);
+  }
+
+  const size_t ref_len = ref_nodes.size();
+  std::vector<uint64_t> offset_at(ref_len + 1, 0);
+  for (size_t i = 0; i < ref_len; ++i)
+    offset_at[i + 1] = offset_at[i] + seg.length_of(ref_nodes[i]);
+  const uint64_t contig_length = offset_at[ref_len];
+
+  // Anchors = reference nodes occurring exactly once. Ordinal = reference order.
+  std::unordered_map<uint32_t, int64_t> occ; // abs id -> ref index or -1 if dup
+  occ.reserve(ref_len * 2 + 1);
+  for (size_t i = 0; i < ref_len; ++i) {
+    const uint32_t id = abs_node_id(ref_nodes[i]);
+    auto it = occ.find(id);
+    if (it == occ.end())
+      occ.emplace(id, static_cast<int64_t>(i));
+    else
+      it->second = -1;
+  }
+  std::vector<uint32_t> anchor_ref_index; // ordinal -> ref index
+  std::unordered_map<NodeId, uint32_t> anchor_node_to_ord;
+  std::unordered_map<NodeId, uint32_t> reverse_anchor_node_to_ord;
+  anchor_ref_index.reserve(ref_len);
+  anchor_node_to_ord.reserve(ref_len * 2 + 1);
+  reverse_anchor_node_to_ord.reserve(ref_len * 2 + 1);
+  for (size_t i = 0; i < ref_len; ++i) {
+    const uint32_t id = abs_node_id(ref_nodes[i]);
+    auto it = occ.find(id);
+    if (it != occ.end() && it->second == static_cast<int64_t>(i)) {
+      const uint32_t ord = static_cast<uint32_t>(anchor_ref_index.size());
+      anchor_node_to_ord.emplace(ref_nodes[i], ord);
+      reverse_anchor_node_to_ord.emplace(static_cast<NodeId>(-ref_nodes[i]),
+                                         ord);
+      anchor_ref_index.push_back(static_cast<uint32_t>(i));
+    }
+  }
+  const uint32_t num_anchors = static_cast<uint32_t>(anchor_ref_index.size());
+  if (num_anchors < 2)
+    return contig_length; // nothing to call against
+
+  // --- Pass 2a: decode each non-ref slice, extract anchor subsequence ---
+  const size_t num_samples_slices = sample_slices.size();
+  std::vector<DecodedHaplotype> decoded(num_samples_slices);
+
+  {
+    ScopedOMPThreads omp_scope(options.num_threads);
+    const int T = std::max(1, omp_scope.effective_threads());
+#pragma omp parallel num_threads(T)
+    {
+      std::vector<NodeId> scratch;
+#pragma omp for schedule(dynamic, 16)
+      for (long long si = 0; si < static_cast<long long>(num_samples_slices);
+           ++si) {
+        const uint32_t slice_id = sample_slices[si];
+        DecodedHaplotype &dh = decoded[si];
+        dh.nodes.clear();
+        auto visit = [&](NodeId node) { dh.nodes.push_back(node); };
+        stream_decoded_nodes(slices[slice_id], delta_round, min_rule_id,
+                             max_rule_id, rules_first, rules_second, rule_cache,
+                             scratch, visit);
+        for (uint32_t pos = 0; pos < dh.nodes.size(); ++pos) {
+          auto it = anchor_node_to_ord.find(dh.nodes[pos]);
+          if (it != anchor_node_to_ord.end()) {
+            dh.anchor_hits.emplace_back(it->second, pos);
+            continue;
+          }
+          auto rit = reverse_anchor_node_to_ord.find(dh.nodes[pos]);
+          if (rit != reverse_anchor_node_to_ord.end())
+            dh.reverse_anchor_hits.emplace_back(rit->second, pos);
+        }
+        dh.forward_anchor_pos.reserve(dh.anchor_hits.size() * 2 + 1);
+        for (size_t k = 1; k < dh.anchor_hits.size(); ++k) {
+          const auto prev = dh.anchor_hits[k - 1];
+          const auto cur = dh.anchor_hits[k];
+          if (cur.first > prev.first) {
+            dh.forward_anchor_pos.emplace(prev.first, prev.second);
+            dh.forward_anchor_pos.emplace(cur.first, cur.second);
+          }
+        }
+        dh.reverse_anchor_pos.reserve(dh.reverse_anchor_hits.size() * 2 + 1);
+        for (size_t k = 1; k < dh.reverse_anchor_hits.size(); ++k) {
+          const auto prev = dh.reverse_anchor_hits[k - 1];
+          const auto cur = dh.reverse_anchor_hits[k];
+          if (cur.first < prev.first) {
+            dh.reverse_anchor_pos.emplace(prev.first, prev.second);
+            dh.reverse_anchor_pos.emplace(cur.first, cur.second);
+          }
+        }
+      }
+    }
+  }
+
+  // --- Pass 2b: breakpoints = anchors no haplotype bridges ---
+  std::vector<uint8_t> skipped(num_anchors, 0);
+  auto mark_skipped_between = [&](
+      const std::vector<std::pair<uint32_t, uint32_t>> &hits) {
+    for (size_t k = 1; k < hits.size(); ++k) {
+      const uint32_t o_prev = hits[k - 1].first;
+      const uint32_t o_cur = hits[k].first;
+      const uint32_t lo = std::min(o_prev, o_cur);
+      const uint32_t hi = std::max(o_prev, o_cur);
+      if (lo == hi)
+        continue;
+      for (uint32_t o = lo + 1; o < hi; ++o)
+        skipped[o] = 1;
+    }
+  };
+  for (const DecodedHaplotype &dh : decoded) {
+    mark_skipped_between(dh.anchor_hits);
+    mark_skipped_between(dh.reverse_anchor_hits);
+  }
+  std::vector<uint32_t> breakpoints; // ordinals, ascending
+  breakpoints.reserve(num_anchors);
+  for (uint32_t o = 0; o < num_anchors; ++o)
+    if (!skipped[o])
+      breakpoints.push_back(o);
+  if (breakpoints.size() < 2)
+    return contig_length;
+
+  const size_t num_columns = columns.size();
+
+  // Resolve the allele of one haplotype slot from its covering slices:
+  //   -1 = missing (no covering slice spans this site)
+  //   -2 = conflict (covering slices disagree on the allele)
+  auto resolve_slot = [](const std::vector<uint32_t> &slot,
+                         const std::vector<int> &slice_allele) -> int {
+    int allele = -1;
+    for (uint32_t local : slot) {
+      const int a = slice_allele[local];
+      if (a < 0)
+        continue;
+      if (allele < 0)
+        allele = a;
+      else if (allele != a)
+        return -2;
+    }
+    return allele;
+  };
+
+  // --- Pass 3 + assembly: one record per varying site ---
+  for (size_t b = 0; b + 1 < breakpoints.size(); ++b) {
+    const uint32_t src_ord = breakpoints[b];
+    const uint32_t sink_ord = breakpoints[b + 1];
+    const uint32_t src_ref_index = anchor_ref_index[src_ord];
+    const uint32_t sink_ref_index = anchor_ref_index[sink_ord];
+
+    // Reference interior allele string.
+    std::string ref_allele;
+    for (uint32_t i = src_ref_index + 1; i < sink_ref_index; ++i)
+      seg.append(ref_allele, ref_nodes[i]);
+
+    // Map allele string -> allele index. Reference is allele 0.
+    std::map<std::string, int> allele_index;
+    allele_index.emplace(ref_allele, 0);
+    std::vector<std::string> alleles; // index -> string
+    alleles.push_back(ref_allele);
+
+    // Allele assigned to each sample slice (-1 == missing/no span/complex).
+    std::vector<int> slice_allele(num_samples_slices, -1);
+
+    for (size_t si = 0; si < num_samples_slices; ++si) {
+      const DecodedHaplotype &dh = decoded[si];
+      std::string allele;
+      auto fs = dh.forward_anchor_pos.find(src_ord);
+      auto fe = dh.forward_anchor_pos.find(sink_ord);
+      if (fs != dh.forward_anchor_pos.end() &&
+          fe != dh.forward_anchor_pos.end() && fs->second < fe->second) {
+        for (uint32_t p = fs->second + 1; p < fe->second; ++p)
+          seg.append(allele, dh.nodes[p]);
+      } else {
+        auto rs = dh.reverse_anchor_pos.find(src_ord);
+        auto re = dh.reverse_anchor_pos.find(sink_ord);
+        if (rs == dh.reverse_anchor_pos.end() ||
+            re == dh.reverse_anchor_pos.end() || re->second >= rs->second)
+          continue; // does not span this site
+        for (uint32_t p = rs->second; p-- > re->second + 1;)
+          seg.append(allele, static_cast<NodeId>(-dh.nodes[p]));
+      }
+      auto ai = allele_index.find(allele);
+      int idx;
+      if (ai == allele_index.end()) {
+        idx = static_cast<int>(alleles.size());
+        allele_index.emplace(allele, idx);
+        alleles.push_back(allele);
+      } else {
+        idx = ai->second;
+      }
+      slice_allele[si] = idx;
+    }
+
+    if (alleles.size() < 2)
+      continue; // no variation at this site
+
+    // Substitution iff every allele has the same length as the reference.
+    bool substitution = true;
+    for (size_t a = 1; a < alleles.size() && substitution; ++a)
+      substitution = (alleles[a].size() == ref_allele.size());
+
+    const uint64_t interior_start = offset_at[src_ref_index + 1];
+    const uint64_t span =
+        offset_at[sink_ref_index] - offset_at[src_ref_index + 1];
+    const bool guard =
+        options.max_site_length != 0 && span > options.max_site_length;
+
+    // Resolve each haplotype slot to a single allele, then count per slot
+    // (not per slice) so a sample's tiling contigs collapse to its ploidy.
+    std::vector<std::vector<int>> column_slot_allele(num_columns);
+    std::vector<uint64_t> ac(alleles.size(), 0);
+    uint64_t an = 0;
+    uint64_t ns = 0;
+    for (size_t c = 0; c < num_columns; ++c) {
+      column_slot_allele[c].reserve(columns[c].size());
+      bool has = false;
+      for (const auto &slot : columns[c]) {
+        const int a = resolve_slot(slot, slice_allele);
+        column_slot_allele[c].push_back(a);
+        if (a >= 0) {
+          ++an;
+          ++ac[a];
+          has = true;
+        }
+      }
+      if (has)
+        ++ns;
+    }
+
+    uint64_t pos;
+    std::string ref_field;
+    std::vector<std::string> alt_fields;
+
+    if (guard) {
+      // Megasite: collapse to a single symbolic record.
+      pos = substitution ? interior_start + 1 : interior_start;
+      const char prev = seg.last_base(ref_nodes[src_ref_index]);
+      ref_field = substitution ? (ref_allele.empty() ? std::string("N")
+                                                      : ref_allele)
+                               : std::string(1, prev);
+      alt_fields.push_back("<CPX>");
+    } else {
+      const char prev = seg.last_base(ref_nodes[src_ref_index]);
+      if (substitution) {
+        pos = interior_start + 1;
+        ref_field = ref_allele;
+        for (size_t a = 1; a < alleles.size(); ++a)
+          alt_fields.push_back(alleles[a]);
+      } else {
+        pos = interior_start; // anchor base position (1-based)
+        ref_field = std::string(1, prev) + ref_allele;
+        for (size_t a = 1; a < alleles.size(); ++a)
+          alt_fields.push_back(std::string(1, prev) + alleles[a]);
+      }
+    }
+
+    // Build the record line.
+    std::ostringstream line;
+    line << contig_name << '\t' << pos << "\t.\t" << ref_field << '\t';
+    for (size_t a = 0; a < alt_fields.size(); ++a) {
+      if (a)
+        line << ',';
+      line << alt_fields[a];
+    }
+    line << "\t.\t.\t";
+
+    // INFO
+    {
+      std::ostringstream info;
+      info << "AC=";
+      for (size_t a = 1; a < alleles.size(); ++a) {
+        if (a > 1)
+          info << ',';
+        info << (guard ? an - ac[0] : ac[a]);
+        if (guard)
+          break;
+      }
+      info << ";AN=" << an << ";AF=";
+      for (size_t a = 1; a < alleles.size(); ++a) {
+        if (a > 1)
+          info << ',';
+        info << format_af(guard ? an - ac[0] : ac[a], an);
+        if (guard)
+          break;
+      }
+      info << ";NS=" << ns;
+      line << info.str();
+    }
+
+    if (options.emit_gt) {
+      line << "\tGT";
+      for (size_t c = 0; c < num_columns; ++c) {
+        line << '\t';
+        const auto &slot_alleles = column_slot_allele[c];
+        for (size_t h = 0; h < slot_alleles.size(); ++h) {
+          if (h)
+            line << '|';
+          const int a = slot_alleles[h];
+          if (a < 0) // missing or conflict
+            line << '.';
+          else if (guard)
+            line << (a == 0 ? 0 : 1);
+          else
+            line << a;
+        }
+      }
+    }
+
+    records.push_back(VcfRecord{pos, line.str()});
+  }
+
+  return contig_length;
+}
+
+// ---------------------------------------------------------------------------
+// Snarl-based deconstruction (topology-driven sites).
+//
+// Sites are superbubbles enumerated from the stored L-line links (see
+// snarl_finder.cpp), projected onto the reference for coordinates. Alleles are
+// observed by streaming each sample traversal exactly once: a small state
+// machine captures only the interior between a snarl's boundary node-sides
+// (forward or, for inversions, reversed) -- whole paths are never retained.
+// ---------------------------------------------------------------------------
+
+// One captured interior: the node stretch a sample spelled through a snarl,
+// already normalized to the reference (forward) orientation.
+struct AlleleObs {
+  uint32_t snarl = 0;
+  uint32_t slice_local = 0;
+  std::vector<NodeId> interior;
+};
+
+uint64_t deconstruct_contig_snarl(
+    const SegmentSeqs &seg, const DoubledGraph &g, const SegmentGraph &seg_graph,
+    const std::vector<HapSlice> &slices, uint32_t ref_slice,
+    const std::vector<uint32_t> &sample_slices,
+    const std::vector<std::vector<std::vector<uint32_t>>> &columns,
+    const std::vector<int32_t> &rules_first,
+    const std::vector<int32_t> &rules_second, const RuleLeafCache &rule_cache,
+    uint32_t min_rule_id, uint32_t max_rule_id, int delta_round,
+    const DeconstructOptions &options, const std::string &contig_name,
+    std::vector<VcfRecord> &records) {
+  // --- Pass 1: reference profile ---
+  std::vector<NodeId> ref_nodes;
+  {
+    std::vector<NodeId> scratch;
+    auto visit = [&](NodeId node) { ref_nodes.push_back(node); };
+    stream_decoded_nodes(slices[ref_slice], delta_round, min_rule_id,
+                         max_rule_id, rules_first, rules_second, rule_cache,
+                         scratch, visit);
+  }
+  const size_t ref_len = ref_nodes.size();
+  std::vector<uint64_t> offset_at(ref_len + 1, 0);
+  for (size_t i = 0; i < ref_len; ++i)
+    offset_at[i + 1] = offset_at[i] + seg.length_of(ref_nodes[i]);
+  const uint64_t contig_length = offset_at[ref_len];
+
+  // --- Pass 2: topology-based snarls projected on the reference ---
+  // vg-compat uses the global biconnected decomposition (top-level snarls,
+  // matching vg's default granularity, with cyclic-reference blocks dropped).
+  // Default --snarl keeps the leaf-superbubble superset.
+  std::vector<ReferenceSnarl> snarls =
+      options.vg_compat ? find_reference_snarls_top_level(seg_graph, ref_nodes)
+                        : find_reference_snarls(g, ref_nodes);
+
+  const size_t num_snarls = snarls.size();
+  if (num_snarls == 0)
+    return contig_length;
+
+  // Boundary lookup for on-the-fly capture. Forward entrance/exit are the
+  // oriented boundary node-sides; reversed entrance/exit handle a sample that
+  // traverses the snarl on the opposite strand (inversion).
+  std::unordered_map<uint32_t, uint32_t> fwd_entrance; // vertex -> snarl idx
+  std::unordered_map<uint32_t, uint32_t> rev_entrance;
+  std::vector<uint32_t> fwd_exit(num_snarls), rev_exit(num_snarls);
+  fwd_entrance.reserve(num_snarls * 2 + 1);
+  rev_entrance.reserve(num_snarls * 2 + 1);
+  for (uint32_t s = 0; s < num_snarls; ++s) {
+    fwd_entrance.emplace(DoubledGraph::vid(snarls[s].start_node), s);
+    fwd_exit[s] = DoubledGraph::vid(snarls[s].end_node);
+    rev_entrance.emplace(DoubledGraph::vid(-snarls[s].end_node), s);
+    rev_exit[s] = DoubledGraph::vid(-snarls[s].start_node);
+  }
+
+  // --- Pass 3: observe alleles, streaming each sample slice once ---
+  const size_t num_samples_slices = sample_slices.size();
+  std::vector<AlleleObs> observations;
+  {
+    ScopedOMPThreads omp_scope(options.num_threads);
+    const int T = std::max(1, omp_scope.effective_threads());
+    std::vector<std::vector<AlleleObs>> per_thread(T);
+#pragma omp parallel num_threads(T)
+    {
+      const int tid =
+#ifdef _OPENMP
+          omp_get_thread_num();
+#else
+          0;
+#endif
+      std::vector<AlleleObs> &local = per_thread[tid];
+      std::vector<NodeId> scratch;
+#pragma omp for schedule(dynamic, 16)
+      for (long long si = 0; si < static_cast<long long>(num_samples_slices);
+           ++si) {
+        const uint32_t slice_id = sample_slices[si];
+        uint32_t open = DoubledGraph::kInvalid;
+        bool reversed = false;
+        uint32_t exit_v = 0;
+        std::vector<NodeId> interior;
+        auto open_at = [&](uint32_t v) {
+          auto f = fwd_entrance.find(v);
+          if (f != fwd_entrance.end()) {
+            open = f->second;
+            reversed = false;
+            exit_v = fwd_exit[open];
+            interior.clear();
+            return;
+          }
+          auto r = rev_entrance.find(v);
+          if (r != rev_entrance.end()) {
+            open = r->second;
+            reversed = true;
+            exit_v = rev_exit[open];
+            interior.clear();
+          }
+        };
+        auto visit = [&](NodeId node) {
+          const uint32_t v = DoubledGraph::vid(node);
+          if (open == DoubledGraph::kInvalid) {
+            open_at(v);
+            return;
+          }
+          if (v == exit_v) {
+            std::vector<NodeId> seq;
+            if (!reversed) {
+              seq = interior;
+            } else {
+              seq.reserve(interior.size());
+              for (auto it = interior.rbegin(); it != interior.rend(); ++it)
+                seq.push_back(static_cast<NodeId>(-*it));
+            }
+            local.push_back(AlleleObs{open, static_cast<uint32_t>(si),
+                                      std::move(seq)});
+            open = DoubledGraph::kInvalid;
+            interior.clear();
+            // The exit boundary may itself open the next (chained) snarl.
+            open_at(v);
+            return;
+          }
+          interior.push_back(node);
+        };
+        stream_decoded_nodes(slices[slice_id], delta_round, min_rule_id,
+                             max_rule_id, rules_first, rules_second, rule_cache,
+                             scratch, visit);
+        // A slice still "open" at end never reached the exit: no clean span.
+      }
+    }
+    size_t total = 0;
+    for (const auto &v : per_thread)
+      total += v.size();
+    observations.reserve(total);
+    for (auto &v : per_thread)
+      for (auto &o : v)
+        observations.push_back(std::move(o));
+  }
+
+  // Group observations by snarl for per-site assembly.
+  std::vector<std::vector<uint32_t>> obs_by_snarl(num_snarls);
+  for (uint32_t k = 0; k < observations.size(); ++k)
+    obs_by_snarl[observations[k].snarl].push_back(k);
+
+  const size_t num_columns = columns.size();
+  auto resolve_slot = [](const std::vector<uint32_t> &slot,
+                         const std::vector<int> &slice_allele) -> int {
+    int allele = -1;
+    for (uint32_t local : slot) {
+      const int a = slice_allele[local];
+      if (a < 0)
+        continue;
+      if (allele < 0)
+        allele = a;
+      else if (allele != a)
+        return -2;
+    }
+    return allele;
+  };
+
+  // --- Pass 4: assemble + emit one record per varying snarl ---
+  std::vector<int> slice_allele(num_samples_slices, -1);
+  for (uint32_t s = 0; s < num_snarls; ++s) {
+    const uint32_t src_ref_index = snarls[s].start_ref_index;
+    const uint32_t sink_ref_index = snarls[s].end_ref_index;
+
+    std::string ref_allele;
+    for (uint32_t i = src_ref_index + 1; i < sink_ref_index; ++i)
+      seg.append(ref_allele, ref_nodes[i]);
+
+    std::map<std::string, int> allele_index;
+    allele_index.emplace(ref_allele, 0);
+    std::vector<std::string> alleles;
+    alleles.push_back(ref_allele);
+
+    // Reset only the slots we touch (slice_allele is reused across snarls).
+    std::vector<uint32_t> touched;
+    touched.reserve(obs_by_snarl[s].size());
+    for (uint32_t k : obs_by_snarl[s]) {
+      const AlleleObs &obs = observations[k];
+      std::string allele;
+      for (NodeId n : obs.interior)
+        seg.append(allele, n);
+      auto ai = allele_index.find(allele);
+      int idx;
+      if (ai == allele_index.end()) {
+        idx = static_cast<int>(alleles.size());
+        allele_index.emplace(allele, idx);
+        alleles.push_back(allele);
+      } else {
+        idx = ai->second;
+      }
+      slice_allele[obs.slice_local] = idx;
+      touched.push_back(obs.slice_local);
+    }
+
+    if (alleles.size() < 2) {
+      for (uint32_t t : touched)
+        slice_allele[t] = -1;
+      continue;
+    }
+
+    bool substitution = true;
+    for (size_t a = 1; a < alleles.size() && substitution; ++a)
+      substitution = (alleles[a].size() == ref_allele.size());
+
+    const uint64_t interior_start = offset_at[src_ref_index + 1];
+    const uint64_t span =
+        offset_at[sink_ref_index] - offset_at[src_ref_index + 1];
+    const bool guard =
+        options.max_site_length != 0 && span > options.max_site_length;
+
+    std::vector<std::vector<int>> column_slot_allele(num_columns);
+    std::vector<uint64_t> ac(alleles.size(), 0);
+    uint64_t an = 0;
+    uint64_t ns = 0;
+    for (size_t c = 0; c < num_columns; ++c) {
+      column_slot_allele[c].reserve(columns[c].size());
+      bool has = false;
+      for (const auto &slot : columns[c]) {
+        const int a = resolve_slot(slot, slice_allele);
+        column_slot_allele[c].push_back(a);
+        if (a >= 0) {
+          ++an;
+          ++ac[a];
+          has = true;
+        }
+      }
+      if (has)
+        ++ns;
+    }
+
+    uint64_t pos;
+    std::string ref_field;
+    std::vector<std::string> alt_fields;
+    if (guard) {
+      pos = substitution ? interior_start + 1 : interior_start;
+      const char prev = seg.last_base(ref_nodes[src_ref_index]);
+      ref_field = substitution
+                      ? (ref_allele.empty() ? std::string("N") : ref_allele)
+                      : std::string(1, prev);
+      alt_fields.push_back("<CPX>");
+    } else {
+      const char prev = seg.last_base(ref_nodes[src_ref_index]);
+      if (substitution) {
+        pos = interior_start + 1;
+        ref_field = ref_allele;
+        for (size_t a = 1; a < alleles.size(); ++a)
+          alt_fields.push_back(alleles[a]);
+      } else {
+        pos = interior_start;
+        ref_field = std::string(1, prev) + ref_allele;
+        for (size_t a = 1; a < alleles.size(); ++a)
+          alt_fields.push_back(std::string(1, prev) + alleles[a]);
+      }
+    }
+
+    std::ostringstream line;
+    line << contig_name << '\t' << pos << "\t.\t" << ref_field << '\t';
+    for (size_t a = 0; a < alt_fields.size(); ++a) {
+      if (a)
+        line << ',';
+      line << alt_fields[a];
+    }
+    line << "\t.\t.\t";
+    {
+      std::ostringstream info;
+      info << "AC=";
+      for (size_t a = 1; a < alleles.size(); ++a) {
+        if (a > 1)
+          info << ',';
+        info << (guard ? an - ac[0] : ac[a]);
+        if (guard)
+          break;
+      }
+      info << ";AN=" << an << ";AF=";
+      for (size_t a = 1; a < alleles.size(); ++a) {
+        if (a > 1)
+          info << ',';
+        info << format_af(guard ? an - ac[0] : ac[a], an);
+        if (guard)
+          break;
+      }
+      info << ";NS=" << ns;
+      line << info.str();
+    }
+    if (options.emit_gt) {
+      line << "\tGT";
+      for (size_t c = 0; c < num_columns; ++c) {
+        line << '\t';
+        const auto &slot_alleles = column_slot_allele[c];
+        for (size_t h = 0; h < slot_alleles.size(); ++h) {
+          if (h)
+            line << '|';
+          const int a = slot_alleles[h];
+          if (a < 0)
+            line << '.';
+          else if (guard)
+            line << (a == 0 ? 0 : 1);
+          else
+            line << a;
+        }
+      }
+    }
+    records.push_back(VcfRecord{pos, line.str()});
+
+    for (uint32_t t : touched)
+      slice_allele[t] = -1;
+  }
+
+  return contig_length;
+}
+
+} // namespace
+
+void deconstruct_to_vcf(const CompressedData &data,
+                        const DeconstructOptions &options, std::ostream &out) {
+  if (options.reference_names.empty())
+    throw std::runtime_error("deconstruct: at least one reference (-r) required");
+
+  SegmentSeqs seg = load_segments(data);
+
+  std::vector<int32_t> rules_first =
+      Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
+  std::vector<int32_t> rules_second =
+      Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
+  Codec::delta_decode_int32(rules_first);
+  Codec::delta_decode_int32(rules_second);
+
+  std::vector<int32_t> paths_flat =
+      Codec::zstd_decompress_int32_vector(data.paths_zstd);
+  std::vector<int32_t> walks_flat =
+      Codec::zstd_decompress_int32_vector(data.walks_zstd);
+
+  std::vector<HapSlice> slices;
+  slices.reserve(data.sequence_lengths.size() + data.walk_lengths.size());
+  build_slices(paths_flat, data.sequence_lengths, data.original_path_lengths,
+               slices);
+  build_slices(walks_flat, data.walk_lengths, data.original_walk_lengths,
+               slices);
+
+  SliceIdentity ident = build_slice_identity(data, options.grouping);
+  if (ident.names.size() != slices.size())
+    throw std::runtime_error("deconstruct: slice/identity count mismatch");
+
+  // Resolve reference names to slice ids.
+  std::unordered_map<std::string, uint32_t> name_to_slice;
+  name_to_slice.reserve(slices.size() * 2 + 1);
+  for (uint32_t i = 0; i < slices.size(); ++i)
+    name_to_slice.emplace(ident.names[i], i);
+
+  std::vector<uint32_t> ref_slices;
+  std::vector<uint8_t> is_ref(slices.size(), 0);
+  for (const std::string &rn : options.reference_names) {
+    auto it = name_to_slice.find(rn);
+    if (it == name_to_slice.end())
+      throw std::runtime_error("deconstruct: reference path not found: " + rn);
+    ref_slices.push_back(it->second);
+    is_ref[it->second] = 1;
+  }
+
+  // Flatten non-ref slices; assign each a dense local index used by per-site
+  // allele arrays.
+  std::vector<uint32_t> sample_slices;
+  std::unordered_map<uint32_t, uint32_t> global_to_local;
+  for (uint32_t i = 0; i < slices.size(); ++i) {
+    if (is_ref[i])
+      continue;
+    global_to_local.emplace(i, static_cast<uint32_t>(sample_slices.size()));
+    sample_slices.push_back(i);
+  }
+
+  // VCF sample columns. Each column has one or more haplotype slots; each slot
+  // lists the (local) slices that cover that haplotype. When grouping by
+  // sample, slots correspond to distinct haplotype indices, so a sample's
+  // contigs that tile the reference collapse into the correct ploidy rather
+  // than inflating it. For SampleHap / PerPathWalk there is a single slot per
+  // column. std::map keeps columns and slots in deterministic order.
+  const bool slot_by_hap = (options.grouping == GroupingMode::Sample);
+  std::map<std::string, std::map<uint32_t, std::vector<uint32_t>>> col_slot_map;
+  for (uint32_t i = 0; i < slices.size(); ++i) {
+    if (is_ref[i])
+      continue;
+    const uint32_t slot_key = slot_by_hap ? ident.haps[i] : 0u;
+    col_slot_map[ident.samples[i]][slot_key].push_back(global_to_local.at(i));
+  }
+  std::vector<std::string> column_names;
+  std::vector<std::vector<std::vector<uint32_t>>> columns_local;
+  column_names.reserve(col_slot_map.size());
+  columns_local.reserve(col_slot_map.size());
+  for (auto &ckv : col_slot_map) {
+    column_names.push_back(ckv.first);
+    std::vector<std::vector<uint32_t>> slots;
+    slots.reserve(ckv.second.size());
+    for (auto &skv : ckv.second)
+      slots.push_back(std::move(skv.second));
+    columns_local.push_back(std::move(slots));
+  }
+
+  // Rule-leaf cache (shared, read-only during decoding).
+  const uint32_t min_rule_id = data.min_rule_id();
+  const uint32_t max_rule_id =
+      min_rule_id + static_cast<uint32_t>(rules_first.size());
+  RuleLeafCache rule_cache;
+  rule_cache.min_rule_id = min_rule_id;
+  rule_cache.max_rule_id = max_rule_id;
+  rule_cache.budget_bytes = resolve_rule_cache_budget(
+      "GFAZ_DECONSTRUCT_RULE_CACHE_BYTES", static_cast<size_t>(1) << 30);
+  rule_cache.forward.assign(rules_first.size(), {});
+  rule_cache.ready.assign(rules_first.size(), 0);
+  build_rule_cache(rule_cache, rules_first, rules_second);
+
+  const int delta_round = data.delta_round;
+
+  // Topology-based mode: build the bidirected node-side graph once from links.
+  // vg-compat additionally needs the undirected segment graph for the global
+  // biconnected (top-level snarl) decomposition.
+  DoubledGraph snarl_graph;
+  SegmentGraph seg_graph;
+  if (options.use_snarls) {
+    snarl_graph = build_doubled_graph_from_links(data, seg.num_nodes);
+    if (options.vg_compat)
+      seg_graph = build_segment_graph_from_links(data, seg.num_nodes);
+    if (data.num_links == 0)
+      std::cerr << "Warning: deconstruct --snarl: container has no L-line "
+                   "links; no snarls can be called.\n";
+  }
+
+  // Process each reference contig, collecting records + contig lengths.
+  struct ContigOut {
+    std::string name;
+    uint64_t length;
+    std::vector<VcfRecord> records;
+  };
+  std::vector<ContigOut> contigs;
+  contigs.reserve(ref_slices.size());
+
+  for (size_t r = 0; r < ref_slices.size(); ++r) {
+    ContigOut co;
+    co.name = vcf_contig_name_for_reference(options.reference_names[r]);
+    co.length =
+        options.use_snarls
+            ? deconstruct_contig_snarl(
+                  seg, snarl_graph, seg_graph, slices, ref_slices[r],
+                  sample_slices, columns_local, rules_first, rules_second,
+                  rule_cache, min_rule_id, max_rule_id, delta_round, options,
+                  co.name, co.records)
+            : deconstruct_contig(
+                  seg, slices, ref_slices[r], sample_slices, columns_local,
+                  rules_first, rules_second, rule_cache, min_rule_id,
+                  max_rule_id, delta_round, options, co.name, co.records);
+    std::sort(co.records.begin(), co.records.end(),
+              [](const VcfRecord &a, const VcfRecord &b) {
+                return a.pos < b.pos;
+              });
+    contigs.push_back(std::move(co));
+  }
+
+  // --- VCF header ---
+  out << "##fileformat=VCFv4.2\n";
+  out << "##FILTER=<ID=PASS,Description=\"All filters passed\">\n";
+  for (const ContigOut &co : contigs)
+    out << "##contig=<ID=" << co.name << ",length=" << co.length << ">\n";
+  out << "##INFO=<ID=AC,Number=A,Type=Integer,Description=\"Allele count in "
+         "genotypes\">\n";
+  out << "##INFO=<ID=AN,Number=1,Type=Integer,Description=\"Total number of "
+         "alleles in called genotypes\">\n";
+  out << "##INFO=<ID=AF,Number=A,Type=Float,Description=\"Allele frequency\">\n";
+  out << "##INFO=<ID=NS,Number=1,Type=Integer,Description=\"Number of samples "
+         "with data\">\n";
+  if (options.max_site_length != 0) {
+    out << "##ALT=<ID=CPX,Description=\"Complex region exceeding "
+           "max-site-length\">\n";
+  }
+  if (options.emit_gt) {
+    out << "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n";
+  }
+  out << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO";
+  if (options.emit_gt) {
+    out << "\tFORMAT";
+    for (const std::string &name : column_names)
+      out << '\t' << name;
+  }
+  out << '\n';
+
+  for (const ContigOut &co : contigs)
+    for (const VcfRecord &rec : co.records)
+      out << rec.line << '\n';
+}
+
+} // namespace gfaz

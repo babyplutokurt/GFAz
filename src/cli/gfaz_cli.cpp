@@ -32,6 +32,8 @@ int main(int argc, char *argv[]) {
     return gfaz::cli::do_growth(argc - 1, argv + 1);
   } else if (command == "pav") {
     return gfaz::cli::do_pav(argc - 1, argv + 1);
+  } else if (command == "deconstruct") {
+    return gfaz::cli::do_deconstruct(argc - 1, argv + 1);
   } else {
     std::cerr << "Unknown command: " << command << std::endl;
     gfaz::cli::print_usage();
