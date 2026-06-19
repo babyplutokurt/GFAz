@@ -49,10 +49,10 @@ Establish a stage-by-stage performance and memory baseline for GPU decompression
 
 ### Candidate Files
 
-- [`src/gpu/decompression/traversal_decode_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/decompression/traversal_decode_gpu.cu)
-- [`src/gpu/decompression/decompression_primitives_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/decompression/decompression_primitives_gpu.cu)
-- [`src/gpu/decompression/path_expand_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/decompression/path_expand_gpu.cu)
-- [`src/gpu/io/gfa_writer_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/io/gfa_writer_gpu.cu)
+- [`src/compress/gpu/decompression/traversal_decode_gpu.cu`](/home/kurty/Release/gfa_compression/src/compress/gpu/decompression/traversal_decode_gpu.cu)
+- [`src/compress/gpu/decompression/decompression_primitives_gpu.cu`](/home/kurty/Release/gfa_compression/src/compress/gpu/decompression/decompression_primitives_gpu.cu)
+- [`src/compress/gpu/decompression/path_expand_gpu.cu`](/home/kurty/Release/gfa_compression/src/compress/gpu/decompression/path_expand_gpu.cu)
+- [`src/compress/gpu/io/gfa_writer_gpu.cu`](/home/kurty/Release/gfa_compression/src/compress/gpu/io/gfa_writer_gpu.cu)
 
 ### Deliverables
 
@@ -85,10 +85,10 @@ Reduce allocation churn and improve memory locality by reusing buffers across GP
 
 ### Candidate Files
 
-- [`include/gpu/decompression/decompression_primitives_gpu.hpp`](/home/kurty/Release/gfa_compression/include/gpu/decompression/decompression_primitives_gpu.hpp)
-- [`src/gpu/decompression/decompression_primitives_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/decompression/decompression_primitives_gpu.cu)
-- [`src/gpu/decompression/traversal_decode_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/decompression/traversal_decode_gpu.cu)
-- [`src/gpu/decompression/path_expand_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/decompression/path_expand_gpu.cu)
+- [`include/compress/gpu/decompression/decompression_primitives_gpu.hpp`](/home/kurty/Release/gfa_compression/include/compress/gpu/decompression/decompression_primitives_gpu.hpp)
+- [`src/compress/gpu/decompression/decompression_primitives_gpu.cu`](/home/kurty/Release/gfa_compression/src/compress/gpu/decompression/decompression_primitives_gpu.cu)
+- [`src/compress/gpu/decompression/traversal_decode_gpu.cu`](/home/kurty/Release/gfa_compression/src/compress/gpu/decompression/traversal_decode_gpu.cu)
+- [`src/compress/gpu/decompression/path_expand_gpu.cu`](/home/kurty/Release/gfa_compression/src/compress/gpu/decompression/path_expand_gpu.cu)
 
 ### Deliverables
 
@@ -147,9 +147,9 @@ Optimize the GPU backend around the path that avoids full host-side traversal ma
 
 ### Candidate Files
 
-- [`src/gpu/io/gfa_writer_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/io/gfa_writer_gpu.cu)
-- [`src/gpu/decompression/traversal_decode_gpu.cu`](/home/kurty/Release/gfa_compression/src/gpu/decompression/traversal_decode_gpu.cu)
-- [`src/gpu/decompression/path_decompression_gpu_rolling.cu`](/home/kurty/Release/gfa_compression/src/gpu/decompression/path_decompression_gpu_rolling.cu)
+- [`src/compress/gpu/io/gfa_writer_gpu.cu`](/home/kurty/Release/gfa_compression/src/compress/gpu/io/gfa_writer_gpu.cu)
+- [`src/compress/gpu/decompression/traversal_decode_gpu.cu`](/home/kurty/Release/gfa_compression/src/compress/gpu/decompression/traversal_decode_gpu.cu)
+- [`src/compress/gpu/decompression/path_decompression_gpu_rolling.cu`](/home/kurty/Release/gfa_compression/src/compress/gpu/decompression/path_decompression_gpu_rolling.cu)
 
 ### Deliverables
 
