@@ -27,7 +27,7 @@ The serializer entry points exposed to GPU callers are compatibility aliases ove
 
 ## CPU Compression Workflow Details
 
-Main implementation: `src/workflows/compression_workflow.cpp`
+Main implementation: `src/compress/compression_workflow.cpp`
 
 1. Parse input GFA into `GfaGraph`, whose segment and path state is grouped as `SegmentData` and `PathData`.
 2. Flatten path and walk traversals for compression-oriented processing.
@@ -46,7 +46,7 @@ Notes:
 
 ## CPU Decompression Workflow Details
 
-Main implementation: `src/workflows/decompression_workflow.cpp`
+Main implementation: `src/compress/decompression_workflow.cpp`
 
 The CPU backend has two decompression modes:
 
@@ -66,8 +66,8 @@ The CPU backend has two decompression modes:
 
 Main implementations:
 
-- `src/gpu/compression/compression_workflow_gpu.cu`
-- `src/gpu/decompression/decompression_workflow_gpu.cu`
+- `src/compress/gpu/compression/compression_workflow_gpu.cu`
+- `src/compress/gpu/decompression/decompression_workflow_gpu.cu`
 
 Behavior:
 
@@ -81,13 +81,13 @@ Behavior:
 
 ## Serialization Contracts
 
-Shared serialization (`include/codec/serialization.hpp`, `src/codec/serialization.cpp`):
+Shared serialization (`include/core/codec/serialization.hpp`, `src/core/codec/serialization.cpp`):
 
 - Magic: `GFAZ`
 - Version: `5`
 - Type: `CompressedData`
 
-GPU serialization (`include/gpu/core/serialization_gpu.hpp`, `src/gpu/core/serialization_gpu.cpp`):
+GPU serialization (`include/compress/gpu/core/serialization_gpu.hpp`, `src/compress/gpu/core/serialization_gpu.cpp`):
 
 - Alias over the shared serializer
 - Magic: `GFAZ`

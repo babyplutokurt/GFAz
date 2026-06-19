@@ -79,5 +79,5 @@ Framing for the paper / docs:
 - Block-level chunking of paths: not needed for current 8 GB resident target,
   but revisit if we want truly lazy decode on cloud/Lambda deployments.
 - Walk-by-name lookup is currently O(N) linear scan
-  (`src/workflows/extraction_workflow.cpp:308`). Fine for the 4 targets above,
+  (`src/compress/extraction_workflow.cpp:308`). Fine for the 4 targets above,
   but fix before any interactive / per-query service.
