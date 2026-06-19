@@ -212,6 +212,24 @@ std::string vcf_contig_name_for_reference(const std::string &reference_name) {
   return reference_name;
 }
 
+// VCF CHROM / ##contig name for a reference. Default: the bare sequence name
+// (e.g. "chr1"). With graph-info (-a), the full PanSN base name including
+// sample#hap (e.g. "CHM13#0#chr1", trailing :start-end stripped) for vg parity.
+std::string vcf_chrom_name(const std::string &reference_name, bool graph_info) {
+  if (graph_info)
+    return strip_trailing_subrange(reference_name);
+  return vcf_contig_name_for_reference(reference_name);
+}
+
+// Append one oriented node to a graph-path string in vg's AT/snarl-id spelling:
+// '>' for forward, '<' for reverse, followed by the (1-based) node number. The
+// number is gfaz's own node id (the .gfaz node space); original GFA segment
+// names are not retained.
+void append_oriented_node(std::string &s, NodeId n) {
+  s += (n >= 0) ? '>' : '<';
+  s += std::to_string(n >= 0 ? n : -n);
+}
+
 std::string format_af(uint64_t ac, uint64_t an) {
   if (an == 0)
     return "0";
@@ -284,7 +302,7 @@ uint64_t write_record_head(std::ostringstream &line,
                            bool substitution, uint64_t interior_start, char prev,
                            const std::string &ref_allele,
                            const std::vector<std::string> &alleles,
-                           uint64_t ref_start) {
+                           uint64_t ref_start, const std::string &id_field = ".") {
   uint64_t pos;
   std::string ref_field;
   std::vector<std::string> alt_fields;
@@ -311,7 +329,8 @@ uint64_t write_record_head(std::ostringstream &line,
   // is a subrange of its contig (ref_start == 0 for whole-contig references).
   pos += ref_start;
 
-  line << contig_name << '\t' << pos << "\t.\t" << ref_field << '\t';
+  line << contig_name << '\t' << pos << '\t' << id_field << '\t' << ref_field
+       << '\t';
   for (size_t a = 0; a < alt_fields.size(); ++a) {
     if (a)
       line << ',';
@@ -846,6 +865,13 @@ uint64_t deconstruct_contig_snarl(
         allele_index.emplace(ref_allele, 0);
         std::vector<std::string> alleles;
         alleles.push_back(ref_allele);
+        // For -a (AT field): the interior-pool extent (off,len) of the first
+        // observation that introduced each ALT allele, used to spell its
+        // traversal. Index 0 (REF) is a placeholder; the REF traversal comes
+        // from ref_nodes. Only populated when emit_at.
+        std::vector<std::pair<uint32_t, uint32_t>> allele_src;
+        if (options.emit_at)
+          allele_src.emplace_back(0u, 0u);
 
         // Reset only the slots we touch (slice_allele is reused across snarls).
         std::vector<uint32_t> touched;
@@ -861,6 +887,8 @@ uint64_t deconstruct_contig_snarl(
             idx = static_cast<int>(alleles.size());
             allele_index.emplace(allele, idx);
             alleles.push_back(allele);
+            if (options.emit_at)
+              allele_src.emplace_back(obs.off, obs.len);
           } else {
             idx = ai->second;
           }
@@ -905,12 +933,43 @@ uint64_t deconstruct_contig_snarl(
         }
 
         const char prev = seg.last_base(ref_nodes[src_ref_index]);
+        // -a: snarl boundary id (>src>sink in gfaz's node space) for the ID
+        // column; otherwise "." (the default).
+        std::string id_field = ".";
+        if (options.emit_at) {
+          id_field.clear();
+          append_oriented_node(id_field, ref_nodes[src_ref_index]);
+          append_oriented_node(id_field, ref_nodes[sink_ref_index]);
+        }
         std::ostringstream line;
         const uint64_t pos = write_record_head(line, contig_name, guard,
                                                substitution, interior_start,
                                                prev, ref_allele, alleles,
-                                               ref_start);
+                                               ref_start, id_field);
         append_info_fields(line, ac, an, ns, guard);
+        // -a: AT (allele traversal), one '>'/'<'-oriented node path per allele
+        // (REF first), each = src boundary + interior + sink boundary, in
+        // gfaz's 1-based node space. Skipped under the megasite guard, which
+        // already collapses the alleles to a single symbolic <CPX> record.
+        if (options.emit_at && !guard) {
+          line << ";AT=";
+          for (size_t a = 0; a < alleles.size(); ++a) {
+            if (a)
+              line << ',';
+            std::string at;
+            append_oriented_node(at, ref_nodes[src_ref_index]);
+            if (a == 0) {
+              for (uint32_t i = src_ref_index + 1; i < sink_ref_index; ++i)
+                append_oriented_node(at, ref_nodes[i]);
+            } else {
+              const auto &ext = allele_src[a];
+              for (uint32_t i = 0; i < ext.second; ++i)
+                append_oriented_node(at, interior_pool[ext.first + i]);
+            }
+            append_oriented_node(at, ref_nodes[sink_ref_index]);
+            line << at;
+          }
+        }
         append_gt_columns(line, column_slot_allele, guard, options);
         local_records.push_back(VcfRecord{pos, line.str()});
 
@@ -1011,7 +1070,7 @@ void deconstruct_to_vcf(const CompressedData &data,
     std::unordered_map<std::string, std::string> chrom_owner;
     for (size_t r = 0; r < ref_slices.size(); ++r) {
       const std::string chrom =
-          vcf_contig_name_for_reference(ref_display_names[r]);
+          vcf_chrom_name(ref_display_names[r], options.emit_at);
       auto ins = chrom_owner.emplace(chrom, ref_display_names[r]);
       if (!ins.second)
         throw std::runtime_error(
@@ -1099,7 +1158,7 @@ void deconstruct_to_vcf(const CompressedData &data,
 
   for (size_t r = 0; r < ref_slices.size(); ++r) {
     ContigOut co;
-    co.name = vcf_contig_name_for_reference(ref_display_names[r]);
+    co.name = vcf_chrom_name(ref_display_names[r], options.emit_at);
     const uint64_t ref_start = ident.ref_starts[ref_slices[r]];
     co.length =
         options.use_snarls
@@ -1132,6 +1191,10 @@ void deconstruct_to_vcf(const CompressedData &data,
   out << "##INFO=<ID=AF,Number=A,Type=Float,Description=\"Allele frequency\">\n";
   out << "##INFO=<ID=NS,Number=1,Type=Integer,Description=\"Number of samples "
          "with data\">\n";
+  if (options.emit_at) {
+    out << "##INFO=<ID=AT,Number=R,Type=String,Description=\"Allele Traversal "
+           "as path in graph (gfaz 1-based node ids)\">\n";
+  }
   if (options.max_site_length != 0) {
     out << "##ALT=<ID=CPX,Description=\"Complex region exceeding "
            "max-site-length\">\n";

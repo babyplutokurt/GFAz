@@ -391,7 +391,14 @@ def main(argv: list[str]) -> int:
         type=Path,
         help="Reuse an existing .gfaz. If omitted, the GFA is compressed into --out-dir.",
     )
-    parser.add_argument("--ref", help="Reference path name. Default: preset, then a grch38/chm13 P/W line, then the first.")
+    parser.add_argument("--ref", help="Reference path name (or, with --ref-prefix, a name prefix). Default: preset, then a grch38/chm13 P/W line, then the first.")
+    parser.add_argument(
+        "--ref-prefix",
+        action="store_true",
+        help="Treat --ref as a name prefix: vg uses -P and gfaz uses -P "
+             "(whole-reference mode, e.g. --ref CHM13 --ref-prefix). "
+             "Default is exact path match (vg -p / gfaz -r).",
+    )
     parser.add_argument("--vg-bin", type=Path, default=DEFAULT_VG)
     parser.add_argument("--gfaz-bin", type=Path, default=DEFAULT_GFAZ)
     parser.add_argument(
@@ -480,7 +487,8 @@ def main(argv: list[str]) -> int:
 
     # --- vg deconstruct (reads the GFA directly). ---
     if not args.skip_vg:
-        vg_cmd = [str(args.vg_bin), "deconstruct", "-p", ref, "-t", str(args.threads), str(gfa)]
+        vg_ref_flag = "-P" if args.ref_prefix else "-p"
+        vg_cmd = [str(args.vg_bin), "deconstruct", vg_ref_flag, ref, "-t", str(args.threads), str(gfa)]
         results.append(
             run_one(
                 dataset=dataset,
@@ -495,9 +503,10 @@ def main(argv: list[str]) -> int:
 
     # --- gfaz deconstruct, one run per selected mode. ---
     if not args.skip_gfaz:
+        gfaz_ref_flag = "-P" if args.ref_prefix else "-r"
         for mode in modes:
             gfaz_cmd = [
-                str(args.gfaz_bin), "deconstruct", "-i", str(gfaz), "-r", ref,
+                str(args.gfaz_bin), "deconstruct", "-i", str(gfaz), gfaz_ref_flag, ref,
                 "-t", str(args.threads), *GFAZ_MODES[mode],
             ]
             results.append(

@@ -27,6 +27,8 @@ int do_deconstruct(int argc, char *argv[]) {
       {"group-by-sample", no_argument, 0, 'S'},
       {"group-by-haplotype", no_argument, 0, 'H'},
       {"per-path", no_argument, 0, 'p'},
+      {"at", no_argument, 0, 'a'},
+      {"graph-info", no_argument, 0, 'a'},
       {"snarl", no_argument, 0, 1000},
       {"vg-compat", no_argument, 0, 1001},
       {"vg-compact", no_argument, 0, 1001},
@@ -39,7 +41,7 @@ int do_deconstruct(int argc, char *argv[]) {
 
   int opt;
   optind = 1;
-  while ((opt = getopt_long(argc, argv, "i:r:P:SHpm:Gt:j:h", long_options,
+  while ((opt = getopt_long(argc, argv, "i:r:P:SHpam:Gt:j:h", long_options,
                             nullptr)) != -1) {
     switch (opt) {
     case 'i':
@@ -61,6 +63,9 @@ int do_deconstruct(int argc, char *argv[]) {
       break;
     case 'p':
       options.grouping = gfaz::GroupingMode::PerPathWalk;
+      break;
+    case 'a':
+      options.emit_at = true;
       break;
     case 1000: // --snarl: leaf-superbubble superset (legacy)
       options.use_snarls = true;

@@ -26,6 +26,14 @@ struct DeconstructOptions {
   int num_threads = kDefaultNumThreads;
   // Emit per-sample GT columns (false -> site + INFO only).
   bool emit_gt = true;
+  // Emit graph-level annotations for closer `vg deconstruct` parity (off by
+  // default to keep the output lean): the AT (allele traversal) INFO field, the
+  // snarl boundary id in the ID column, and the full PanSN contig name
+  // (sample#hap#seq) in CHROM instead of the bare sequence name. Node ids in AT
+  // / ID are gfaz's own 1-based numbering (the .gfaz node space; original GFA
+  // segment names are not retained), so they are not byte-identical to vg's.
+  // Only affects the snarl writer for AT/ID; CHROM naming applies to both.
+  bool emit_at = false;
   // Sites whose reference span exceeds this (bp) are emitted as a single
   // <CPX>-flagged record instead of enumerating every allele. 0 disables.
   uint64_t max_site_length = 0;

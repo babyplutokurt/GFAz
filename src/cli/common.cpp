@@ -315,6 +315,12 @@ OPTIONS:
                             Sites spanning more than <bp> on the reference are
                             emitted as a single <CPX> record. 0 disables.
     -G, --no-gt             Emit sites + INFO (AC/AN/AF/NS) only, no GT columns.
+    -a, --at, --graph-info  Emit graph annotations for closer vg parity: the AT
+                            (allele traversal) INFO field, the snarl boundary id
+                            in the ID column, and the full PanSN contig name
+                            (sample#hap#seq) in CHROM. Node ids use gfaz's own
+                            1-based numbering (not the original GFA segment
+                            names). Off by default (keeps the output lean).
     -t, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP.
     -j, --threads <N>       Alias for -t.
     -h, --help              Show this help message.
