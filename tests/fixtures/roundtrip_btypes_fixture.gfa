@@ -1,0 +1,5 @@
+H	VN:Z:1.1
+S	1	acgtACGT	bc:B:c,-1,2,-3	bC:B:C,1,2,3	bs:B:s,-100,200	bS:B:S,100,200	bi:B:i,-1000,2000	bI:B:I,1000,2000	bf:B:f,1.5,-2.5
+S	2	NNNN	xi:i:-42	xf:f:-3.14
+L	1	+	2	+	0M
+P	p	1+,2+	*

@@ -43,11 +43,15 @@ FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures"
 #   deconstruct_fixture    11 segments, 5 P-lines (SNP/indel topology)
 #   optional_fields        J + C lines, S optional fields i/f/A/Z/B
 #   growth_fixture_walks   W-lines only (walk decode path)
+#   roundtrip_orientations reverse-orientation P/W, cyclic/duplicate visits
+#   roundtrip_btypes       all B-array subtypes (c/C/s/S/i/I/f), lowercase seq
 FIXTURES = [
     "cli_fixture.gfa",
     "deconstruct_fixture.gfa",
     "compressor_optional_fields_fixture.gfa",
     "growth_fixture_walks.gfa",
+    "roundtrip_orientations_fixture.gfa",
+    "roundtrip_btypes_fixture.gfa",
 ]
 
 # (delta, rounds, threshold) combinations. Defaults are (1, 8, 2).

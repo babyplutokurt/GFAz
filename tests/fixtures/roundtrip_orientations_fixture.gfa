@@ -1,0 +1,13 @@
+H	VN:Z:1.1
+S	1	AAAA
+S	2	CCCC
+S	3	GGGG
+S	4	TTTT
+L	1	+	2	+	0M
+L	2	+	3	+	0M
+L	3	+	4	+	0M
+P	fwd	1+,2+,3+,4+	*
+P	mixed	1+,2-,3+,4-	*
+P	cyclic	1+,2+,3+,2+,4+	4M,4M,4M,4M
+W	w1	0	c1	0	16	>1>2>3>4
+W	w2	0	c2	0	16	>1<2>3<4
