@@ -3,9 +3,19 @@ S	1	AAAA	LN:i:4
 S	2	C	LN:i:1
 S	3	GGGG	LN:i:4
 S	10	T	LN:i:1
+S	21	GG	LN:i:2
+S	22	A	LN:i:1
+S	23	T	LN:i:1
+S	24	CC	LN:i:2
 L	1	+	2	+	0M
 L	2	+	3	+	0M
 L	1	+	10	+	0M
 L	10	+	3	+	0M
+L	21	+	22	+	0M
+L	22	+	24	+	0M
+L	21	+	23	+	0M
+L	23	+	24	+	0M
 W	REF	0	chr1	1000	1009	>1>2>3
+W	REF	0	chr2	500	505	>21>22>24
 W	HG001	0	chr1	1000	1009	>1>10>3
+W	HG001	0	chr2	500	505	>21>23>24

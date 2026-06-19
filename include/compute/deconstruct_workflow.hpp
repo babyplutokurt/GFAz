@@ -14,8 +14,13 @@ namespace gfaz {
 
 struct DeconstructOptions {
   // Reference path/walk names to deconstruct against (each becomes a VCF
-  // CHROM). Required.
+  // CHROM). Required unless reference_prefixes is given.
   std::vector<std::string> reference_names;
+  // Reference path/walk name *prefixes* (vg `-P` parity): every stored
+  // path/walk name beginning with one of these is used as a reference contig.
+  // E.g. "CHM13" selects all CHM13#0#chr* chromosomes. Combined with
+  // reference_names; at least one of the two must be non-empty.
+  std::vector<std::string> reference_prefixes;
   // How non-reference traversals collapse into VCF sample columns.
   GroupingMode grouping = GroupingMode::Sample;
   int num_threads = kDefaultNumThreads;

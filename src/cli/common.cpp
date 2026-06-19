@@ -299,7 +299,13 @@ USAGE:
 OPTIONS:
     -i, --input <FILE>      Input .gfaz file. --idx is also accepted.
     -r, --reference <NAME>  Reference path/walk name to deconstruct against.
-                            May be repeated; each becomes a VCF CHROM.
+                            May be repeated; each becomes a VCF CHROM. The
+                            ":start-end" subrange of a W-line name is optional
+                            (the PanSN base name resolves it).
+    -P, --path-prefix <P>   Deconstruct against every path/walk whose name
+                            begins with <P> (vg parity). E.g. -P CHM13 selects
+                            all CHM13 reference chromosomes. May be repeated and
+                            combined with -r.
     -S, --group-by-sample   One VCF column per sample (default); a sample's
                             haplotypes form a phased genotype.
     -H, --group-by-haplotype

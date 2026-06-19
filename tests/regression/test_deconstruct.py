@@ -231,32 +231,49 @@ def test_per_path(cli: Path, gfaz: Path):
 
 
 def test_subrange_reference(cli: Path, gfaz: Path):
-  """A W-line reference covering a non-zero subrange of its contig.
+  """Reference paths covering a non-zero subrange of their contig (vg parity).
 
-  REF#0#chr1 is the walk over chr1[1000,1009) (nodes 1,2,3 = AAAA C GGGG);
-  HG001 carries the SNP C->T at node2. The variant sits at walk-offset 5, so its
-  reference-frame POS must be 1000 + 5 = 1005, and the contig length must be the
-  subrange end (1009). Also checks that the PanSN base name resolves without the
-  ":start-end" suffix (matching vg's -P), in both snarl (default) and --linear
-  modes.
+  The fixture has two whole-chromosome references as W-lines with subranges:
+  REF#0#chr1 over chr1[1000,1009) (AAAA C GGGG) and REF#0#chr2 over chr2[500,505)
+  (GG A CC); HG001 carries a SNP on each (C->T at chr1, A->T at chr2). Checks:
+    - non-zero-start POS offset: chr1 variant at walk-offset 5 -> POS 1000+5=1005;
+      chr2 variant at walk-offset 3 -> POS 500+3=503; ##contig length = subrange end;
+    - `-P REF` selects BOTH reference chromosomes in one VCF (so REF is not a
+      sample, only HG001 is);
+    - the PanSN base name resolves the same slice as the exact ":start-end" name.
   """
-  expected = [
+  expected_prefix = [
       "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG001",
       "chr1\t1005\t.\tC\tT\t.\t.\tAC=1;AN=1;AF=1;NS=1\tGT\t1",
+      "chr2\t503\t.\tA\tT\t.\t.\tAC=1;AN=1;AF=1;NS=1\tGT\t1",
   ]
-  for ref in ("REF#0#chr1:1000-1009", "REF#0#chr1"):
-    for mode in ([], ["--linear"]):
-      result = run_command(
-          [str(cli), "deconstruct", "-i", str(gfaz), "-r", ref, "-S", *mode]
-      )
-      require_success(result, f"deconstruct subrange ref={ref} {mode}")
-      if "##contig=<ID=chr1,length=1009>" not in result.stdout:
-        raise AssertionError(
-            f"deconstruct subrange ({ref} {mode}): contig length must be the "
-            f"subrange end 1009.\n" + result.stdout
-        )
-      assert_lines(data_lines(result.stdout), expected,
-                   f"deconstruct subrange ref={ref} {mode}")
+  result = run_command(
+      [str(cli), "deconstruct", "-i", str(gfaz), "-P", "REF", "-S"]
+  )
+  require_success(result, "deconstruct -P REF")
+  for contig in ("##contig=<ID=chr1,length=1009>", "##contig=<ID=chr2,length=505>"):
+    if contig not in result.stdout:
+      raise AssertionError(
+          "deconstruct -P: contig length must be the subrange end.\n"
+          + result.stdout)
+  assert_lines(data_lines(result.stdout), expected_prefix, "deconstruct -P REF")
+
+  # Base name (no ":start-end") must resolve the same slice as the exact name,
+  # in both snarl (default) and --linear modes.
+  for mode in ([], ["--linear"]):
+    base = run_command(
+        [str(cli), "deconstruct", "-i", str(gfaz), "-r", "REF#0#chr1", "-S", *mode])
+    exact = run_command(
+        [str(cli), "deconstruct", "-i", str(gfaz), "-r", "REF#0#chr1:1000-1009",
+         "-S", *mode])
+    require_success(base, f"deconstruct base-name {mode}")
+    require_success(exact, f"deconstruct exact-name {mode}")
+    if base.stdout != exact.stdout:
+      raise AssertionError(
+          f"deconstruct {mode}: base name and exact ':start-end' name differ.")
+    if "\t1005\t" not in base.stdout:
+      raise AssertionError(
+          f"deconstruct {mode}: subrange-start POS offset not applied (no 1005).")
 
 
 def test_missing_reference_errors(cli: Path, gfaz: Path):

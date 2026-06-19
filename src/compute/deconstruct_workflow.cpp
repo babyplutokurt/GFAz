@@ -930,8 +930,9 @@ uint64_t deconstruct_contig_snarl(
 
 void deconstruct_to_vcf(const CompressedData &data,
                         const DeconstructOptions &options, std::ostream &out) {
-  if (options.reference_names.empty())
-    throw std::runtime_error("deconstruct: at least one reference (-r) required");
+  if (options.reference_names.empty() && options.reference_prefixes.empty())
+    throw std::runtime_error(
+        "deconstruct: at least one reference (-r) or prefix (-P) required");
 
   SegmentSeqs seg = load_segments(data);
 
@@ -960,25 +961,65 @@ void deconstruct_to_vcf(const CompressedData &data,
   }
 
   std::vector<uint32_t> ref_slices;
+  std::vector<std::string> ref_display_names; // parallel to ref_slices (CHROM src)
   std::vector<uint8_t> is_ref(slices.size(), 0);
+  auto add_ref = [&](uint32_t slice_id, const std::string &display) {
+    if (is_ref[slice_id])
+      return; // already selected (dedup across -r / -P)
+    is_ref[slice_id] = 1;
+    ref_slices.push_back(slice_id);
+    ref_display_names.push_back(display);
+  };
+
+  // Explicit -r names: exact match, else PanSN base-name fallback.
   for (const std::string &rn : options.reference_names) {
-    uint32_t slice_id;
     auto it = name_to_slice.find(rn);
     if (it != name_to_slice.end()) {
-      slice_id = it->second;
-    } else {
-      auto bit = base_to_slices.find(strip_trailing_subrange(rn));
-      if (bit == base_to_slices.end())
-        throw std::runtime_error("deconstruct: reference path not found: " + rn);
-      if (bit->second.size() != 1)
-        throw std::runtime_error(
-            "deconstruct: reference '" + rn + "' matches " +
-            std::to_string(bit->second.size()) +
-            " subrange fragments; specify the exact name including :start-end");
-      slice_id = bit->second.front();
+      add_ref(it->second, rn);
+      continue;
     }
-    ref_slices.push_back(slice_id);
-    is_ref[slice_id] = 1;
+    auto bit = base_to_slices.find(strip_trailing_subrange(rn));
+    if (bit == base_to_slices.end())
+      throw std::runtime_error("deconstruct: reference path not found: " + rn);
+    if (bit->second.size() != 1)
+      throw std::runtime_error(
+          "deconstruct: reference '" + rn + "' matches " +
+          std::to_string(bit->second.size()) +
+          " subrange fragments; specify the exact name including :start-end");
+    add_ref(bit->second.front(), rn);
+  }
+
+  // -P prefixes (vg parity): every stored name beginning with the prefix becomes
+  // a reference contig. Slices are scanned in container order for determinism.
+  for (const std::string &pfx : options.reference_prefixes) {
+    size_t matched = 0;
+    for (uint32_t i = 0; i < slices.size(); ++i) {
+      if (ident.names[i].rfind(pfx, 0) == 0) { // names[i] starts with pfx
+        add_ref(i, ident.names[i]);
+        ++matched;
+      }
+    }
+    if (matched == 0)
+      throw std::runtime_error(
+          "deconstruct: no reference path matches prefix: " + pfx);
+  }
+
+  // Each reference contig must be a single path/walk: a contig split into
+  // multiple subrange fragments would emit duplicate CHROM blocks. Detect and
+  // reject (stitching fragments into one reference is not yet supported).
+  {
+    std::unordered_map<std::string, std::string> chrom_owner;
+    for (size_t r = 0; r < ref_slices.size(); ++r) {
+      const std::string chrom =
+          vcf_contig_name_for_reference(ref_display_names[r]);
+      auto ins = chrom_owner.emplace(chrom, ref_display_names[r]);
+      if (!ins.second)
+        throw std::runtime_error(
+            "deconstruct: reference contig '" + chrom +
+            "' is split into multiple paths ('" + ins.first->second + "', '" +
+            ref_display_names[r] +
+            "'); fragmented references are not yet supported");
+    }
   }
 
   // Flatten non-ref slices; assign each a dense local index used by per-site
@@ -1058,7 +1099,7 @@ void deconstruct_to_vcf(const CompressedData &data,
 
   for (size_t r = 0; r < ref_slices.size(); ++r) {
     ContigOut co;
-    co.name = vcf_contig_name_for_reference(options.reference_names[r]);
+    co.name = vcf_contig_name_for_reference(ref_display_names[r]);
     const uint64_t ref_start = ident.ref_starts[ref_slices[r]];
     co.length =
         options.use_snarls

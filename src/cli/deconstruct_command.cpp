@@ -22,6 +22,8 @@ int do_deconstruct(int argc, char *argv[]) {
       {"input", required_argument, 0, 'i'},
       {"reference", required_argument, 0, 'r'},
       {"path", required_argument, 0, 'r'},
+      {"path-prefix", required_argument, 0, 'P'},
+      {"reference-prefix", required_argument, 0, 'P'},
       {"group-by-sample", no_argument, 0, 'S'},
       {"group-by-haplotype", no_argument, 0, 'H'},
       {"per-path", no_argument, 0, 'p'},
@@ -37,7 +39,7 @@ int do_deconstruct(int argc, char *argv[]) {
 
   int opt;
   optind = 1;
-  while ((opt = getopt_long(argc, argv, "i:r:SHpm:Gt:j:h", long_options,
+  while ((opt = getopt_long(argc, argv, "i:r:P:SHpm:Gt:j:h", long_options,
                             nullptr)) != -1) {
     switch (opt) {
     case 'i':
@@ -45,6 +47,9 @@ int do_deconstruct(int argc, char *argv[]) {
       break;
     case 'r':
       options.reference_names.emplace_back(optarg);
+      break;
+    case 'P':
+      options.reference_prefixes.emplace_back(optarg);
       break;
     case 'S':
       saw_sample = true;
@@ -107,8 +112,9 @@ int do_deconstruct(int argc, char *argv[]) {
     print_deconstruct_help();
     return 1;
   }
-  if (options.reference_names.empty()) {
-    std::cerr << "Error: Expected at least one -r <reference-name>\n";
+  if (options.reference_names.empty() && options.reference_prefixes.empty()) {
+    std::cerr << "Error: Expected at least one -r <reference-name> or "
+                 "-P <reference-prefix>\n";
     print_deconstruct_help();
     return 1;
   }
