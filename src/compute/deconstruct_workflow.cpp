@@ -527,7 +527,7 @@ uint64_t deconstruct_contig(
       seg.append(ref_allele, ref_nodes[i]);
 
     // Map allele string -> allele index. Reference is allele 0.
-    std::map<std::string, int> allele_index;
+    std::unordered_map<std::string, int> allele_index;
     allele_index.emplace(ref_allele, 0);
     std::vector<std::string> alleles; // index -> string
     alleles.push_back(ref_allele);
@@ -873,7 +873,7 @@ uint64_t deconstruct_contig_snarl(
         for (uint32_t i = src_ref_index + 1; i < sink_ref_index; ++i)
           seg.append(ref_allele, ref_nodes[i]);
 
-        std::map<std::string, int> allele_index;
+        std::unordered_map<std::string, int> allele_index;
         allele_index.emplace(ref_allele, 0);
         std::vector<std::string> alleles;
         alleles.push_back(ref_allele);
