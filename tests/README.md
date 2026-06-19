@@ -31,6 +31,10 @@
 - `test_thread_determinism.py` asserts pav/growth/deconstruct produce
   byte-identical output at 1/4/8 threads (the OpenMP reductions must be
   thread-count invariant).
+- `test_degenerate_inputs.py` covers degenerate-but-valid graphs (segments-only,
+  walks-only, header-only) round-tripping cleanly, and invalid invocations
+  (missing/malformed BED, unresolved pav/deconstruct reference) failing with a
+  non-zero exit.
 
 `tests/concordance/`
 - Golden-file concordance tests that lock gfaz's compute engine to the reference

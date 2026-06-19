@@ -41,6 +41,7 @@ HERMETIC_SUITES = [
     "tests/regression/test_cpu_roundtrip.py",
     "tests/regression/test_compression_optional_fields.py",
     "tests/regression/test_thread_determinism.py",
+    "tests/regression/test_degenerate_inputs.py",
     "tests/concordance/test_pav_vs_odgi.py",
     "tests/concordance/test_growth_vs_panacus.py",
     "tests/concordance/test_deconstruct_vs_vg.py",
