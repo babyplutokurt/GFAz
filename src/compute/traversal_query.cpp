@@ -132,6 +132,10 @@ void strip_pansn_coords_inplace(std::string &s) {
   s.erase(colon);
 }
 
+// PanSN parse mirroring Panacus's from_str + clear_coords: regex
+// ^([^#]+)(#[^#]+)?(#[^#].*)?$, with ":start-end" stripped from the last
+// populated field. `has_hap`/`has_seq` mirror PathSegment's Option fields, so a
+// malformed name (e.g. "sample#", "sample##seq") falls back to fewer fields.
 PansnParts parse_pansn_path_name(const std::string &name) {
   PansnParts p;
   const size_t h1 = name.find('#');
@@ -142,36 +146,54 @@ PansnParts parse_pansn_path_name(const std::string &name) {
   }
   p.sample = name.substr(0, h1);
   const size_t h2 = name.find('#', h1 + 1);
-  if (h2 == std::string::npos) {
-    p.hap = name.substr(h1 + 1);
-    p.has_hap = !p.hap.empty();
+  auto take_two_field = [&](const std::string &hap_raw) {
+    if (hap_raw.empty())
+      return; // Invalid PanSN ("sample#"): fall back to single-field key.
+    p.hap = hap_raw;
+    p.has_hap = true;
     strip_pansn_coords_inplace(p.hap);
+  };
+  if (h2 == std::string::npos) {
+    take_two_field(name.substr(h1 + 1));
     return p;
   }
-  p.hap = name.substr(h1 + 1, h2 - h1 - 1);
-  p.seq = name.substr(h2 + 1);
-  p.has_hap = !p.hap.empty();
-  p.has_seq = !p.seq.empty();
+  if (h2 == h1 + 1) {
+    // "sample##...": doesn't match PanSN at all; keep sample only.
+    return p;
+  }
+  const std::string hap_raw = name.substr(h1 + 1, h2 - h1 - 1);
+  std::string seq_raw = name.substr(h2 + 1);
+  if (seq_raw.empty() || seq_raw[0] == '#') {
+    // Group-3 regex fails; Panacus backtracks to the 2-field match.
+    take_two_field(hap_raw);
+    return p;
+  }
+  p.hap = hap_raw;
+  p.has_hap = true;
+  p.seq = std::move(seq_raw);
+  p.has_seq = true;
   strip_pansn_coords_inplace(p.seq);
   return p;
 }
 
 std::string path_group_key(const std::string &name, GroupingMode mode) {
+  if (mode == GroupingMode::PerPathWalk)
+    return name;
   const PansnParts p = parse_pansn_path_name(name);
   switch (mode) {
   case GroupingMode::Sample:
     return p.sample;
   case GroupingMode::SampleHap:
-    return p.has_hap ? (p.sample + "#" + p.hap) : p.sample;
+    // Panacus: format!("{}#{}", sample, hap.unwrap_or("")).
+    return p.sample + "#" + (p.has_hap ? p.hap : std::string());
   case GroupingMode::SampleHapSeq:
-    if (p.has_hap && p.has_seq)
-      return p.sample + "#" + p.hap + "#" + p.seq;
-    if (p.has_hap)
-      return p.sample + "#" + p.hap;
-    return p.sample;
-  case GroupingMode::PerPathWalk:
   default:
-    return name;
+    if (p.has_hap)
+      return p.has_seq ? (p.sample + "#" + p.hap + "#" + p.seq)
+                       : (p.sample + "#" + p.hap);
+    if (p.has_seq)
+      return p.sample + "#*#" + p.seq;
+    return p.sample;
   }
 }
 

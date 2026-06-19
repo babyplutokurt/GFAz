@@ -1,5 +1,6 @@
 #include "compute/growth_workflow.hpp"
 
+#include "compute/traversal_query.hpp"
 #include "core/codec/codec.hpp"
 #include "core/utils/threading_utils.hpp"
 
@@ -129,115 +130,9 @@ struct HapSlice {
   uint32_t orig_len;
 };
 
-// Strip a trailing ":start-end" suffix in place (digits on both sides of '-',
-// preceded by ':'). Mirrors Panacus's PATHID_COORDS = ^(.+):([0-9]+)-([0-9]+)$.
-void strip_pansn_coords_inplace(std::string &s) {
-  const size_t colon = s.rfind(':');
-  if (colon == std::string::npos || colon == 0)
-    return;
-  const size_t dash = s.find('-', colon + 1);
-  if (dash == std::string::npos)
-    return;
-  if (colon + 1 == dash || dash + 1 == s.size())
-    return;
-  for (size_t i = colon + 1; i < dash; ++i)
-    if (!std::isdigit(static_cast<unsigned char>(s[i])))
-      return;
-  for (size_t i = dash + 1; i < s.size(); ++i)
-    if (!std::isdigit(static_cast<unsigned char>(s[i])))
-      return;
-  s.erase(colon);
-}
-
-// Parts of a PanSN path name after Panacus's from_str + clear_coords().
-// `has_hap`/`has_seq` mirror PathSegment's Option<haplotype>/Option<seqid>.
-struct PansnParts {
-  std::string sample;
-  std::string hap;
-  std::string seq;
-  bool has_hap = false;
-  bool has_seq = false;
-};
-
-// Panacus regex: ^([^#]+)(#[^#]+)?(#[^#].*)?$; ":start-end" is stripped from
-// the last populated field (sample | hap | seq).
-PansnParts parse_pansn_path_name(const std::string &name) {
-  PansnParts p;
-  const size_t h1 = name.find('#');
-  if (h1 == std::string::npos) {
-    p.sample = name;
-    strip_pansn_coords_inplace(p.sample);
-    return p;
-  }
-  p.sample = name.substr(0, h1);
-  const size_t h2 = name.find('#', h1 + 1);
-  auto take_two_field = [&](const std::string &hap_raw) {
-    if (hap_raw.empty()) {
-      // Invalid PanSN ("sample#"): fall back to single-field key.
-      return;
-    }
-    p.hap = hap_raw;
-    p.has_hap = true;
-    strip_pansn_coords_inplace(p.hap);
-  };
-  if (h2 == std::string::npos) {
-    take_two_field(name.substr(h1 + 1));
-    return p;
-  }
-  if (h2 == h1 + 1) {
-    // "sample##...": doesn't match PanSN at all; keep sample only.
-    return p;
-  }
-  const std::string hap_raw = name.substr(h1 + 1, h2 - h1 - 1);
-  std::string seq_raw = name.substr(h2 + 1);
-  if (seq_raw.empty() || seq_raw[0] == '#') {
-    // Group-3 regex fails; Panacus backtracks to the 2-field match.
-    take_two_field(hap_raw);
-    return p;
-  }
-  p.hap = hap_raw;
-  p.has_hap = true;
-  p.seq = std::move(seq_raw);
-  p.has_seq = true;
-  strip_pansn_coords_inplace(p.seq);
-  return p;
-}
-
-// Build the group key for a P-line under the requested grouping mode. Mirrors
-// Panacus: default uses id(), -H uses "{sample}#{hap_or_empty}", -S uses
-// "{sample}". `SampleHapSeq` here is Panacus default (PathSegment::id()).
-std::string path_group_key(const PansnParts &p, GroupingMode mode) {
-  switch (mode) {
-  case GroupingMode::Sample:
-    return p.sample;
-  case GroupingMode::SampleHap:
-    // Matches Panacus: format!("{}#{}", sample, hap.unwrap_or("")).
-    return p.sample + "#" + (p.has_hap ? p.hap : std::string());
-  case GroupingMode::SampleHapSeq:
-  default:
-    if (p.has_hap) {
-      return p.has_seq ? (p.sample + "#" + p.hap + "#" + p.seq)
-                       : (p.sample + "#" + p.hap);
-    }
-    if (p.has_seq)
-      return p.sample + "#*#" + p.seq;
-    return p.sample;
-  }
-}
-
-// Build the group key for a W-line (sample/hap/seq already separate columns).
-std::string walk_group_key(const std::string &sample, uint32_t hap,
-                           const std::string &seq, GroupingMode mode) {
-  switch (mode) {
-  case GroupingMode::Sample:
-    return sample;
-  case GroupingMode::SampleHap:
-    return sample + "#" + std::to_string(hap);
-  case GroupingMode::SampleHapSeq:
-  default:
-    return sample + "#" + std::to_string(hap) + "#" + seq;
-  }
-}
+// PanSN path-name parsing and group-key construction are shared with pav and
+// deconstruct via tquery::{path_group_key, walk_group_key} so all compute
+// modules group haplotypes identically (see compute/traversal_query.hpp).
 
 void build_slices(const std::vector<int32_t> &flat,
                   const std::vector<uint32_t> &lengths,
@@ -329,7 +224,7 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads,
                              ? names_concat.substr(name_off, L)
                              : std::string();
       name_off += L;
-      keys.push_back(path_group_key(parse_pansn_path_name(name), mode));
+      keys.push_back(tquery::path_group_key(name, mode));
     }
 
     // Walks: already have (sample, hap, seqid) as separate columns.
@@ -363,7 +258,7 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads,
                             : std::string();
       s_off += SL;
       q_off += QL;
-      keys.push_back(walk_group_key(sample, hap_indices[i], seq, mode));
+      keys.push_back(tquery::walk_group_key(sample, hap_indices[i], seq, mode));
     }
 
     std::unordered_map<std::string, uint32_t> key_to_gid;
