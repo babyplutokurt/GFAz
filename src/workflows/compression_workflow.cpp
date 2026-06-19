@@ -250,6 +250,16 @@ double apply_delta_transform(CompressionContext &ctx) {
         gfaz::Codec::delta_transform_and_max_abs(ctx.graph.walks.walks);
     ctx.max_abs = std::max(ctx.max_abs, std::max(path_max, walk_max));
   }
+
+  // Rule IDs and the segment table are both bounded below by max_abs (via
+  // next_id). For delta_round > 0 the symbols above are *deltas*, which can be
+  // far smaller than the largest node ID, so max_abs alone would place the
+  // rule-ID floor below the real node-ID range and truncate the stored segment
+  // sequences (flatten_segment_sequences stops at next_id). Floor it at the
+  // node count so every segment is retained and rule IDs stay disjoint from
+  // node IDs -- this mirrors what the delta_round == 0 path already does.
+  ctx.max_abs =
+      std::max(ctx.max_abs, static_cast<uint32_t>(ctx.graph.segments.size()));
   const auto end = std::chrono::high_resolution_clock::now();
 
   if (ctx.max_abs >= ctx.next_id) {

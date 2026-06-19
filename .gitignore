@@ -32,6 +32,8 @@ env/
 #
 *gfa
 !gfa_analyzer.py
+# Test fixtures are checked in (they are tiny, hand-verified inputs).
+!tests/fixtures/*.gfa
 !tests/fixtures/deconstruct_inversion_fixture.gfa
 !tests/fixtures/deconstruct_pansn_ref_fixture.gfa
 !tests/fixtures/deconstruct_reverse_path_fixture.gfa

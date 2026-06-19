@@ -1,0 +1,20 @@
+## tool: 0cfc3b19
+## command: odgi pav -i <og> -b pav_pathonly_concordance.bed -t 2
+## fixture: pav_pathonly_concordance.gfa, pav_pathonly_concordance.bed
+## normalize: header verbatim + body lines sorted
+chrom	start	end	name	group	pav
+ref	0	26	ref_all	HG001#0#chr1	0.96154
+ref	0	26	ref_all	HG001#1#chr1	1
+ref	0	26	ref_all	HG002#0#chr1	0.96154
+ref	0	26	ref_all	HG002#1#chr1	1
+ref	0	26	ref_all	ref	1
+ref	0	5	ref_head	HG001#0#chr1	0.8
+ref	0	5	ref_head	HG001#1#chr1	1
+ref	0	5	ref_head	HG002#0#chr1	1
+ref	0	5	ref_head	HG002#1#chr1	1
+ref	0	5	ref_head	ref	1
+ref	10	20	ref_mid	HG001#0#chr1	1
+ref	10	20	ref_mid	HG001#1#chr1	1
+ref	10	20	ref_mid	HG002#0#chr1	0.92308
+ref	10	20	ref_mid	HG002#1#chr1	1
+ref	10	20	ref_mid	ref	1

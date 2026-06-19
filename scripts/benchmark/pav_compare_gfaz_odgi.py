@@ -166,6 +166,18 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+# gfaz emits pav rows in BED order, odgi in path-id order, so a raw byte/sha256
+# compare reports spurious mismatches. Compare the header verbatim plus the body
+# lines sorted (the same predicate the concordance test uses).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from tests.concordance.concordance_utils import normalize_pav  # noqa: E402
+
+
+def normalized_pav_equal(gfaz_out: Path, odgi_out: Path) -> bool:
+    return (normalize_pav(gfaz_out.read_text())
+            == normalize_pav(odgi_out.read_text()))
+
+
 def ratio(numerator: float | int | None, denominator: float | int | None) -> str:
     if numerator is None or denominator is None or denominator == 0:
         return ""
@@ -378,6 +390,8 @@ def main() -> int:
         print(f"gfaz_output_sha256: {gfaz_hash}")
         print(f"odgi_output_sha256: {odgi_hash}")
         print(f"outputs_byte_identical: {str(gfaz_hash == odgi_hash).lower()}")
+        # Authoritative concordance check (tolerant of row-order differences).
+        print(f"outputs_concordant: {str(normalized_pav_equal(gfaz_out, odgi_out)).lower()}")
 
     return 0
 

@@ -271,4 +271,18 @@ if(BUILD_CLI)
       message(FATAL_ERROR "gperftools profiler library not found. Install with: sudo apt install libgoogle-perftools-dev")
     endif()
   endif()
+
+  # Hermetic CPU-only test suite (CLI regressions + golden-file concordance).
+  # A single CTest entry delegates to the Python harness so its PASS/SKIP/FAIL
+  # logic stays the source of truth. Binding-dependent round-trip suites are run
+  # separately. Concordance goldens are regenerated via scripts/gen_golden.py.
+  find_program(PYTHON3_EXECUTABLE NAMES python3 python)
+  if(PYTHON3_EXECUTABLE)
+    enable_testing()
+    add_test(
+      NAME gfaz_tests
+      COMMAND ${PYTHON3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/run_all.py
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+  endif()
 endif()

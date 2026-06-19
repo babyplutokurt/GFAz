@@ -1,0 +1,9 @@
+## tool: panacus 0.4.2
+## command: panacus growth -H growth_fixture.gfa
+## gfaz mode: -G sample-hap
+## predicate: panacus[k] == floor(gfaz[k])
+1	9
+2	9
+3	10
+4	10
+5	11

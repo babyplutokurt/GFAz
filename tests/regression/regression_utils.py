@@ -8,6 +8,25 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILD_DIR = REPO_ROOT / "build"
 CLI_PATH = BUILD_DIR / "bin" / "gfaz"
 
+# Exit code the runner (tests/run_all.py) interprets as "skipped, not failed".
+# Matches the automake convention so CTest/CI can treat it specially too.
+SKIP_EXIT_CODE = 77
+
+
+class SkipTest(Exception):
+  """Raised by a test to signal it cannot run (missing tool, dataset, or
+  golden file). The runner reports SKIP rather than FAIL."""
+
+
+def run_main(main_fn):
+  """Entry-point wrapper: run a test's main(), translating SkipTest into the
+  runner's SKIP exit code (77) instead of a hard failure."""
+  try:
+    main_fn()
+  except SkipTest as exc:
+    print(f"⏭️  SKIP: {exc}")
+    sys.exit(SKIP_EXIT_CODE)
+
 
 def add_repo_and_build_to_syspath():
   sys.path.insert(0, str(REPO_ROOT))

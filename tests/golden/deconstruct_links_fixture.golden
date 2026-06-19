@@ -1,0 +1,7 @@
+## tool: vg version 5a18319c9
+## command: vg deconstruct -p ref deconstruct_links_fixture.gfa
+## normalize: (CHROM,POS,REF,ALT)->sample=GT, sorted; ID/QUAL/INFO ignored
+#SAMPLES	HG001	HG002
+ref	11	TA	T	HG001=0|0;HG002=1|0
+ref	18	G	GGGG	HG001=0|0;HG002=0|1
+ref	5	C	T	HG001=1|0;HG002=0|0

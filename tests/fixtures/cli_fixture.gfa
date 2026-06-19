@@ -1,0 +1,9 @@
+H	VN:Z:1
+S	1	AC	LN:i:2
+S	2	G	LN:i:1
+S	3	TTA	LN:i:3
+S	4	C	LN:i:1
+P	pathA	1+,2+,3+	2M,1M
+P	pathB	1+,3-,4+	*
+W	sampleA	0	chr1	0	6	>1>2>3
+W	sampleB	1	chr2	*	*	>1<3>4
