@@ -3,6 +3,7 @@
 #include "core/codec/codec.hpp"
 
 #include <cctype>
+#include <cstdlib>
 #include <stdexcept>
 
 namespace gfaz {

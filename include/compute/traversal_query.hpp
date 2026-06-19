@@ -19,7 +19,6 @@
 #include "core/model/gfa_graph.hpp"
 #include "compute/grouping_mode.hpp"
 
-#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <string>
