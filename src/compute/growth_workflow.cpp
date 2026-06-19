@@ -183,59 +183,36 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads,
     std::vector<std::string> keys;
     keys.reserve(total_slices);
 
-    // Paths: decompress P-line names and parse PanSN parts.
-    std::string names_concat;
-    std::vector<uint32_t> name_lens;
+    // Paths: decompress P-line names and derive their group keys.
     if (num_paths > 0) {
-      names_concat = Codec::zstd_decompress_string(data.names_zstd);
-      name_lens = Codec::zstd_decompress_uint32_vector(data.name_lengths_zstd);
-      if (name_lens.size() != num_paths) {
+      const std::vector<std::string> path_names = tquery::decompress_strings(
+          data.names_zstd, data.name_lengths_zstd, "path name");
+      if (path_names.size() != num_paths) {
         throw std::runtime_error(
             "growth: path name count does not match number of paths");
       }
-    }
-    size_t name_off = 0;
-    for (size_t i = 0; i < num_paths; ++i) {
-      const uint32_t L = name_lens[i];
-      std::string name = (name_off + L <= names_concat.size())
-                             ? names_concat.substr(name_off, L)
-                             : std::string();
-      name_off += L;
-      keys.push_back(tquery::path_group_key(name, mode));
+      for (const std::string &name : path_names)
+        keys.push_back(tquery::path_group_key(name, mode));
     }
 
-    // Walks: already have (sample, hap, seqid) as separate columns.
-    std::string sample_concat, seq_concat;
-    std::vector<uint32_t> sample_lens, seq_lens;
-    std::vector<uint32_t> hap_indices;
+    // Walks: sample/hap/seqid are separate columns. (Only these three are
+    // needed for grouping; start/end are not, so we avoid load_walk_identity.)
     if (num_walks > 0) {
-      sample_concat = Codec::zstd_decompress_string(data.walk_sample_ids_zstd);
-      sample_lens =
-          Codec::zstd_decompress_uint32_vector(data.walk_sample_id_lengths_zstd);
-      seq_concat = Codec::zstd_decompress_string(data.walk_seq_ids_zstd);
-      seq_lens =
-          Codec::zstd_decompress_uint32_vector(data.walk_seq_id_lengths_zstd);
-      hap_indices =
+      const std::vector<std::string> samples = tquery::decompress_strings(
+          data.walk_sample_ids_zstd, data.walk_sample_id_lengths_zstd,
+          "walk sample");
+      const std::vector<std::string> seqs = tquery::decompress_strings(
+          data.walk_seq_ids_zstd, data.walk_seq_id_lengths_zstd, "walk seq");
+      const std::vector<uint32_t> hap_indices =
           Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
-      if (sample_lens.size() != num_walks || seq_lens.size() != num_walks ||
+      if (samples.size() != num_walks || seqs.size() != num_walks ||
           hap_indices.size() != num_walks) {
         throw std::runtime_error(
             "growth: walk metadata column count does not match number of walks");
       }
-    }
-    size_t s_off = 0, q_off = 0;
-    for (size_t i = 0; i < num_walks; ++i) {
-      const uint32_t SL = sample_lens[i];
-      const uint32_t QL = seq_lens[i];
-      std::string sample = (s_off + SL <= sample_concat.size())
-                               ? sample_concat.substr(s_off, SL)
-                               : std::string();
-      std::string seq = (q_off + QL <= seq_concat.size())
-                            ? seq_concat.substr(q_off, QL)
-                            : std::string();
-      s_off += SL;
-      q_off += QL;
-      keys.push_back(tquery::walk_group_key(sample, hap_indices[i], seq, mode));
+      for (size_t i = 0; i < num_walks; ++i)
+        keys.push_back(
+            tquery::walk_group_key(samples[i], hap_indices[i], seqs[i], mode));
     }
 
     std::unordered_map<std::string, uint32_t> key_to_gid;
