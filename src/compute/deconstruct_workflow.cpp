@@ -234,6 +234,48 @@ void append_info_fields(std::ostringstream &line,
   line << info.str();
 }
 
+// Write the CHROM/POS/ID/REF/ALT/QUAL/FILTER head of one VCF record into `line`
+// (through the trailing "\t.\t.\t" before INFO) and return POS. `prev` is the
+// reference base preceding the site, used to left-anchor indels; under a
+// megasite guard the record collapses to a single symbolic <CPX> alt. Shared by
+// both contig writers so REF/ALT are formatted identically.
+uint64_t write_record_head(std::ostringstream &line,
+                           const std::string &contig_name, bool guard,
+                           bool substitution, uint64_t interior_start, char prev,
+                           const std::string &ref_allele,
+                           const std::vector<std::string> &alleles) {
+  uint64_t pos;
+  std::string ref_field;
+  std::vector<std::string> alt_fields;
+  if (guard) {
+    // Megasite: collapse to a single symbolic record.
+    pos = substitution ? interior_start + 1 : interior_start;
+    ref_field = substitution
+                    ? (ref_allele.empty() ? std::string("N") : ref_allele)
+                    : std::string(1, prev);
+    alt_fields.push_back("<CPX>");
+  } else if (substitution) {
+    pos = interior_start + 1;
+    ref_field = ref_allele;
+    for (size_t a = 1; a < alleles.size(); ++a)
+      alt_fields.push_back(alleles[a]);
+  } else {
+    pos = interior_start; // anchor base position (1-based)
+    ref_field = std::string(1, prev) + ref_allele;
+    for (size_t a = 1; a < alleles.size(); ++a)
+      alt_fields.push_back(std::string(1, prev) + alleles[a]);
+  }
+
+  line << contig_name << '\t' << pos << "\t.\t" << ref_field << '\t';
+  for (size_t a = 0; a < alt_fields.size(); ++a) {
+    if (a)
+      line << ',';
+    line << alt_fields[a];
+  }
+  line << "\t.\t.\t";
+  return pos;
+}
+
 // Deconstruct one reference contig. Appends VCF records to `records`, returns
 // the contig length (sum of reference segment lengths).
 uint64_t deconstruct_contig(
@@ -481,42 +523,11 @@ uint64_t deconstruct_contig(
         ++ns;
     }
 
-    uint64_t pos;
-    std::string ref_field;
-    std::vector<std::string> alt_fields;
-
-    if (guard) {
-      // Megasite: collapse to a single symbolic record.
-      pos = substitution ? interior_start + 1 : interior_start;
-      const char prev = seg.last_base(ref_nodes[src_ref_index]);
-      ref_field = substitution ? (ref_allele.empty() ? std::string("N")
-                                                      : ref_allele)
-                               : std::string(1, prev);
-      alt_fields.push_back("<CPX>");
-    } else {
-      const char prev = seg.last_base(ref_nodes[src_ref_index]);
-      if (substitution) {
-        pos = interior_start + 1;
-        ref_field = ref_allele;
-        for (size_t a = 1; a < alleles.size(); ++a)
-          alt_fields.push_back(alleles[a]);
-      } else {
-        pos = interior_start; // anchor base position (1-based)
-        ref_field = std::string(1, prev) + ref_allele;
-        for (size_t a = 1; a < alleles.size(); ++a)
-          alt_fields.push_back(std::string(1, prev) + alleles[a]);
-      }
-    }
-
-    // Build the record line.
+    const char prev = seg.last_base(ref_nodes[src_ref_index]);
     std::ostringstream line;
-    line << contig_name << '\t' << pos << "\t.\t" << ref_field << '\t';
-    for (size_t a = 0; a < alt_fields.size(); ++a) {
-      if (a)
-        line << ',';
-      line << alt_fields[a];
-    }
-    line << "\t.\t.\t";
+    const uint64_t pos =
+        write_record_head(line, contig_name, guard, substitution, interior_start,
+                          prev, ref_allele, alleles);
 
     // INFO
     append_info_fields(line, ac, an, ns, guard);
@@ -774,39 +785,11 @@ uint64_t deconstruct_contig_snarl(
         ++ns;
     }
 
-    uint64_t pos;
-    std::string ref_field;
-    std::vector<std::string> alt_fields;
-    if (guard) {
-      pos = substitution ? interior_start + 1 : interior_start;
-      const char prev = seg.last_base(ref_nodes[src_ref_index]);
-      ref_field = substitution
-                      ? (ref_allele.empty() ? std::string("N") : ref_allele)
-                      : std::string(1, prev);
-      alt_fields.push_back("<CPX>");
-    } else {
-      const char prev = seg.last_base(ref_nodes[src_ref_index]);
-      if (substitution) {
-        pos = interior_start + 1;
-        ref_field = ref_allele;
-        for (size_t a = 1; a < alleles.size(); ++a)
-          alt_fields.push_back(alleles[a]);
-      } else {
-        pos = interior_start;
-        ref_field = std::string(1, prev) + ref_allele;
-        for (size_t a = 1; a < alleles.size(); ++a)
-          alt_fields.push_back(std::string(1, prev) + alleles[a]);
-      }
-    }
-
+    const char prev = seg.last_base(ref_nodes[src_ref_index]);
     std::ostringstream line;
-    line << contig_name << '\t' << pos << "\t.\t" << ref_field << '\t';
-    for (size_t a = 0; a < alt_fields.size(); ++a) {
-      if (a)
-        line << ',';
-      line << alt_fields[a];
-    }
-    line << "\t.\t.\t";
+    const uint64_t pos =
+        write_record_head(line, contig_name, guard, substitution, interior_start,
+                          prev, ref_allele, alleles);
     append_info_fields(line, ac, an, ns, guard);
     append_gt_columns(line, column_slot_allele, guard, options);
     records.push_back(VcfRecord{pos, line.str()});
