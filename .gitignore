@@ -1,4 +1,4 @@
-# Build artifacts
+# ── Build artifacts ──
 build/
 build_cpu/
 bin/
@@ -7,67 +7,56 @@ bin/
 *.dylib
 *.dll
 
-# CMake generated files
+# ── CMake / generated build files ──
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Makefile
 install_manifest.txt
+compile_commands.json
 
-# Python specific
+# ── Python ──
 __pycache__/
 *.pyc
 *.pyd
 
-# Virtual environments
+# ── Virtual environments ──
 .venv/
 env/
 
-# Editor/IDE specific
+# ── Editor / IDE / OS ──
 .vscode/
 .DS_Store
 *.swp
 *~
 
-#
+# ── GFA inputs (large) ── tiny hand-verified fixtures are force-added back below
 *gfa
-!gfa_analyzer.py
-# Test fixtures are checked in (they are tiny, hand-verified inputs).
 !tests/fixtures/*.gfa
 !tests/fixtures/deconstruct_inversion_fixture.gfa
 !tests/fixtures/deconstruct_pansn_ref_fixture.gfa
 !tests/fixtures/deconstruct_reverse_path_fixture.gfa
 
-# cache
+# ── Compressed containers & large datasets ──
+example.gfaz
+output.gfaz
+chrY*
+data/
+test_data/
+reference_repo/
+
+# ── Benchmark / eval outputs ──
 .cache/
 benchmark_results/
-
-./scripts/eval_results.csv
-./scripts/Ecoli*
-
-
-test_data/
-
-rebuttal.md
-
-paper_compute_engine/
-
 extract_benchmark.csv
+scripts/eval_results.csv
+scripts/Ecoli*
 
-test_data/
-data/
-
-compile_commands.json
-fix_cc.py   
-
+# ── Local scratch / working files (not for the repo) ──
+rebuttal.md
+review.md
+paper_compute_engine/
+fix_cc.py
 do_refactor.py
 do_refactor_pt2.py
 revert_ns.py
-
-example.gfaz
-output.gfaz
-review.md
-
-chrY*
-
-reference_repo/
