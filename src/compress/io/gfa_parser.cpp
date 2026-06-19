@@ -225,6 +225,73 @@ void parse_b_array(std::string_view value_view, gfaz::OptionalFieldColumn &col) 
                             bytes.end());
 }
 
+// Reserve storage for the active type variant of a freshly-discovered optional
+// column, sized to the expected row count. Shared by segment/link parsing.
+void reserve_optional_column(gfaz::OptionalFieldColumn &col, char type,
+                             size_t hint) {
+  if (type == 'i')
+    col.int_values.reserve(hint);
+  else if (type == 'f')
+    col.float_values.reserve(hint);
+  else if (type == 'A')
+    col.char_values.reserve(hint);
+  else if (type == 'Z' || type == 'J' || type == 'H')
+    col.string_lengths.reserve(hint);
+  else if (type == 'B') {
+    col.b_subtypes.reserve(hint);
+    col.b_lengths.reserve(hint);
+  }
+}
+
+// Append one optional-field value to `col` for row `row_index`, back-filling any
+// skipped rows with the per-type sentinel. Shared by segment- and link-field
+// parsing so both materialize columns identically.
+void append_optional_value(gfaz::OptionalFieldColumn &col, char type,
+                           size_t row_index, std::string_view value_view) {
+  switch (type) {
+  case 'i':
+    while (col.int_values.size() < row_index)
+      col.int_values.push_back(std::numeric_limits<int64_t>::min());
+    col.int_values.push_back(parse_int64(value_view));
+    break;
+
+  case 'f':
+    while (col.float_values.size() < row_index)
+      col.float_values.push_back(std::numeric_limits<float>::lowest());
+    col.float_values.push_back(parse_float(value_view));
+    break;
+
+  case 'A':
+    while (col.char_values.size() < row_index)
+      col.char_values.push_back('\0');
+    col.char_values.push_back(value_view.empty() ? '\0' : value_view[0]);
+    break;
+
+  case 'Z':
+  case 'J':
+  case 'H':
+    while (col.string_lengths.size() < row_index)
+      col.string_lengths.push_back(0);
+    col.concatenated_strings.append(value_view.data(), value_view.size());
+    col.string_lengths.push_back(static_cast<uint32_t>(value_view.size()));
+    break;
+
+  case 'B': {
+    while (col.b_subtypes.size() < row_index) {
+      col.b_subtypes.push_back('\0');
+      col.b_lengths.push_back(0);
+    }
+    parse_b_array(value_view, col);
+    break;
+  }
+
+  default:
+    std::cerr << kParserWarningPrefix << "unsupported optional field type '"
+              << type << "' for tag '" << col.tag << "'" << std::endl;
+    break;
+  }
+}
+
 } // namespace
 
 using gfaz::runtime_utils::format_memory_snapshot;
@@ -896,18 +963,7 @@ void GfaParser::parse_segment_field(std::string_view field,
     gfaz::OptionalFieldColumn col;
     col.tag = std::string(field.substr(0, 2));
     col.type = type;
-    if (type == 'i')
-      col.int_values.reserve(num_segments_hint_);
-    else if (type == 'f')
-      col.float_values.reserve(num_segments_hint_);
-    else if (type == 'A')
-      col.char_values.reserve(num_segments_hint_);
-    else if (type == 'Z' || type == 'J' || type == 'H')
-      col.string_lengths.reserve(num_segments_hint_);
-    else if (type == 'B') {
-      col.b_subtypes.reserve(num_segments_hint_);
-      col.b_lengths.reserve(num_segments_hint_);
-    }
+    reserve_optional_column(col, type, num_segments_hint_);
     graph.segments.optional_fields.push_back(col);
 
     it = segment_field_meta_.find(tag_key);
@@ -924,49 +980,7 @@ void GfaParser::parse_segment_field(std::string_view field,
   }
 
   gfaz::OptionalFieldColumn &col = graph.segments.optional_fields[col_index];
-
-  switch (type) {
-  case 'i':
-    while (col.int_values.size() < segment_index)
-      col.int_values.push_back(std::numeric_limits<int64_t>::min());
-    col.int_values.push_back(parse_int64(value_view));
-    break;
-
-  case 'f':
-    while (col.float_values.size() < segment_index)
-      col.float_values.push_back(std::numeric_limits<float>::lowest());
-    col.float_values.push_back(parse_float(value_view));
-    break;
-
-  case 'A':
-    while (col.char_values.size() < segment_index)
-      col.char_values.push_back('\0');
-    col.char_values.push_back(value_view.empty() ? '\0' : value_view[0]);
-    break;
-
-  case 'Z':
-  case 'J':
-  case 'H':
-    while (col.string_lengths.size() < segment_index)
-      col.string_lengths.push_back(0);
-    col.concatenated_strings.append(value_view.data(), value_view.size());
-    col.string_lengths.push_back(static_cast<uint32_t>(value_view.size()));
-    break;
-
-  case 'B': {
-    while (col.b_subtypes.size() < segment_index) {
-      col.b_subtypes.push_back('\0');
-      col.b_lengths.push_back(0);
-    }
-    parse_b_array(value_view, col);
-    break;
-  }
-
-  default:
-    std::cerr << kParserWarningPrefix << "unsupported optional field type '"
-              << type << "' for tag '" << col.tag << "'" << std::endl;
-    break;
-  }
+  append_optional_value(col, type, segment_index, value_view);
 }
 
 void GfaParser::parse_link_field(std::string_view field, size_t link_index,
@@ -986,18 +1000,7 @@ void GfaParser::parse_link_field(std::string_view field, size_t link_index,
     gfaz::OptionalFieldColumn col;
     col.tag = std::string(field.substr(0, 2));
     col.type = type;
-    if (type == 'i')
-      col.int_values.reserve(num_links_hint_);
-    else if (type == 'f')
-      col.float_values.reserve(num_links_hint_);
-    else if (type == 'A')
-      col.char_values.reserve(num_links_hint_);
-    else if (type == 'Z' || type == 'J' || type == 'H')
-      col.string_lengths.reserve(num_links_hint_);
-    else if (type == 'B') {
-      col.b_subtypes.reserve(num_links_hint_);
-      col.b_lengths.reserve(num_links_hint_);
-    }
+    reserve_optional_column(col, type, num_links_hint_);
     graph.link_optional_fields.push_back(col);
 
     GFAZ_LOG("Discovered link optional field: " << col.tag << " (type: " << type
@@ -1018,51 +1021,7 @@ void GfaParser::parse_link_field(std::string_view field, size_t link_index,
   }
 
   gfaz::OptionalFieldColumn &col = graph.link_optional_fields[col_index];
-
-  switch (type) {
-  case 'i':
-    while (col.int_values.size() < link_index)
-      col.int_values.push_back(std::numeric_limits<int64_t>::min());
-    col.int_values.push_back(parse_int64(value_view));
-    break;
-
-  case 'f':
-    while (col.float_values.size() < link_index)
-      col.float_values.push_back(std::numeric_limits<float>::lowest());
-    col.float_values.push_back(parse_float(value_view));
-    break;
-
-  case 'A':
-    while (col.char_values.size() < link_index)
-      col.char_values.push_back('\0');
-    col.char_values.push_back(value_view.empty() ? '\0' : value_view[0]);
-    break;
-
-  case 'Z':
-  case 'J':
-  case 'H':
-    while (col.string_lengths.size() < link_index)
-      col.string_lengths.push_back(0);
-    col.concatenated_strings.append(value_view.data(), value_view.size());
-    col.string_lengths.push_back(static_cast<uint32_t>(value_view.size()));
-    break;
-
-  case 'B': {
-    while (col.b_subtypes.size() < link_index) {
-      col.b_subtypes.push_back('\0');
-      col.b_lengths.push_back(0);
-    }
-    parse_b_array(value_view, col);
-    break;
-  }
-
-  default:
-    std::cerr << kParserWarningPrefix
-              << "unsupported link optional field type '" << type
-              << "' for tag '" << graph.link_optional_fields[col_index].tag
-              << "'" << std::endl;
-    break;
-  }
+  append_optional_value(col, type, link_index, value_view);
 }
 
 void GfaParser::parse_j_line(std::string_view line, gfaz::GfaGraph &graph) {
