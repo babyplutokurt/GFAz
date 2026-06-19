@@ -207,6 +207,33 @@ void append_gt_columns(std::ostringstream &line,
   }
 }
 
+// Append the AC/AN/AF/NS INFO field for one VCF record (ac is per-allele counts,
+// an the total called alleles, ns the sample count). Shared by both contig
+// writers; under a megasite guard only the single collapsed alt count is shown.
+void append_info_fields(std::ostringstream &line,
+                        const std::vector<uint64_t> &ac, uint64_t an,
+                        uint64_t ns, bool guard) {
+  std::ostringstream info;
+  info << "AC=";
+  for (size_t a = 1; a < ac.size(); ++a) {
+    if (a > 1)
+      info << ',';
+    info << (guard ? an - ac[0] : ac[a]);
+    if (guard)
+      break;
+  }
+  info << ";AN=" << an << ";AF=";
+  for (size_t a = 1; a < ac.size(); ++a) {
+    if (a > 1)
+      info << ',';
+    info << format_af(guard ? an - ac[0] : ac[a], an);
+    if (guard)
+      break;
+  }
+  info << ";NS=" << ns;
+  line << info.str();
+}
+
 // Deconstruct one reference contig. Appends VCF records to `records`, returns
 // the contig length (sum of reference segment lengths).
 uint64_t deconstruct_contig(
@@ -492,27 +519,7 @@ uint64_t deconstruct_contig(
     line << "\t.\t.\t";
 
     // INFO
-    {
-      std::ostringstream info;
-      info << "AC=";
-      for (size_t a = 1; a < alleles.size(); ++a) {
-        if (a > 1)
-          info << ',';
-        info << (guard ? an - ac[0] : ac[a]);
-        if (guard)
-          break;
-      }
-      info << ";AN=" << an << ";AF=";
-      for (size_t a = 1; a < alleles.size(); ++a) {
-        if (a > 1)
-          info << ',';
-        info << format_af(guard ? an - ac[0] : ac[a], an);
-        if (guard)
-          break;
-      }
-      info << ";NS=" << ns;
-      line << info.str();
-    }
+    append_info_fields(line, ac, an, ns, guard);
 
     append_gt_columns(line, column_slot_allele, guard, options);
 
@@ -800,27 +807,7 @@ uint64_t deconstruct_contig_snarl(
       line << alt_fields[a];
     }
     line << "\t.\t.\t";
-    {
-      std::ostringstream info;
-      info << "AC=";
-      for (size_t a = 1; a < alleles.size(); ++a) {
-        if (a > 1)
-          info << ',';
-        info << (guard ? an - ac[0] : ac[a]);
-        if (guard)
-          break;
-      }
-      info << ";AN=" << an << ";AF=";
-      for (size_t a = 1; a < alleles.size(); ++a) {
-        if (a > 1)
-          info << ',';
-        info << format_af(guard ? an - ac[0] : ac[a], an);
-        if (guard)
-          break;
-      }
-      info << ";NS=" << ns;
-      line << info.str();
-    }
+    append_info_fields(line, ac, an, ns, guard);
     append_gt_columns(line, column_slot_allele, guard, options);
     records.push_back(VcfRecord{pos, line.str()});
 
