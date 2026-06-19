@@ -115,9 +115,7 @@ SliceIdentity build_slice_identity(const CompressedData &data,
 
   if (num_paths) {
     std::vector<std::string> path_names =
-        decompress_strings(data.names_zstd, data.name_lengths_zstd, "path name");
-    if (path_names.size() != num_paths)
-      throw std::runtime_error("deconstruct: path name count mismatch");
+        load_path_names(data, num_paths, "deconstruct");
     for (const std::string &name : path_names) {
       const PansnParts p = parse_pansn_path_name(name);
       uint32_t hap = 0;

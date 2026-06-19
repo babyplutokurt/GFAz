@@ -285,6 +285,15 @@ std::vector<std::string> decompress_strings(const ZstdCompressedBlock &strings,
   return out;
 }
 
+std::vector<std::string> load_path_names(const CompressedData &data,
+                                         size_t num_paths, const char *label) {
+  std::vector<std::string> names =
+      decompress_strings(data.names_zstd, data.name_lengths_zstd, "path name");
+  if (names.size() != num_paths)
+    throw std::runtime_error(std::string(label) + ": path name count mismatch");
+  return names;
+}
+
 WalkIdentityColumns load_walk_identity(const CompressedData &data,
                                        size_t num_walks, const char *label) {
   WalkIdentityColumns w;

@@ -67,12 +67,8 @@ TraversalMetadata build_metadata(const CompressedData &data,
   const size_t num_walks = data.walk_lengths.size();
   const size_t total = num_paths + num_walks;
 
-  if (num_paths) {
-    meta.path_names = decompress_strings(data.names_zstd, data.name_lengths_zstd,
-                                         "path name");
-    if (meta.path_names.size() != num_paths)
-      throw std::runtime_error("pav: path name count mismatch");
-  }
+  if (num_paths)
+    meta.path_names = load_path_names(data, num_paths, "pav");
 
   std::vector<std::string> keys;
   keys.reserve(total);

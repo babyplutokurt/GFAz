@@ -171,12 +171,8 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads,
 
     // Paths: decompress P-line names and derive their group keys.
     if (num_paths > 0) {
-      const std::vector<std::string> path_names = tquery::decompress_strings(
-          data.names_zstd, data.name_lengths_zstd, "path name");
-      if (path_names.size() != num_paths) {
-        throw std::runtime_error(
-            "growth: path name count does not match number of paths");
-      }
+      const std::vector<std::string> path_names =
+          tquery::load_path_names(data, num_paths, "growth");
       for (const std::string &name : path_names)
         keys.push_back(tquery::path_group_key(name, mode));
     }

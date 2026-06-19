@@ -252,6 +252,13 @@ std::vector<std::string> decompress_strings(const ZstdCompressedBlock &strings,
                                             const ZstdCompressedBlock &lengths,
                                             const char *label);
 
+// Decompress the P-line path names and validate the count; throws
+// "<label>: path name count mismatch" if it does not equal num_paths. The
+// P-line counterpart to load_walk_identity, shared so every module reads and
+// checks path names the same way.
+std::vector<std::string> load_path_names(const CompressedData &data,
+                                         size_t num_paths, const char *label);
+
 // ---------------------------------------------------------------------------
 // W-line identity columns
 // ---------------------------------------------------------------------------
