@@ -80,7 +80,8 @@ struct SegmentSeqs {
     return lengths[n - 1];
   }
 
-  // Append the (uppercased, orientation-resolved) sequence of one node.
+  // Append the orientation-resolved sequence of one node. `concat` is already
+  // uppercased once at load (see load_segments), so no per-base toupper here.
   void append(std::string &out, NodeId signed_node) const {
     const uint32_t n = abs_node_id(signed_node);
     if (n == 0 || n > num_nodes)
@@ -88,20 +89,16 @@ struct SegmentSeqs {
     const char *s = concat.data() + offset[n - 1];
     const size_t len = offset[n] - offset[n - 1];
     if (signed_node >= 0) {
-      const size_t base = out.size();
       out.append(s, len);
-      for (size_t i = base; i < out.size(); ++i)
-        out[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(out[i])));
     } else {
       std::string sub(s, len);
-      for (char &c : sub)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
       reverse_complement_inplace(sub);
       out += sub;
     }
   }
 
-  // Last base of a node as seen along its traversal orientation.
+  // Last base of a node as seen along its traversal orientation. `concat` is
+  // already uppercased at load.
   char last_base(NodeId signed_node) const {
     const uint32_t n = abs_node_id(signed_node);
     if (n == 0 || n > num_nodes)
@@ -111,15 +108,29 @@ struct SegmentSeqs {
     if (len == 0)
       return 'N';
     if (signed_node >= 0)
-      return static_cast<char>(std::toupper(static_cast<unsigned char>(s[len - 1])));
-    return complement_base(
-        static_cast<char>(std::toupper(static_cast<unsigned char>(s[0]))));
+      return s[len - 1];
+    return complement_base(s[0]);
   }
 };
 
 SegmentSeqs load_segments(const CompressedData &data) {
   SegmentSeqs seg;
   seg.concat = Codec::zstd_decompress_string(data.segment_sequences_zstd);
+  // Uppercase the whole segment pool once here so the per-allele hot path
+  // (SegmentSeqs::append / last_base, called hundreds of millions of times,
+  // each base re-spelled once per haplotype that traverses its node) avoids a
+  // per-base std::toupper. The VCF already emits everything uppercase, so output
+  // is byte-identical. The pass is embarrassingly parallel; threading it keeps
+  // the upfront cost negligible even when only a small contig is requested.
+  {
+    const long long n = static_cast<long long>(seg.concat.size());
+    char *p = seg.concat.data();
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for (long long i = 0; i < n; ++i)
+      p[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(p[i])));
+  }
   seg.lengths = Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
   seg.num_nodes = static_cast<uint32_t>(seg.lengths.size());
   seg.offset.assign(seg.num_nodes + 1, 0);
