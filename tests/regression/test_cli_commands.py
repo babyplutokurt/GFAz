@@ -198,6 +198,41 @@ def test_add_haplotypes_walks(cli_path: Path, gfaz_path: Path, append_walks: Pat
       updated_path.unlink()
 
 
+def test_add_haplotypes_full_decompress(cli_path: Path, gfaz_path: Path,
+                                        append_paths: Path):
+  # Deeper than the extract checks: append, then fully decompress and confirm
+  # the whole P/W line set is exactly the original plus the appended path (so
+  # the append neither drops nor corrupts existing traversals).
+  updated = temp_file(".gfaz", "gfaz_cli_full_")
+  out = temp_file(".gfa", "gfaz_cli_full_out_")
+  try:
+    require_success(
+        run_command([str(cli_path), "add-haplotypes", str(gfaz_path),
+                     str(append_paths), str(updated)]),
+        "add-haplotypes for full decompress")
+    require_success(
+        run_command([str(cli_path), "decompress", str(updated), str(out)]),
+        "decompress updated container")
+    pw = sorted(ln for ln in out.read_text().splitlines()
+                if ln and ln[0] in "PW")
+    expected = sorted([
+        "P\tpathA\t1+,2+,3+\t2M,1M",
+        "P\tpathB\t1+,3-,4+\t*",
+        "P\tpathC\t2+,4+,3-\t*",
+        "W\tsampleA\t0\tchr1\t0\t6\t>1>2>3",
+        "W\tsampleB\t1\tchr2\t*\t*\t>1<3>4",
+    ])
+    if pw != expected:
+      raise AssertionError(
+          "add-haplotypes full decompress P/W mismatch.\n"
+          f"expected:\n" + "\n".join(expected) + "\n"
+          f"actual:\n" + "\n".join(pw))
+  finally:
+    for p in (updated, out):
+      if p.exists():
+        p.unlink()
+
+
 def test_add_haplotypes_rejects_mixed(
     cli_path: Path, gfaz_path: Path, append_mixed: Path
 ):
@@ -319,6 +354,7 @@ def main():
     )
     test_add_haplotypes_paths(cli_path, gfaz_path, append_paths)
     test_add_haplotypes_walks(cli_path, gfaz_path, append_walks)
+    test_add_haplotypes_full_decompress(cli_path, gfaz_path, append_paths)
     test_add_haplotypes_rejects_mixed(cli_path, gfaz_path, append_mixed)
     print("✅ PASS cli_command_regressions")
   finally:
