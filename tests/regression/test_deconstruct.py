@@ -75,7 +75,7 @@ def assert_lines(actual, expected, step):
 
 def test_main_records(cli: Path, gfaz: Path):
   result = run_command(
-      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "ref", "-S"]
+      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "ref", "-S", "--linear"]
   )
   require_success(result, "deconstruct main")
   expected = [
@@ -89,7 +89,7 @@ def test_main_records(cli: Path, gfaz: Path):
 
 def test_no_gt(cli: Path, gfaz: Path):
   result = run_command(
-      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "ref", "-S", "-G"]
+      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "ref", "-S", "-G", "--linear"]
   )
   require_success(result, "deconstruct --no-gt")
   expected = [
@@ -103,7 +103,7 @@ def test_no_gt(cli: Path, gfaz: Path):
 
 def test_contig_header(cli: Path, gfaz: Path):
   result = run_command(
-      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "ref", "-S"]
+      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "ref", "-S", "--linear"]
   )
   require_success(result, "deconstruct header")
   if "##contig=<ID=ref,length=26>" not in result.stdout:
@@ -115,7 +115,7 @@ def test_contig_header(cli: Path, gfaz: Path):
 def test_reverse_complement(cli: Path, gfaz: Path):
   # node4 = AC, traversed reverse -> ALT must be revcomp(AC) = GT.
   result = run_command(
-      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "ref", "-S"]
+      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "ref", "-S", "--linear"]
   )
   require_success(result, "deconstruct revcomp")
   expected = [
@@ -127,7 +127,7 @@ def test_reverse_complement(cli: Path, gfaz: Path):
 
 def test_inversion_matches_vg_fixture(cli: Path, gfaz: Path):
   result = run_command(
-      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "x", "-S"]
+      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "x", "-S", "--linear"]
   )
   require_success(result, "deconstruct inversion")
   expected = [
@@ -139,7 +139,7 @@ def test_inversion_matches_vg_fixture(cli: Path, gfaz: Path):
 
 def test_cpx_header_without_gt(cli: Path, gfaz: Path):
   result = run_command(
-      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "x", "-S", "-G", "-m", "1"]
+      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "x", "-S", "-G", "-m", "1", "--linear"]
   )
   require_success(result, "deconstruct CPX no-GT")
   if "##ALT=<ID=CPX" not in result.stdout:
@@ -153,7 +153,7 @@ def test_cpx_header_without_gt(cli: Path, gfaz: Path):
 
 def test_pansn_reference_contig_name(cli: Path, gfaz: Path):
   result = run_command(
-      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "REF#0#chrQ", "-S"]
+      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "REF#0#chrQ", "-S", "--linear"]
   )
   require_success(result, "deconstruct PanSN reference")
   if "##contig=<ID=chrQ,length=3>" not in result.stdout:
@@ -170,7 +170,7 @@ def test_pansn_reference_contig_name(cli: Path, gfaz: Path):
 
 def test_reverse_path_block(cli: Path, gfaz: Path):
   result = run_command(
-      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "ref", "-S"]
+      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "ref", "-S", "--linear"]
   )
   require_success(result, "deconstruct reverse path block")
   expected = [

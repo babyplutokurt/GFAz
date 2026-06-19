@@ -27,18 +27,20 @@ struct DeconstructOptions {
   // Use topology-based snarl (superbubble) enumeration built from the stored
   // L-line links, instead of the linear reference-unique-anchor heuristic.
   // Site boundaries then come from graph structure rather than the reference
-  // projection, and alleles are observed by streaming each path once.
-  bool use_snarls = false;
-  // Snarl mode only: emit one record per *top-level* snarl, matching
-  // `vg deconstruct`'s default granularity. Sites come from the global
-  // biconnected decomposition of the node-end graph (see snarl_finder.cpp):
-  // each non-trivial biconnected block the reference threads through is one
-  // snarl, and blocks with a cyclic/ambiguous reference traversal are dropped
-  // (as vg does). This collapses the leaf-bubble chains and nested bubbles the
-  // default superset reports separately, and suppresses the tangled
-  // satellite/palindrome regions vg also skips. By default (false) gfaz reports
-  // the leaf-superbubble superset instead.
-  bool vg_compat = false;
+  // projection, and alleles are observed by streaming each path once. On by
+  // default; the linear heuristic is a legacy mode (set false via --linear).
+  bool use_snarls = true;
+  // Emit one record per *top-level* snarl, matching `vg deconstruct`'s default
+  // granularity. Sites come from the global biconnected decomposition of the
+  // node-end graph (see snarl_finder.cpp): each non-trivial biconnected block
+  // the reference threads through is one snarl, and blocks with a
+  // cyclic/ambiguous reference traversal are dropped (as vg does). This
+  // collapses the leaf-bubble chains and nested bubbles the leaf-superbubble
+  // superset reports separately, and suppresses the tangled satellite/palindrome
+  // regions vg also skips. This is the default, since producing output identical
+  // to `vg deconstruct` is the goal. Set false (via the legacy --snarl flag) to
+  // get the leaf-superbubble superset instead.
+  bool vg_compat = true;
 };
 
 // Derive a VCF (header + records) from the compressed traversals and write it

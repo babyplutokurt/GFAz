@@ -15,6 +15,7 @@ int do_deconstruct(int argc, char *argv[]) {
   std::string input_path;
   bool saw_sample = false;
   bool saw_haplotype = false;
+  const char *legacy_mode = nullptr;
 
   static struct option long_options[] = {
       {"idx", required_argument, 0, 'i'},
@@ -27,6 +28,7 @@ int do_deconstruct(int argc, char *argv[]) {
       {"snarl", no_argument, 0, 1000},
       {"vg-compat", no_argument, 0, 1001},
       {"vg-compact", no_argument, 0, 1001},
+      {"linear", no_argument, 0, 1002},
       {"max-site-length", required_argument, 0, 'm'},
       {"no-gt", no_argument, 0, 'G'},
       {"threads", required_argument, 0, 't'},
@@ -55,12 +57,19 @@ int do_deconstruct(int argc, char *argv[]) {
     case 'p':
       options.grouping = gfaz::GroupingMode::PerPathWalk;
       break;
-    case 1000:
+    case 1000: // --snarl: leaf-superbubble superset (legacy)
       options.use_snarls = true;
+      options.vg_compat = false;
+      legacy_mode = "--snarl";
       break;
-    case 1001:
+    case 1001: // --vg-compat / --vg-compact (now the default)
+      options.use_snarls = true;
       options.vg_compat = true;
-      options.use_snarls = true; // vg-compat is a refinement of snarl mode
+      break;
+    case 1002: // --linear (legacy)
+      options.use_snarls = false;
+      options.vg_compat = false;
+      legacy_mode = "--linear";
       break;
     case 'm':
       options.max_site_length =
@@ -85,6 +94,11 @@ int do_deconstruct(int argc, char *argv[]) {
   if (saw_sample && saw_haplotype) {
     std::cerr << "Error: select only one grouping option: -S or -H\n";
     return 1;
+  }
+  if (legacy_mode) {
+    std::cerr << "Warning: " << legacy_mode
+              << " is a legacy mode and will be removed in a future release; "
+                 "the default now matches `vg deconstruct`.\n";
   }
   if (input_path.empty() && optind < argc)
     input_path = argv[optind++];

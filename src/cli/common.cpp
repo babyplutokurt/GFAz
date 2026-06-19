@@ -305,20 +305,6 @@ OPTIONS:
     -H, --group-by-haplotype
                             One VCF column per sample#hap.
     -p, --per-path          One VCF column per path/walk (haploid).
-        --snarl             Find sites by topology (superbubbles + inversions)
-                            enumerated from the stored L-line links, like
-                            `vg deconstruct`, instead of the linear
-                            reference-anchor heuristic. Requires links in the
-                            container.
-        --vg-compat         Implies --snarl. Emit one record per top-level snarl
-                            (the global biconnected decomposition), matching
-                            `vg deconstruct`'s default granularity, and drop
-                            snarls with a cyclic reference traversal as vg does.
-        --vg-compact        Alias for --vg-compat.
-                            Default snarl mode keeps a superset: per-leaf-bubble
-                            records plus extra well-formed sites in
-                            cyclic/repetitive regions (e.g. chrY satellites) that
-                            vg collapses or skips.
     -m, --max-site-length <bp>
                             Sites spanning more than <bp> on the reference are
                             emitted as a single <CPX> record. 0 disables.
@@ -327,19 +313,30 @@ OPTIONS:
     -j, --threads <N>       Alias for -t.
     -h, --help              Show this help message.
 
+LEGACY MODES (deprecated, removed in a future release):
+        --snarl             Leaf-superbubble superset: per-leaf-bubble records
+                            plus extra well-formed sites in cyclic/repetitive
+                            regions (e.g. chrY satellites) that vg collapses or
+                            skips. Requires L-line links in the container.
+        --linear            Flat reference-anchor/breakpoint heuristic that does
+                            not use the graph topology. Site boundaries come from
+                            the reference projection rather than snarls.
+
 OUTPUT:
-    A VCFv4.2 stream on stdout. Variant sites are found by an anchor/breakpoint
-    decomposition of haplotype traversals relative to the chosen reference path,
-    computed directly on the compressed traversals without materializing the
-    GFA. REF/ALT alleles are spelled from segment sequences (reverse-complement
-    aware), with the standard left-anchor base for indels. Genotypes are phased
-    (each haplotype is its own traversal).
+    A VCFv4.2 stream on stdout, computed directly on the compressed traversals
+    without materializing the GFA. By default sites are top-level snarls (the
+    global biconnected decomposition of the node-end graph built from the stored
+    L-line links), matching `vg deconstruct`'s default granularity; snarls with
+    a cyclic reference traversal are dropped, as vg does. REF/ALT alleles are
+    spelled from segment sequences (reverse-complement aware), with the standard
+    left-anchor base for indels. Genotypes are phased (each haplotype is its own
+    traversal).
 
 NOTES:
-    Default mode is a flat anchor/breakpoint decomposition. --snarl switches to
-    topology-driven sites (superbubbles + inversions from the L-line links) that
-    track `vg deconstruct`'s snarl boundaries; alleles are still observed by
-    streaming each traversal once. See DECONSTRUCT_WORKFLOW.md for details.
+    The default mode aims to produce output identical to `vg deconstruct`.
+    The --snarl (superset) and --linear (anchor-heuristic) modes are legacy and
+    will be removed; they emit a deprecation warning on stderr. See
+    DECONSTRUCT_WORKFLOW.md for details.
 
 )";
 }

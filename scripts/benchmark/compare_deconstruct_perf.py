@@ -9,9 +9,10 @@ Each command runs under `/usr/bin/time -v`, capturing elapsed wall time, peak
 RSS, exit code, and -- for deconstruct runs -- the number of VCF records
 emitted. Results are written as JSON + CSV and printed as a table with ratios.
 
-gfaz deconstruct is benchmarked in `--snarl` mode by default (the topology-based
-mode that mirrors `vg deconstruct`). Use --gfaz-modes to also time the linear
-heuristic and the vg-compat (acyclic-reference) refinement.
+gfaz deconstruct is benchmarked in vg-compat mode by default (gfaz's own
+default, which mirrors `vg deconstruct`'s top-level-snarl output). Use
+--gfaz-modes to also time the legacy linear heuristic and the legacy snarl
+(leaf-superbubble superset) mode.
 
 Examples:
   # From a GFA (auto-compresses to a temp .gfaz):
@@ -62,7 +63,7 @@ PRESETS = {
 # gfaz deconstruct mode -> extra CLI flags (all are per-sample, -S).
 GFAZ_MODES = {
     "snarl": ["-S", "--snarl"],
-    "linear": ["-S"],
+    "linear": ["-S", "--linear"],
     "vg-compat": ["-S", "--vg-compat"],
 }
 
@@ -314,7 +315,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--gfaz-bin", type=Path, default=DEFAULT_GFAZ)
     parser.add_argument(
         "--gfaz-modes",
-        default="snarl",
+        default="vg-compat",
         help="Comma-separated gfaz deconstruct modes to time (%s), or 'all'." % ",".join(GFAZ_MODES),
     )
     parser.add_argument("--threads", type=int, default=1)

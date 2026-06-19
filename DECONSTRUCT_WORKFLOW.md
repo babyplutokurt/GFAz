@@ -8,12 +8,15 @@
 > `src/cli/deconstruct_command.cpp`; tests:
 > `tests/regression/test_deconstruct.py`.
 >
-> There are **three site-finding modes**. §4–§6 below document the **default
-> linear reference-anchor** algorithm. The **topology-based** modes (`--snarl`
-> and the vg-parity `--vg-compat`) are documented in **§11**; `--vg-compat`
-> reproduces `vg deconstruct` at ~99.99% position concordance on full human
-> chromosomes while running 17–24× faster (see §11.4). This document is the
-> reference for all three.
+> There are **three site-finding modes**. The **default is vg-compat**
+> (top-level snarls), which reproduces `vg deconstruct` at ~99.99% position
+> concordance on full human chromosomes while running 17–24× faster (see §11.4);
+> producing output identical to `vg` is the goal of this workflow. The other two
+> modes — `--snarl` (leaf-superbubble superset) and `--linear` (the flat
+> reference-anchor heuristic documented in §4–§6) — are **legacy and will be
+> removed in a future release**; they print a deprecation warning on stderr.
+> §11 documents the topology-based modes. This document is the reference for all
+> three.
 
 ## 1. Purpose
 
@@ -73,8 +76,10 @@ gfaz deconstruct -i input.gfaz -r <reference-name> [options] > out.vcf
 | `-S, --group-by-sample` | One VCF column per sample (default). |
 | `-H, --group-by-haplotype` | One VCF column per (sample, hap). |
 | `--per-path` | One VCF column per path/walk (haploid). |
-| `--snarl` | Find sites by graph topology (superbubbles + inversions from the stored L-line links) instead of the linear anchor heuristic. Reports a superset of leaf bubbles. See §11. |
-| `--vg-compat` (alias `--vg-compact`) | Implies `--snarl`. Emit one record per **top-level snarl** via the global biconnected decomposition, matching `vg deconstruct`'s default granularity (cyclic-reference snarls dropped). See §11. |
+| *(default)* | Emit one record per **top-level snarl** via the global biconnected decomposition, matching `vg deconstruct`'s default granularity (cyclic-reference snarls dropped). Equivalent to the former `--vg-compat`. See §11. |
+| `--vg-compat` (alias `--vg-compact`) | Explicit selection of the default mode (no-op; kept for backward compatibility). |
+| `--snarl` | **Legacy.** Find sites by graph topology but report the leaf-bubble *superset* (superbubbles + inversions from the stored L-line links), rather than top-level snarls. See §11. |
+| `--linear` | **Legacy.** Use the flat reference-anchor heuristic (§4–§6) instead of graph topology. |
 | `-t, --threads <N>` | Thread count (mirrors `pav`). |
 | `--max-site-length <bp>` | Sites whose reference span exceeds this are emitted as a single `CPX`-flagged record instead of enumerating every allele (megasite guard, §4.2/§6). `0` disables the guard. |
 | `--no-gt` | Emit site + `INFO` (AC/AN/AF) only, skip `GT` columns. |
