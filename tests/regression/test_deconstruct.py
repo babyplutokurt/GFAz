@@ -275,6 +275,22 @@ def test_subrange_reference(cli: Path, gfaz: Path):
       raise AssertionError(
           f"deconstruct {mode}: subrange-start POS offset not applied (no 1005).")
 
+  # Reference selection goes through one name-sorted index (exact + raw-prefix).
+  # A prefix matching a single contig selects only that contig...
+  one = run_command(
+      [str(cli), "deconstruct", "-i", str(gfaz), "-P", "REF#0#chr2", "-S"])
+  require_success(one, "deconstruct -P REF#0#chr2")
+  chroms = {ln.split("\t", 1)[0] for ln in data_lines(one.stdout)
+            if not ln.startswith("#")}
+  if chroms != {"chr2"}:
+    raise AssertionError(
+        f"deconstruct -P REF#0#chr2 should select only chr2, got {chroms}")
+  # ...and a prefix matching nothing is a clean error, not an empty VCF.
+  none = run_command(
+      [str(cli), "deconstruct", "-i", str(gfaz), "-P", "NOPE", "-S"])
+  if none.returncode == 0:
+    raise AssertionError("deconstruct -P with no match should fail")
+
 
 def test_graph_info_at(cli: Path, gfaz: Path):
   """`-a` adds graph annotations for vg parity without changing the variant call.

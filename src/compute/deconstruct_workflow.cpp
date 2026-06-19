@@ -13,6 +13,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -1006,18 +1007,23 @@ void deconstruct_to_vcf(const CompressedData &data,
   if (ident.names.size() != slices.size())
     throw std::runtime_error("deconstruct: slice/identity count mismatch");
 
-  // Resolve reference names to slice ids. Exact match wins; otherwise fall back
-  // to a PanSN base-name match that ignores the ":start-end" subrange, so a
-  // friendly "CHM13#0#chrY" resolves the stored "CHM13#0#chrY:0-57227415"
-  // (vg accepts the base name via -P; gfaz should too).
-  std::unordered_map<std::string, uint32_t> name_to_slice;
-  std::unordered_map<std::string, std::vector<uint32_t>> base_to_slices;
-  name_to_slice.reserve(slices.size() * 2 + 1);
-  base_to_slices.reserve(slices.size() * 2 + 1);
-  for (uint32_t i = 0; i < slices.size(); ++i) {
-    name_to_slice.emplace(ident.names[i], i);
-    base_to_slices[strip_trailing_subrange(ident.names[i])].push_back(i);
-  }
+  // Resolve reference names/prefixes to slice ids over a single name-sorted
+  // index of slice ids. Exact `-r` is a binary search; the `-r` PanSN base-name
+  // fallback (ignore the ":start-end" subrange, so a friendly "CHM13#0#chrY"
+  // resolves the stored "CHM13#0#chrY:0-57227415") and the `-P` raw-prefix
+  // selection (vg parity) share one contiguous-range primitive. Sorting indices
+  // rather than names avoids the per-slice string-key hash inserts and base-name
+  // allocations the previous dual hash maps paid, and makes lookups sublinear.
+  std::vector<uint32_t> by_name(slices.size());
+  std::iota(by_name.begin(), by_name.end(), 0u);
+  std::sort(by_name.begin(), by_name.end(), [&](uint32_t a, uint32_t b) {
+    if (ident.names[a] != ident.names[b])
+      return ident.names[a] < ident.names[b];
+    return a < b; // tie-break on slice id: exact lookup picks the lowest index
+  });
+  auto name_less_key = [&](uint32_t i, const std::string &key) {
+    return ident.names[i] < key;
+  };
 
   std::vector<uint32_t> ref_slices;
   std::vector<std::string> ref_display_names; // parallel to ref_slices (CHROM src)
@@ -1030,37 +1036,63 @@ void deconstruct_to_vcf(const CompressedData &data,
     ref_display_names.push_back(display);
   };
 
-  // Explicit -r names: exact match, else PanSN base-name fallback.
+  // Slices whose name starts with `pfx` (raw string prefix == vg's -P), in
+  // container (slice-id) order. Such names form a contiguous block of the
+  // name-sorted index, so this is O(log n + matches) instead of a full scan.
+  auto prefix_slices = [&](const std::string &pfx) {
+    std::vector<uint32_t> out;
+    auto lo =
+        std::lower_bound(by_name.begin(), by_name.end(), pfx, name_less_key);
+    for (auto it = lo; it != by_name.end(); ++it) {
+      if (ident.names[*it].compare(0, pfx.size(), pfx) != 0)
+        break; // sorted: once a name stops matching, no later one can
+      out.push_back(*it);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+  };
+
+  // Exact full-name lookup in the sorted index; returns slices.size() if absent.
+  auto exact_slice = [&](const std::string &name) -> uint32_t {
+    auto lo =
+        std::lower_bound(by_name.begin(), by_name.end(), name, name_less_key);
+    if (lo != by_name.end() && ident.names[*lo] == name)
+      return *lo;
+    return static_cast<uint32_t>(slices.size());
+  };
+
+  // Explicit -r names: exact match, else the unique slice whose subrange-stripped
+  // name equals the requested base.
   for (const std::string &rn : options.reference_names) {
-    auto it = name_to_slice.find(rn);
-    if (it != name_to_slice.end()) {
-      add_ref(it->second, rn);
+    const uint32_t ex = exact_slice(rn);
+    if (ex != slices.size()) {
+      add_ref(ex, rn);
       continue;
     }
-    auto bit = base_to_slices.find(strip_trailing_subrange(rn));
-    if (bit == base_to_slices.end())
+    const std::string base = strip_trailing_subrange(rn);
+    std::vector<uint32_t> cand;
+    for (uint32_t i : prefix_slices(base))
+      if (strip_trailing_subrange(ident.names[i]) == base)
+        cand.push_back(i);
+    if (cand.empty())
       throw std::runtime_error("deconstruct: reference path not found: " + rn);
-    if (bit->second.size() != 1)
+    if (cand.size() != 1)
       throw std::runtime_error(
           "deconstruct: reference '" + rn + "' matches " +
-          std::to_string(bit->second.size()) +
+          std::to_string(cand.size()) +
           " subrange fragments; specify the exact name including :start-end");
-    add_ref(bit->second.front(), rn);
+    add_ref(cand.front(), rn);
   }
 
   // -P prefixes (vg parity): every stored name beginning with the prefix becomes
-  // a reference contig. Slices are scanned in container order for determinism.
+  // a reference contig, in container order.
   for (const std::string &pfx : options.reference_prefixes) {
-    size_t matched = 0;
-    for (uint32_t i = 0; i < slices.size(); ++i) {
-      if (ident.names[i].rfind(pfx, 0) == 0) { // names[i] starts with pfx
-        add_ref(i, ident.names[i]);
-        ++matched;
-      }
-    }
-    if (matched == 0)
+    const std::vector<uint32_t> matches = prefix_slices(pfx);
+    if (matches.empty())
       throw std::runtime_error(
           "deconstruct: no reference path matches prefix: " + pfx);
+    for (uint32_t i : matches)
+      add_ref(i, ident.names[i]);
   }
 
   // Each reference contig must be a single path/walk: a contig split into
