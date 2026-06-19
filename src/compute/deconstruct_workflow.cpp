@@ -1218,7 +1218,9 @@ void deconstruct_to_vcf(const CompressedData &data,
   out << "##INFO=<ID=AF,Number=A,Type=Float,Description=\"Allele frequency\">\n";
   out << "##INFO=<ID=NS,Number=1,Type=Integer,Description=\"Number of samples "
          "with data\">\n";
-  if (options.emit_at) {
+  // AT is produced only by the snarl writer; don't advertise it under the
+  // legacy --linear mode (which emits no AT values).
+  if (options.emit_at && options.use_snarls) {
     out << "##INFO=<ID=AT,Number=R,Type=String,Description=\"Allele Traversal "
            "as path in graph (gfaz 1-based node ids)\">\n";
   }

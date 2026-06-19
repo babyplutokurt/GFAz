@@ -337,6 +337,31 @@ def test_graph_info_at(cli: Path, gfaz: Path):
       raise AssertionError(f"deconstruct {alias} differs from -a output.")
 
 
+def test_linear_at_header_gated(cli: Path, gfaz: Path):
+  """`--linear -a` must not advertise AT: only the snarl writer emits it.
+
+  The legacy linear writer produces no AT values or snarl IDs, so emitting the
+  ##INFO=<ID=AT,...> header (or any ;AT=) there would describe a field that
+  never appears. The graph-info CHROM naming still applies to both writers.
+  """
+  result = run_command(
+      [str(cli), "deconstruct", "-i", str(gfaz), "-P", "REF", "-S",
+       "--linear", "-a"]
+  )
+  require_success(result, "deconstruct -P REF --linear -a")
+  if "##INFO=<ID=AT," in result.stdout:
+    raise AssertionError(
+        "--linear -a must not emit the AT header (linear writer has no AT).\n"
+        + result.stdout)
+  if ";AT=" in result.stdout:
+    raise AssertionError(
+        "--linear -a must not emit any ;AT= field.\n" + result.stdout)
+  # CHROM PanSN naming still applies under -a (both writers).
+  if "REF#0#chr1" not in result.stdout:
+    raise AssertionError(
+        "--linear -a should still use the PanSN CHROM name.\n" + result.stdout)
+
+
 def test_missing_reference_errors(cli: Path, gfaz: Path):
   result = run_command(
       [str(cli), "deconstruct", "-i", str(gfaz), "-r", "nope", "-S"]
@@ -373,6 +398,7 @@ def main():
     test_per_path(cli, links_gfaz)
     test_subrange_reference(cli, subrange_gfaz)
     test_graph_info_at(cli, subrange_gfaz)
+    test_linear_at_header_gated(cli, subrange_gfaz)
     print("✅ PASS deconstruct_regressions")
   finally:
     for p in (main_gfaz, rc_gfaz, inv_gfaz, pansn_gfaz, reverse_path_gfaz,
