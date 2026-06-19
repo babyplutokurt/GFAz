@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -549,11 +550,19 @@ uint64_t deconstruct_contig(
 // ---------------------------------------------------------------------------
 
 // One captured interior: the node stretch a sample spelled through a snarl,
-// already normalized to the reference (forward) orientation.
-struct AlleleObs {
+// already normalized to the reference (forward) orientation. The interior nodes
+// live in a single shared flat pool (interior_pool); each record just points at
+// its slice [off, off + len). Storing observations as fixed 16-byte records over
+// a flat pool -- rather than a std::vector<NodeId> per observation -- avoids one
+// heap allocation per observation. At chromosome scale there is roughly one
+// observation per (sample x snarl): hundreds of millions of them, with an
+// average interior of ~1 node, so the per-vector control block + malloc chunk
+// dominated peak RSS.
+struct ObsRec {
   uint32_t snarl = 0;
   uint32_t slice_local = 0;
-  std::vector<NodeId> interior;
+  uint32_t off = 0; // start index in interior_pool
+  uint32_t len = 0; // number of interior nodes
 };
 
 uint64_t deconstruct_contig_snarl(
@@ -610,11 +619,13 @@ uint64_t deconstruct_contig_snarl(
 
   // --- Pass 3: observe alleles, streaming each sample slice once ---
   const size_t num_samples_slices = sample_slices.size();
-  std::vector<AlleleObs> observations;
+  std::vector<ObsRec> observations;
+  std::vector<NodeId> interior_pool;
   {
     ScopedOMPThreads omp_scope(options.num_threads);
     const int T = std::max(1, omp_scope.effective_threads());
-    std::vector<std::vector<AlleleObs>> per_thread(T);
+    std::vector<std::vector<ObsRec>> per_thread(T);
+    std::vector<std::vector<NodeId>> per_thread_pool(T);
 #pragma omp parallel num_threads(T)
     {
       const int tid =
@@ -623,7 +634,8 @@ uint64_t deconstruct_contig_snarl(
 #else
           0;
 #endif
-      std::vector<AlleleObs> &local = per_thread[tid];
+      std::vector<ObsRec> &local = per_thread[tid];
+      std::vector<NodeId> &pool = per_thread_pool[tid];
       std::vector<NodeId> scratch;
 #pragma omp for schedule(dynamic, 16)
       for (long long si = 0; si < static_cast<long long>(num_samples_slices);
@@ -657,16 +669,17 @@ uint64_t deconstruct_contig_snarl(
             return;
           }
           if (v == exit_v) {
-            std::vector<NodeId> seq;
+            // Append this interior to the thread's flat pool (normalized to the
+            // reference / forward orientation) and record only its extent.
+            const uint32_t off = static_cast<uint32_t>(pool.size());
             if (!reversed) {
-              seq = interior;
+              pool.insert(pool.end(), interior.begin(), interior.end());
             } else {
-              seq.reserve(interior.size());
               for (auto it = interior.rbegin(); it != interior.rend(); ++it)
-                seq.push_back(static_cast<NodeId>(-*it));
+                pool.push_back(static_cast<NodeId>(-*it));
             }
-            local.push_back(AlleleObs{open, static_cast<uint32_t>(si),
-                                      std::move(seq)});
+            local.push_back(ObsRec{open, static_cast<uint32_t>(si), off,
+                                   static_cast<uint32_t>(pool.size() - off)});
             open = DoubledGraph::kInvalid;
             interior.clear();
             // The exit boundary may itself open the next (chained) snarl.
@@ -681,13 +694,31 @@ uint64_t deconstruct_contig_snarl(
         // A slice still "open" at end never reached the exit: no clean span.
       }
     }
-    size_t total = 0;
-    for (const auto &v : per_thread)
-      total += v.size();
-    observations.reserve(total);
-    for (auto &v : per_thread)
-      for (auto &o : v)
-        observations.push_back(std::move(o));
+    // Merge per-thread records and interior pools into the two shared flat
+    // arrays, draining and freeing each thread's buffers as we go so that the
+    // per-thread and merged copies never both reside in memory at full size.
+    size_t total_recs = 0, total_pool = 0;
+    for (int t = 0; t < T; ++t) {
+      total_recs += per_thread[t].size();
+      total_pool += per_thread_pool[t].size();
+    }
+    if (total_pool > std::numeric_limits<uint32_t>::max())
+      throw std::runtime_error(
+          "deconstruct: snarl interior pool exceeds 2^32 nodes");
+    observations.reserve(total_recs);
+    interior_pool.reserve(total_pool);
+    for (int t = 0; t < T; ++t) {
+      const uint32_t base = static_cast<uint32_t>(interior_pool.size());
+      std::vector<NodeId> &pl = per_thread_pool[t];
+      interior_pool.insert(interior_pool.end(), pl.begin(), pl.end());
+      std::vector<NodeId>().swap(pl);
+      std::vector<ObsRec> &rc = per_thread[t];
+      for (ObsRec r : rc) {
+        r.off += base;
+        observations.push_back(r);
+      }
+      std::vector<ObsRec>().swap(rc);
+    }
   }
 
   // Group observations by snarl for per-site assembly. The allele numbering
@@ -759,10 +790,10 @@ uint64_t deconstruct_contig_snarl(
         std::vector<uint32_t> touched;
         touched.reserve(obs_by_snarl[s].size());
         for (uint32_t k : obs_by_snarl[s]) {
-          const AlleleObs &obs = observations[k];
+          const ObsRec &obs = observations[k];
           std::string allele;
-          for (NodeId n : obs.interior)
-            seg.append(allele, n);
+          for (uint32_t i = 0; i < obs.len; ++i)
+            seg.append(allele, interior_pool[obs.off + i]);
           auto ai = allele_index.find(allele);
           int idx;
           if (ai == allele_index.end()) {
