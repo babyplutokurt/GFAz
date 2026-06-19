@@ -690,10 +690,19 @@ uint64_t deconstruct_contig_snarl(
         observations.push_back(std::move(o));
   }
 
-  // Group observations by snarl for per-site assembly.
+  // Group observations by snarl for per-site assembly. The allele numbering
+  // assigned below is first-seen order over each snarl's observations, so that
+  // order must not depend on Pass 3's thread scheduling. Sort each snarl's
+  // observations by their source slice; this reproduces the single-thread order
+  // (Pass 3 streams slices in ascending order, keeping one slice's observations
+  // contiguous), making the whole VCF thread-count invariant.
   std::vector<std::vector<uint32_t>> obs_by_snarl(num_snarls);
   for (uint32_t k = 0; k < observations.size(); ++k)
     obs_by_snarl[observations[k].snarl].push_back(k);
+  for (auto &ks : obs_by_snarl)
+    std::stable_sort(ks.begin(), ks.end(), [&](uint32_t a, uint32_t b) {
+      return observations[a].slice_local < observations[b].slice_local;
+    });
 
   const size_t num_columns = columns.size();
   auto resolve_slot = [](const std::vector<uint32_t> &slot,
@@ -712,88 +721,113 @@ uint64_t deconstruct_contig_snarl(
   };
 
   // --- Pass 4: assemble + emit one record per varying snarl ---
-  std::vector<int> slice_allele(num_samples_slices, -1);
-  for (uint32_t s = 0; s < num_snarls; ++s) {
-    const uint32_t src_ref_index = snarls[s].start_ref_index;
-    const uint32_t sink_ref_index = snarls[s].end_ref_index;
+  // Per-snarl iterations are independent: every working buffer is either
+  // iteration-local or a thread-private scratch (slice_allele, reset via
+  // touched). Records are written to per-thread buffers and merged afterward;
+  // the caller re-sorts records by POS, so emission order does not matter.
+  {
+    ScopedOMPThreads omp_scope(options.num_threads);
+    const int T = std::max(1, omp_scope.effective_threads());
+    std::vector<std::vector<VcfRecord>> per_thread(T);
+#pragma omp parallel num_threads(T)
+    {
+      const int tid =
+#ifdef _OPENMP
+          omp_get_thread_num();
+#else
+          0;
+#endif
+      std::vector<VcfRecord> &local_records = per_thread[tid];
+      // Thread-private allele scratch, reset between snarls via `touched`.
+      std::vector<int> slice_allele(num_samples_slices, -1);
+#pragma omp for schedule(dynamic, 16)
+      for (long long sll = 0; sll < static_cast<long long>(num_snarls); ++sll) {
+        const uint32_t s = static_cast<uint32_t>(sll);
+        const uint32_t src_ref_index = snarls[s].start_ref_index;
+        const uint32_t sink_ref_index = snarls[s].end_ref_index;
 
-    std::string ref_allele;
-    for (uint32_t i = src_ref_index + 1; i < sink_ref_index; ++i)
-      seg.append(ref_allele, ref_nodes[i]);
+        std::string ref_allele;
+        for (uint32_t i = src_ref_index + 1; i < sink_ref_index; ++i)
+          seg.append(ref_allele, ref_nodes[i]);
 
-    std::map<std::string, int> allele_index;
-    allele_index.emplace(ref_allele, 0);
-    std::vector<std::string> alleles;
-    alleles.push_back(ref_allele);
+        std::map<std::string, int> allele_index;
+        allele_index.emplace(ref_allele, 0);
+        std::vector<std::string> alleles;
+        alleles.push_back(ref_allele);
 
-    // Reset only the slots we touch (slice_allele is reused across snarls).
-    std::vector<uint32_t> touched;
-    touched.reserve(obs_by_snarl[s].size());
-    for (uint32_t k : obs_by_snarl[s]) {
-      const AlleleObs &obs = observations[k];
-      std::string allele;
-      for (NodeId n : obs.interior)
-        seg.append(allele, n);
-      auto ai = allele_index.find(allele);
-      int idx;
-      if (ai == allele_index.end()) {
-        idx = static_cast<int>(alleles.size());
-        allele_index.emplace(allele, idx);
-        alleles.push_back(allele);
-      } else {
-        idx = ai->second;
-      }
-      slice_allele[obs.slice_local] = idx;
-      touched.push_back(obs.slice_local);
-    }
-
-    if (alleles.size() < 2) {
-      for (uint32_t t : touched)
-        slice_allele[t] = -1;
-      continue;
-    }
-
-    bool substitution = true;
-    for (size_t a = 1; a < alleles.size() && substitution; ++a)
-      substitution = (alleles[a].size() == ref_allele.size());
-
-    const uint64_t interior_start = offset_at[src_ref_index + 1];
-    const uint64_t span =
-        offset_at[sink_ref_index] - offset_at[src_ref_index + 1];
-    const bool guard =
-        options.max_site_length != 0 && span > options.max_site_length;
-
-    std::vector<std::vector<int>> column_slot_allele(num_columns);
-    std::vector<uint64_t> ac(alleles.size(), 0);
-    uint64_t an = 0;
-    uint64_t ns = 0;
-    for (size_t c = 0; c < num_columns; ++c) {
-      column_slot_allele[c].reserve(columns[c].size());
-      bool has = false;
-      for (const auto &slot : columns[c]) {
-        const int a = resolve_slot(slot, slice_allele);
-        column_slot_allele[c].push_back(a);
-        if (a >= 0) {
-          ++an;
-          ++ac[a];
-          has = true;
+        // Reset only the slots we touch (slice_allele is reused across snarls).
+        std::vector<uint32_t> touched;
+        touched.reserve(obs_by_snarl[s].size());
+        for (uint32_t k : obs_by_snarl[s]) {
+          const AlleleObs &obs = observations[k];
+          std::string allele;
+          for (NodeId n : obs.interior)
+            seg.append(allele, n);
+          auto ai = allele_index.find(allele);
+          int idx;
+          if (ai == allele_index.end()) {
+            idx = static_cast<int>(alleles.size());
+            allele_index.emplace(allele, idx);
+            alleles.push_back(allele);
+          } else {
+            idx = ai->second;
+          }
+          slice_allele[obs.slice_local] = idx;
+          touched.push_back(obs.slice_local);
         }
+
+        if (alleles.size() < 2) {
+          for (uint32_t t : touched)
+            slice_allele[t] = -1;
+          continue;
+        }
+
+        bool substitution = true;
+        for (size_t a = 1; a < alleles.size() && substitution; ++a)
+          substitution = (alleles[a].size() == ref_allele.size());
+
+        const uint64_t interior_start = offset_at[src_ref_index + 1];
+        const uint64_t span =
+            offset_at[sink_ref_index] - offset_at[src_ref_index + 1];
+        const bool guard =
+            options.max_site_length != 0 && span > options.max_site_length;
+
+        std::vector<std::vector<int>> column_slot_allele(num_columns);
+        std::vector<uint64_t> ac(alleles.size(), 0);
+        uint64_t an = 0;
+        uint64_t ns = 0;
+        for (size_t c = 0; c < num_columns; ++c) {
+          column_slot_allele[c].reserve(columns[c].size());
+          bool has = false;
+          for (const auto &slot : columns[c]) {
+            const int a = resolve_slot(slot, slice_allele);
+            column_slot_allele[c].push_back(a);
+            if (a >= 0) {
+              ++an;
+              ++ac[a];
+              has = true;
+            }
+          }
+          if (has)
+            ++ns;
+        }
+
+        const char prev = seg.last_base(ref_nodes[src_ref_index]);
+        std::ostringstream line;
+        const uint64_t pos = write_record_head(line, contig_name, guard,
+                                               substitution, interior_start,
+                                               prev, ref_allele, alleles);
+        append_info_fields(line, ac, an, ns, guard);
+        append_gt_columns(line, column_slot_allele, guard, options);
+        local_records.push_back(VcfRecord{pos, line.str()});
+
+        for (uint32_t t : touched)
+          slice_allele[t] = -1;
       }
-      if (has)
-        ++ns;
     }
-
-    const char prev = seg.last_base(ref_nodes[src_ref_index]);
-    std::ostringstream line;
-    const uint64_t pos =
-        write_record_head(line, contig_name, guard, substitution, interior_start,
-                          prev, ref_allele, alleles);
-    append_info_fields(line, ac, an, ns, guard);
-    append_gt_columns(line, column_slot_allele, guard, options);
-    records.push_back(VcfRecord{pos, line.str()});
-
-    for (uint32_t t : touched)
-      slice_allele[t] = -1;
+    for (auto &v : per_thread)
+      for (auto &r : v)
+        records.push_back(std::move(r));
   }
 
   return contig_length;
