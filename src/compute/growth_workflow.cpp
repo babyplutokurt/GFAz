@@ -5,7 +5,6 @@
 #include "core/utils/threading_utils.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
