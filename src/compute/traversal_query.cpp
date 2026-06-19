@@ -96,6 +96,18 @@ RuleLeafCache make_rule_cache(uint32_t min_rule_id,
   return cache;
 }
 
+Rulebook load_rulebook(const CompressedData &data) {
+  Rulebook rb;
+  rb.rules_first = Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
+  rb.rules_second = Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
+  Codec::delta_decode_int32(rb.rules_first);
+  Codec::delta_decode_int32(rb.rules_second);
+  rb.min_rule_id = data.min_rule_id();
+  rb.max_rule_id =
+      rb.min_rule_id + static_cast<uint32_t>(rb.rules_first.size());
+  return rb;
+}
+
 void build_slices(const std::vector<int32_t> &flat,
                   const std::vector<uint32_t> &lengths,
                   const std::vector<uint32_t> &original_lengths,

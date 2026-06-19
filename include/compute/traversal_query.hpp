@@ -63,6 +63,19 @@ RuleLeafCache make_rule_cache(uint32_t min_rule_id,
                               const std::vector<int32_t> &rules_second,
                               const char *budget_env, size_t default_budget);
 
+// The decoded 2-mer grammar rulebook: the two rule-element arrays (delta
+// already undone) and the [min_rule_id, max_rule_id) id range. This is the
+// shared first decode step of every compute module's setup.
+struct Rulebook {
+  std::vector<int32_t> rules_first;
+  std::vector<int32_t> rules_second;
+  uint32_t min_rule_id = 0;
+  uint32_t max_rule_id = 0;
+};
+
+// Decompress and delta-decode both rule-element arrays and compute the id range.
+Rulebook load_rulebook(const CompressedData &data);
+
 inline uint32_t abs_node_id(NodeId node) {
   return static_cast<uint32_t>(node < 0 ? -static_cast<int64_t>(node) : node);
 }

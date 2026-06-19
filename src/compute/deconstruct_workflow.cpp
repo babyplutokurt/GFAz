@@ -848,12 +848,9 @@ void deconstruct_to_vcf(const CompressedData &data,
 
   SegmentSeqs seg = load_segments(data);
 
-  std::vector<int32_t> rules_first =
-      Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
-  std::vector<int32_t> rules_second =
-      Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
-  Codec::delta_decode_int32(rules_first);
-  Codec::delta_decode_int32(rules_second);
+  Rulebook rulebook = load_rulebook(data);
+  const std::vector<int32_t> &rules_first = rulebook.rules_first;
+  const std::vector<int32_t> &rules_second = rulebook.rules_second;
 
   std::vector<int32_t> paths_flat =
       Codec::zstd_decompress_int32_vector(data.paths_zstd);
@@ -926,9 +923,8 @@ void deconstruct_to_vcf(const CompressedData &data,
   }
 
   // Rule-leaf cache (shared, read-only during decoding).
-  const uint32_t min_rule_id = data.min_rule_id();
-  const uint32_t max_rule_id =
-      min_rule_id + static_cast<uint32_t>(rules_first.size());
+  const uint32_t min_rule_id = rulebook.min_rule_id;
+  const uint32_t max_rule_id = rulebook.max_rule_id;
   RuleLeafCache rule_cache = make_rule_cache(
       min_rule_id, rules_first, rules_second, "GFAZ_DECONSTRUCT_RULE_CACHE_BYTES",
       static_cast<size_t>(1) << 30);

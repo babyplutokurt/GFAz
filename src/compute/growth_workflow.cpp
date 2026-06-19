@@ -143,21 +143,17 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads,
   if (total_slices == 0)
     return result;
 
-  std::vector<int32_t> rules_first =
-      Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
-  std::vector<int32_t> rules_second =
-      Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
-  Codec::delta_decode_int32(rules_first);
-  Codec::delta_decode_int32(rules_second);
+  tquery::Rulebook rulebook = tquery::load_rulebook(data);
+  const std::vector<int32_t> &rules_first = rulebook.rules_first;
+  const std::vector<int32_t> &rules_second = rulebook.rules_second;
 
   std::vector<int32_t> paths_flat =
       Codec::zstd_decompress_int32_vector(data.paths_zstd);
   std::vector<int32_t> walks_flat =
       Codec::zstd_decompress_int32_vector(data.walks_zstd);
 
-  const uint32_t min_rule_id = data.min_rule_id();
-  const uint32_t max_rule_id =
-      min_rule_id + static_cast<uint32_t>(rules_first.size());
+  const uint32_t min_rule_id = rulebook.min_rule_id;
+  const uint32_t max_rule_id = rulebook.max_rule_id;
   const int delta_round = data.delta_round;
 
   // Unified slice vector: [paths ... walks]. Index order is preserved so the
