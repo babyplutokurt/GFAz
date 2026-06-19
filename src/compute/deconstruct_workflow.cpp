@@ -350,6 +350,25 @@ uint64_t write_record_head(std::ostringstream &line,
   return pos;
 }
 
+// Resolve the allele of one haplotype slot from its covering slices:
+//   -1 = missing (no covering slice spans this site)
+//   -2 = conflict (covering slices disagree on the allele)
+// Shared by both contig writers.
+int resolve_slot(const std::vector<uint32_t> &slot,
+                 const std::vector<int> &slice_allele) {
+  int allele = -1;
+  for (uint32_t local : slot) {
+    const int a = slice_allele[local];
+    if (a < 0)
+      continue;
+    if (allele < 0)
+      allele = a;
+    else if (allele != a)
+      return -2;
+  }
+  return allele;
+}
+
 // Deconstruct one reference contig. Appends VCF records to `records`, returns
 // the contig length (sum of reference segment lengths).
 uint64_t deconstruct_contig(
@@ -493,24 +512,6 @@ uint64_t deconstruct_contig(
     return contig_length;
 
   const size_t num_columns = columns.size();
-
-  // Resolve the allele of one haplotype slot from its covering slices:
-  //   -1 = missing (no covering slice spans this site)
-  //   -2 = conflict (covering slices disagree on the allele)
-  auto resolve_slot = [](const std::vector<uint32_t> &slot,
-                         const std::vector<int> &slice_allele) -> int {
-    int allele = -1;
-    for (uint32_t local : slot) {
-      const int a = slice_allele[local];
-      if (a < 0)
-        continue;
-      if (allele < 0)
-        allele = a;
-      else if (allele != a)
-        return -2;
-    }
-    return allele;
-  };
 
   // --- Pass 3 + assembly: one record per varying site ---
   for (size_t b = 0; b + 1 < breakpoints.size(); ++b) {
@@ -826,20 +827,6 @@ uint64_t deconstruct_contig_snarl(
     });
 
   const size_t num_columns = columns.size();
-  auto resolve_slot = [](const std::vector<uint32_t> &slot,
-                         const std::vector<int> &slice_allele) -> int {
-    int allele = -1;
-    for (uint32_t local : slot) {
-      const int a = slice_allele[local];
-      if (a < 0)
-        continue;
-      if (allele < 0)
-        allele = a;
-      else if (allele != a)
-        return -2;
-    }
-    return allele;
-  };
 
   // --- Pass 4: assemble + emit one record per varying snarl ---
   // Per-snarl iterations are independent: every working buffer is either
