@@ -67,6 +67,7 @@ def gen_pav():
     for form, extra, name in (
         ("long", [], "pav_pathonly_concordance.long.golden"),
         ("matrix", ["-M"], "pav_pathonly_concordance.matrix.golden"),
+        ("sample-long", ["-S"], "pav_pathonly_concordance.sample.long.golden"),
     ):
       r = run([str(odgi), "pav", "-i", str(og), "-b", str(bed), "-t", "2"] + extra)
       body = normalize_pav(r.stdout)

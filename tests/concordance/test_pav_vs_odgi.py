@@ -57,6 +57,33 @@ def check(cli: Path, gfaz: Path, extra, golden_name: str):
         f"--- actual (gfaz) ---\n{actual}")
 
 
+def check_binary_consistency(cli: Path, gfaz: Path, threshold: float):
+  """-B output must equal the -M float matrix thresholded at the same value.
+  Self-contained (no odgi): guards the binary-emission path."""
+  floats = run_command(
+      [str(cli), "pav", "-i", str(gfaz), "-b", str(BED), "-M", "-t", "2"])
+  require_success(floats, "gfaz pav -M")
+  binary = run_command(
+      [str(cli), "pav", "-i", str(gfaz), "-b", str(BED), "-M",
+       "-B", str(threshold), "-t", "2"])
+  require_success(binary, "gfaz pav -M -B")
+
+  flines = floats.stdout.splitlines()
+  blines = binary.stdout.splitlines()
+  if flines[0] != blines[0] or len(flines) != len(blines):
+    raise AssertionError("pav -B: header/row count differs from -M")
+  for fl, bl in zip(flines[1:], blines[1:]):
+    ff, bf = fl.split("\t"), bl.split("\t")
+    # first 4 columns are chrom/start/end/name; the rest are values
+    if ff[:4] != bf[:4]:
+      raise AssertionError("pav -B: range columns differ from -M")
+    for fv, bv in zip(ff[4:], bf[4:]):
+      expected = "1" if float(fv) >= threshold else "0"
+      if bv != expected:
+        raise AssertionError(
+            f"pav -B: value {bv} != threshold({fv}>={threshold})={expected}")
+
+
 def main():
   cli = Path(CLI_PATH)
   ensure_cli_exists(cli)
@@ -64,6 +91,12 @@ def main():
   try:
     check(cli, gfaz, [], "pav_pathonly_concordance.long.golden")
     check(cli, gfaz, ["-M"], "pav_pathonly_concordance.matrix.golden")
+    check(cli, gfaz, ["-S"], "pav_pathonly_concordance.sample.long.golden")
+    # NB: the -S *matrix* form is intentionally not compared to odgi: values
+    # agree but the sample column order differs (odgi sorts sample names, gfaz
+    # is ref-first/insertion order) -- a presentation choice, not a correctness
+    # difference. The -S long form (above) validates the grouped values.
+    check_binary_consistency(cli, gfaz, 0.95)
     print("✅ PASS pav_vs_odgi")
   finally:
     if gfaz.exists():
