@@ -5,14 +5,15 @@
 // run directly on a CompressedData without materializing the original GFA. Used
 // by growth, pav, and deconstruct, and the intended foundation for new compute
 // modules. It provides:
-//   - grammar rule expansion (build_rule_cache, stream_hap_leaves,
+//   - grammar rule expansion (make_rule_cache, stream_hap_leaves,
 //     stream_decoded_nodes) that turns encoded P/W traversals back into node-id
 //     streams, with an optional bounded leaf cache;
-//   - haplotype slicing over the flat path/walk arrays (HapSlice, build_slices);
+//   - rulebook and traversal loading (load_rulebook, load_traversals) plus
+//     haplotype slicing over the flat path/walk arrays (HapSlice, build_slices);
 //   - PanSN path-name parsing and grouping keys (path_group_key / walk_group_key,
 //     shared so every module groups haplotypes identically);
-//   - W-line identity loading (load_walk_identity) and string-column
-//     reconstruction (decompress_strings).
+//   - P-line and W-line identity loading (load_path_names, load_walk_identity)
+//     and string-column reconstruction (decompress_strings).
 // A new module should build on these rather than re-deriving them.
 
 #include "core/model/compressed_data.hpp"

@@ -271,19 +271,16 @@ reconciliation, and minimal-allele normalization (defer to `bcftools norm`).
   `pav_command.cpp`), VCF header emission.
 - `include/utils/sequence_utils.hpp` (+ `.cpp`) — `reverse_complement(...)`.
 
-### Shared-helper extraction (refactor)
-`RuleLeafCache`, `build_rule_cache`, `expand_rule_visit`, `stream_hap_leaves`,
-`stream_decoded_nodes`, `build_slices`, `decode_one_haplotype_general` currently
-live in the anonymous namespace of `pav_workflow.cpp`. `deconstruct` needs all
-of them. Extract into a shared header (e.g.
-`include/workflows/traversal_decode.hpp` + `.cpp`) and have both `pav` and
-`deconstruct` include it. This is a mechanical, behavior-preserving refactor and
-should be validated against the existing `pav` regression before deconstruct is
-layered on.
+### Shared read-layer
 
-The PanSN grouping helpers (`parse_pansn_path_name`, `path_group_key`,
-`walk_group_key`, `build_metadata`) should likewise be shared rather than
-duplicated.
+`RuleLeafCache`, `make_rule_cache`, `expand_rule_visit`, `stream_hap_leaves`,
+`stream_decoded_nodes`, `build_slices`, `decode_one_haplotype_general`, the
+loaders (`load_rulebook`, `load_traversals`, `load_path_names`,
+`load_walk_identity`), and the PanSN grouping helpers (`parse_pansn_path_name`,
+`path_group_key`, `walk_group_key`) live in the shared compute read-layer
+`include/compute/traversal_query.hpp` (namespace `gfaz::tquery`). `pav`,
+`deconstruct`, and `growth` all build on it, and a new compute module should do
+the same rather than re-deriving these.
 
 ### Wiring
 - `include/cli/commands.hpp`: declare `int do_deconstruct(int, char**)`.
