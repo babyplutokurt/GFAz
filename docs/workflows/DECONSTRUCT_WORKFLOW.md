@@ -75,14 +75,14 @@ gfaz deconstruct -i input.gfaz -r <reference-name> [options] > out.vcf
 | `-r, --reference <name>` | Reference path/walk name (repeatable, or a PanSN sample → multiple contigs). Required. |
 | `-S, --group-by-sample` | One VCF column per sample (default). |
 | `-H, --group-by-haplotype` | One VCF column per (sample, hap). |
-| `--per-path` | One VCF column per path/walk (haploid). |
+| `-p, --per-path` | One VCF column per path/walk (haploid). |
 | *(default)* | Emit one record per **top-level snarl** via the global biconnected decomposition, matching `vg deconstruct`'s default granularity (cyclic-reference snarls dropped). Equivalent to the former `--vg-compat`. See §11. |
 | `--vg-compat` (alias `--vg-compact`) | Explicit selection of the default mode (no-op; kept for backward compatibility). |
 | `--snarl` | **Legacy.** Find sites by graph topology but report the leaf-bubble *superset* (superbubbles + inversions from the stored L-line links), rather than top-level snarls. See §11. |
 | `--linear` | **Legacy.** Use the flat reference-anchor heuristic (§4–§6) instead of graph topology. |
 | `-t, --threads <N>` | Thread count (mirrors `pav`). |
-| `--max-site-length <bp>` | Sites whose reference span exceeds this are emitted as a single `CPX`-flagged record instead of enumerating every allele (megasite guard, §4.2/§6). `0` disables the guard. |
-| `--no-gt` | Emit site + `INFO` (AC/AN/AF) only, skip `GT` columns. |
+| `-m, --max-site-length <bp>` | Sites whose reference span exceeds this are emitted as a single `CPX`-flagged record instead of enumerating every allele (megasite guard, §4.2/§6). `0` disables the guard. |
+| `-G, --no-gt` | Emit site + `INFO` (AC/AN/AF) only, skip `GT` columns. |
 | `-h, --help` | Usage. |
 
 Output is a VCFv4.2 stream on stdout.

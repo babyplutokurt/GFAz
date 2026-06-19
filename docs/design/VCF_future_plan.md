@@ -1,5 +1,11 @@
-  ⭐ 1. gfaz deconstruct — GFA → VCF (the flagship)
-  
+> **Status (2026-06):** Item 1 below — `gfaz deconstruct` — is **shipped**. Its
+> default reproduces `vg deconstruct` at ~99.99% position concordance while running
+> 17–24× faster; see [DECONSTRUCT_WORKFLOW.md](../workflows/DECONSTRUCT_WORKFLOW.md). This file
+> now tracks the *remaining* VCF roadmap (items 2–5). The deconstruct entry is kept
+> for historical context.
+
+  ✅ 1. gfaz deconstruct — GFA → VCF (the flagship) — **SHIPPED**
+
   Pick a reference path (e.g. GRCh38's chr1 walk). Walk the graph's "bubbles" (places where haplotypes diverge then reconverge), and for each one emit a VCF row: REF allele = reference's sub-traversal, ALT =
    the alternative sub-traversals, and per-sample genotypes = which allele each haplotype took.
 
@@ -7,6 +13,7 @@
    + per-sample allele assignment is exactly the path-iterative shape pav already has.
   - Impact: instantly makes every .gfaz consumable by the entire variant-analysis ecosystem. This is the highest-leverage feature.
   - Effort: medium-high — the genuinely new piece is snarl/bubble enumeration relative to a reference path.
+  - Outcome: delivered with default top-level-snarl (vg-compat) mode; legacy `--snarl`/`--linear` modes deprecated.
 
   2. gfaz genotype / allele-frequency export
 

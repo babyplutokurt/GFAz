@@ -336,7 +336,7 @@ NOTES:
     The default mode aims to produce output identical to `vg deconstruct`.
     The --snarl (superset) and --linear (anchor-heuristic) modes are legacy and
     will be removed; they emit a deprecation warning on stderr. See
-    DECONSTRUCT_WORKFLOW.md for details.
+    docs/workflows/DECONSTRUCT_WORKFLOW.md for details.
 
 )";
 }

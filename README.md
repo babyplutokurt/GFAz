@@ -137,11 +137,13 @@ build/bin/gfaz extract-walk example.gfa.gfaz sample 0 seq1 0 1000
 build/bin/gfaz add-haplotypes example.gfa.gfaz new_paths.gfa
 ```
 
-Temporary downstream workflows:
+Compute-engine workflows (run directly on `.gfaz`, no GFA materialization):
 
 ```bash
-# Compute growth curves directly from compressed paths/walks
-build/bin/gfaz growth -i example.gfa.gfaz -j 8
+# Compute growth curves directly from compressed paths/walks.
+# -G/--group-by selects the grouping: path (default), sample-hap-seq, sample-hap,
+# or sample (the last three mirror Panacus's default, -H, and -S).
+build/bin/gfaz growth -i example.gfa.gfaz -j 8 -G sample-hap-seq
 
 # Compute PAV ratios over BED ranges directly from compressed paths/walks
 build/bin/gfaz pav -i example.gfa.gfaz -b ranges.bed -S -M -t 8
@@ -152,10 +154,12 @@ build/bin/gfaz deconstruct -i example.gfa.gfaz -r chr1 -S -t 16 > example.vcf
 ```
 
 `growth` computes expected node accumulation curves from path/walk group
-coverage. `pav` computes presence/absence ratios for BED intervals by building
-node-to-group membership from compressed traversals. `deconstruct` emits a VCF
+coverage (Panacus-equivalent). `pav` computes presence/absence ratios for BED
+intervals by building node-to-group membership from compressed traversals
+(odgi-compatible node semantics; supports `-S`/`-H` grouping, `-M` matrix output,
+and `-B` thresholded binary output). `deconstruct` emits a VCF
 of variant sites relative to a chosen reference path, with per-sample phased
-genotypes (see [DECONSTRUCT_WORKFLOW.md](DECONSTRUCT_WORKFLOW.md)). All three
+genotypes (see [DECONSTRUCT_WORKFLOW.md](docs/workflows/DECONSTRUCT_WORKFLOW.md)). All three
 operate on `.gfaz` without materializing the original GFA.
 
 `deconstruct` has three site-finding modes. **The default emits one record per
@@ -256,26 +260,38 @@ The serialized `.gfaz` format remains shared across CPU and GPU backends.
 
 ## Validation
 
-Typical checks:
+The whole suite (CLI regressions + golden-file concordance + the binding-based
+round-trip matrix) runs from a single entry point, reported as PASS / SKIP / FAIL:
 
 ```bash
 conda activate gfa
-python tests/cpu/test_roundtrip.py example.gfa
-python tests/cpu/test_streaming_roundtrip.py example.gfa
-python tests/gpu/test_roundtrip.py example.gfa
-python tests/regression/test_compression_regression.py example.gfa
-build/bin/gfaz compress example.gfa
+python3 tests/run_all.py            # PASS / SKIP / FAIL summary
+ctest --test-dir build              # same, via the `gfaz_tests` CTest entry
+```
+
+A suite that cannot run (e.g. the compiled bindings are not importable, or an
+external-tool golden is missing) exits with SKIP rather than FAIL. The GPU paths
+are skipped unless a CUDA build is present. See [tests/README.md](tests/README.md)
+for the full layout. To run just the binding-based round-trip checks:
+
+```bash
+python3 tests/regression/test_compression_regression.py example.gfa
 ```
 
 ## Documentation
 
-- [BUILD_GUIDE.md](BUILD_GUIDE.md): build instructions and CMake options
-- [workflow.md](workflow.md): internal workflow and serialization reference
-- [GROWTH_WORKFLOW.md](GROWTH_WORKFLOW.md): growth workflow and comparison with
-  Panacus
-- [PAV_WORKFLOW.md](PAV_WORKFLOW.md): PAV workflow and comparison with odgi
-- [DECONSTRUCT_WORKFLOW.md](DECONSTRUCT_WORKFLOW.md): GFA→VCF deconstruct
-  workflow, algorithm, and limitations
+Full docs live under [`docs/`](docs/README.md) (see that index for the complete
+list). Highlights:
+
+- [docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md): build instructions and CMake options
+- [docs/WORKFLOW.md](docs/WORKFLOW.md): internal workflow and serialization reference
+- [docs/workflows/GROWTH_WORKFLOW.md](docs/workflows/GROWTH_WORKFLOW.md): growth
+  workflow and comparison with Panacus
+- [docs/workflows/PAV_WORKFLOW.md](docs/workflows/PAV_WORKFLOW.md): PAV workflow
+  and comparison with odgi
+- [docs/workflows/DECONSTRUCT_WORKFLOW.md](docs/workflows/DECONSTRUCT_WORKFLOW.md):
+  GFA→VCF deconstruct workflow, algorithm, and limitations
+- [docs/design/](docs/design/): forward-looking design & roadmap notes
 
 ## Limitations
 

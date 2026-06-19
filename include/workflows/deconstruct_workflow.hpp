@@ -45,7 +45,7 @@ struct DeconstructOptions {
 
 // Derive a VCF (header + records) from the compressed traversals and write it
 // to `out`. Operates directly on the .gfaz container without materializing the
-// original GFA. See DECONSTRUCT_WORKFLOW.md for the algorithm.
+// original GFA. See docs/workflows/DECONSTRUCT_WORKFLOW.md for the algorithm.
 void deconstruct_to_vcf(const CompressedData &data,
                         const DeconstructOptions &options, std::ostream &out);
 

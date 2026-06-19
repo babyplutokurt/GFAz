@@ -70,7 +70,5 @@ module is ABI-tied to the Python it was built against, so the runner discovers a
 binding-capable interpreter (from `build/CMakeCache.txt`, falling back to the
 current one) and runs the suite with it; if none is found, the suite is skipped.
 GPU is skipped because it is experimental and often not built. The `tests/cpu`
-and `tests/gpu` path-specific scripts are still run directly when desired.
-
-Legacy root-level test scripts remain as wrappers so older commands still
-run, but new commands should use the files under `tests/`.
+and `tests/gpu` path-specific scripts are run directly when desired (they take a
+GFA argument, e.g. `python3 tests/cpu/test_cpu_streaming_roundtrip.py example.gfa`).

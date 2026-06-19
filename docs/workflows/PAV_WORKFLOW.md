@@ -124,13 +124,22 @@ PanSN parsing strips trailing `:start-end` coordinate suffixes so subpath
 names produced by `odgi build` (e.g. `HG00438#1#chr5:0-149820500`) collapse
 correctly into their parent sample/haplotype.
 
+### Output formats
+
+| Flag                       | Effect |
+|----------------------------|--------|
+| (none)                     | Long form: one `chrom start end name group pav` row per (range, group). |
+| `-M` / `--matrix-output`   | Matrix form: ranges as rows, groups as columns. |
+| `-B` / `--binary-values T` | Emit `1` if the PAV ratio `>= T`, else `0` (combine with `-M` for a presence/absence matrix). |
+
 ## File map
 
 ```
 src/cli/pav_command.cpp            # arg parsing + output formatting
 src/workflows/pav_workflow.cpp     # compute_pav implementation
 include/workflows/pav_workflow.hpp # PavOptions / PavResult / compute_pav
-tests/regression/test_cli_commands.py  # pav fixture regressions
+tests/regression/test_cli_commands.py   # pav fixture regressions (long + matrix + grouped + -B)
+tests/concordance/test_pav_vs_odgi.py   # golden-file concordance vs odgi pav
 tests/fixtures/pav_*.bed           # test BEDs
 scripts/benchmark/pav_compare_gfaz_odgi.py  # path-only A/B benchmark driver
 ```

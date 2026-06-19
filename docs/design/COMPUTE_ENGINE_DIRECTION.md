@@ -188,7 +188,14 @@ large GFA -> .gfaz -> path-derived matrices/statistics
 
 ## Proposed Roadmap
 
-### Phase 1: Shared Traversal Streaming Layer
+> **Status (2026-06):** Phases 1 and 2 are **shipped**. The shared traversal
+> streaming layer underpins `growth`, `pav`, and `deconstruct`; `gfaz pav` is in
+> the CLI (long/matrix/binary output, record/sample/sample#hap grouping) and
+> `gfaz growth` ships the Panacus-equivalent curve. See
+> [PAV_WORKFLOW.md](../workflows/PAV_WORKFLOW.md), [GROWTH_WORKFLOW.md](../workflows/GROWTH_WORKFLOW.md), and
+> [DECONSTRUCT_WORKFLOW.md](../workflows/DECONSTRUCT_WORKFLOW.md). Phases 3–4 remain future work.
+
+### Phase 1: Shared Traversal Streaming Layer — ✅ shipped
 
 Refactor the reusable parts of `growth_workflow.cpp` into a traversal streaming
 utility:
@@ -212,7 +219,7 @@ Optional later fields:
 step_index, path_offset_start, path_offset_end, orientation
 ```
 
-### Phase 2: `gfaz matrix` / `gfaz pav`
+### Phase 2: `gfaz matrix` / `gfaz pav` — ✅ shipped
 
 Initial scope:
 
@@ -231,7 +238,7 @@ Implementation sketch:
 4. Stream query traversals and update `(window_id, group_id)` accumulators.
 5. Normalize by reference window length and emit.
 
-### Phase 3: Novelty And Panel Metrics
+### Phase 3: Novelty And Panel Metrics — planned
 
 Add:
 
@@ -243,7 +250,7 @@ Add:
 
 This phase uses the same streaming layer with node bitsets/count arrays.
 
-### Phase 4: Supporting Analytics
+### Phase 4: Supporting Analytics — planned
 
 Add lower-risk companion commands:
 

@@ -53,7 +53,9 @@ engine for GFA downstream tasks, not just a file compressor.
 
 | # | Target | Status | Notes |
 |---|---|---|---|
-| 1 | Pangenome growth + core/variable (Panacus-equivalent) | in progress | `gfaz growth` subcommand landed (single-thread, count=node, coverage>=1, quorum>=0). Core/variable + bp + multithread + grammar push-down are follow-ups. |
+| 1 | Pangenome growth (Panacus-equivalent) | ✅ shipped | `gfaz growth` — multithreaded (OpenMP), node-counted, all grouping modes (path / sample-hap-seq / sample-hap / sample). See [GROWTH_WORKFLOW.md](../workflows/GROWTH_WORKFLOW.md). Core/variable + bp + grammar push-down remain follow-ups. |
+| 1b | PAV over BED ranges (odgi-equivalent) | ✅ shipped | `gfaz pav` — long/matrix/binary output, record/sample/sample#hap grouping. See [PAV_WORKFLOW.md](../workflows/PAV_WORKFLOW.md). |
+| 1c | Deconstruct GFA → VCF (vg-equivalent) | ✅ shipped | `gfaz deconstruct` — default matches `vg deconstruct` at ~99.99% concordance, 17–24× faster. See [DECONSTRUCT_WORKFLOW.md](../workflows/DECONSTRUCT_WORKFLOW.md). |
 | 2 | All-vs-all haplotype distance matrix (Jaccard / shared-node) | planned | N² work, O(1) memory — nothing on the market does this streamingly at scale. |
 | 3 | Haplotype k-mer scoring for PanGenie / Giraffe subsampling | planned | Highest downstream impact; validate that panel loading (not k-mer index build) is the real bottleneck first. |
 | 4 | Per-haplotype FASTA / GFA extraction CLI + Python API | planned | Trivial to build; becomes the "samtools view" of pangenomes; unlocks interactive users. |
