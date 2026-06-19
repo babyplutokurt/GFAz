@@ -8,7 +8,7 @@
 
 #include "core/model/compressed_data.hpp"
 #include "core/model/gfa_graph.hpp"
-#include "compute/growth_workflow.hpp" // GroupingMode
+#include "compute/grouping_mode.hpp"
 
 #include <cmath>
 #include <cstdint>

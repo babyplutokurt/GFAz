@@ -3,7 +3,7 @@
 
 #include "core/defaults.hpp"
 #include "core/model/compressed_data.hpp"
-#include "compute/growth_workflow.hpp"
+#include "compute/grouping_mode.hpp"
 
 #include <cstdint>
 #include <string>
