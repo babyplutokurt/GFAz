@@ -123,32 +123,10 @@ uint32_t infer_num_nodes(const CompressedData &data) {
   return static_cast<uint32_t>(seg_lens.size());
 }
 
-struct HapSlice {
-  const int32_t *encoded;
-  uint32_t enc_len;
-  uint32_t orig_len;
-};
-
-// PanSN path-name parsing and group-key construction are shared with pav and
-// deconstruct via tquery::{path_group_key, walk_group_key} so all compute
-// modules group haplotypes identically (see compute/traversal_query.hpp).
-
-void build_slices(const std::vector<int32_t> &flat,
-                  const std::vector<uint32_t> &lengths,
-                  const std::vector<uint32_t> &original_lengths,
-                  std::vector<HapSlice> &out) {
-  size_t offset = 0;
-  for (size_t i = 0; i < lengths.size(); ++i) {
-    const uint32_t enc_len = lengths[i];
-    const uint32_t orig_len =
-        (i < original_lengths.size()) ? original_lengths[i] : enc_len;
-    if (offset + enc_len > flat.size()) {
-      throw std::runtime_error("growth: encoded haplotype block is truncated");
-    }
-    out.push_back(HapSlice{flat.data() + offset, enc_len, orig_len});
-    offset += enc_len;
-  }
-}
+// Haplotype slicing (tquery::HapSlice + tquery::build_slices) and PanSN
+// grouping (tquery::path_group_key / walk_group_key) are shared with pav and
+// deconstruct so all compute modules read traversals and group haplotypes
+// identically (see compute/traversal_query.hpp).
 
 } // namespace
 
@@ -184,12 +162,12 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads,
 
   // Unified slice vector: [paths ... walks]. Index order is preserved so the
   // slice-to-group mapping below can address walks with offset num_paths.
-  std::vector<HapSlice> slices;
+  std::vector<tquery::HapSlice> slices;
   slices.reserve(total_slices);
-  build_slices(paths_flat, data.sequence_lengths, data.original_path_lengths,
-               slices);
-  build_slices(walks_flat, data.walk_lengths, data.original_walk_lengths,
-               slices);
+  tquery::build_slices(paths_flat, data.sequence_lengths,
+                       data.original_path_lengths, slices);
+  tquery::build_slices(walks_flat, data.walk_lengths, data.original_walk_lengths,
+                       slices);
 
   // Build groups[] -- each group is a list of slice indices sharing the same
   // haplotype identity per the selected GroupingMode. Each group is processed
@@ -323,7 +301,7 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads,
       }
     };
 
-    auto process_slice = [&](const HapSlice &s) {
+    auto process_slice = [&](const tquery::HapSlice &s) {
       if (delta_round == 0) {
         auto visit = [&](int32_t leaf) { cov_update(leaf); };
         stream_hap_leaves(s.encoded, s.enc_len, min_rule_id, max_rule_id,
@@ -356,7 +334,7 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads,
   }
   paths_flat = std::vector<int32_t>{};
   walks_flat = std::vector<int32_t>{};
-  slices = std::vector<HapSlice>{};
+  slices = std::vector<tquery::HapSlice>{};
 
   // Build coverage histogram from the shared cov[] array.
   result.hist.assign(static_cast<size_t>(N) + 1, 0);
