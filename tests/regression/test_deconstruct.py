@@ -40,6 +40,7 @@ REVCOMP_FIXTURE = FIXTURE_DIR / "deconstruct_revcomp_fixture.gfa"
 INVERSION_FIXTURE = FIXTURE_DIR / "deconstruct_inversion_fixture.gfa"
 PANSN_REF_FIXTURE = FIXTURE_DIR / "deconstruct_pansn_ref_fixture.gfa"
 REVERSE_PATH_FIXTURE = FIXTURE_DIR / "deconstruct_reverse_path_fixture.gfa"
+LINKS_FIXTURE = FIXTURE_DIR / "deconstruct_links_fixture.gfa"
 
 
 def temp_gfaz(prefix: str) -> Path:
@@ -197,6 +198,37 @@ def test_snarl_inversion(cli: Path, gfaz: Path):
     assert_lines(data_lines(result.stdout), expected, f"deconstruct {flag} inversion")
 
 
+def test_group_by_haplotype(cli: Path, gfaz: Path):
+  # Default (snarl) mode on a links-bearing graph; -H -> one column per
+  # (sample, hap), each haploid.
+  result = run_command(
+      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "ref", "-H"]
+  )
+  require_success(result, "deconstruct -H")
+  expected = [
+      "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG001#0\tHG001#1\tHG002#0\tHG002#1",
+      "ref\t5\t.\tC\tT\t.\t.\tAC=1;AN=4;AF=0.25;NS=4\tGT\t1\t0\t0\t0",
+      "ref\t11\t.\tTA\tT\t.\t.\tAC=1;AN=4;AF=0.25;NS=4\tGT\t0\t0\t1\t0",
+      "ref\t18\t.\tG\tGGGG\t.\t.\tAC=1;AN=4;AF=0.25;NS=4\tGT\t0\t0\t0\t1",
+  ]
+  assert_lines(data_lines(result.stdout), expected, "deconstruct -H")
+
+
+def test_per_path(cli: Path, gfaz: Path):
+  # -p -> one haploid column per path/walk.
+  result = run_command(
+      [str(cli), "deconstruct", "-i", str(gfaz), "-r", "ref", "-p"]
+  )
+  require_success(result, "deconstruct -p")
+  expected = [
+      "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG001#0#chr1\tHG001#1#chr1\tHG002#0#chr1\tHG002#1#chr1",
+      "ref\t5\t.\tC\tT\t.\t.\tAC=1;AN=4;AF=0.25;NS=4\tGT\t1\t0\t0\t0",
+      "ref\t11\t.\tTA\tT\t.\t.\tAC=1;AN=4;AF=0.25;NS=4\tGT\t0\t0\t1\t0",
+      "ref\t18\t.\tG\tGGGG\t.\t.\tAC=1;AN=4;AF=0.25;NS=4\tGT\t0\t0\t0\t1",
+  ]
+  assert_lines(data_lines(result.stdout), expected, "deconstruct -p")
+
+
 def test_missing_reference_errors(cli: Path, gfaz: Path):
   result = run_command(
       [str(cli), "deconstruct", "-i", str(gfaz), "-r", "nope", "-S"]
@@ -216,6 +248,7 @@ def main():
   inv_gfaz = compress(cli, INVERSION_FIXTURE)
   pansn_gfaz = compress(cli, PANSN_REF_FIXTURE)
   reverse_path_gfaz = compress(cli, REVERSE_PATH_FIXTURE)
+  links_gfaz = compress(cli, LINKS_FIXTURE)
   try:
     test_main_records(cli, main_gfaz)
     test_no_gt(cli, main_gfaz)
@@ -227,9 +260,12 @@ def main():
     test_cpx_header_without_gt(cli, inv_gfaz)
     test_pansn_reference_contig_name(cli, pansn_gfaz)
     test_reverse_path_block(cli, reverse_path_gfaz)
+    test_group_by_haplotype(cli, links_gfaz)
+    test_per_path(cli, links_gfaz)
     print("✅ PASS deconstruct_regressions")
   finally:
-    for p in (main_gfaz, rc_gfaz, inv_gfaz, pansn_gfaz, reverse_path_gfaz):
+    for p in (main_gfaz, rc_gfaz, inv_gfaz, pansn_gfaz, reverse_path_gfaz,
+              links_gfaz):
       if p.exists():
         p.unlink()
 
