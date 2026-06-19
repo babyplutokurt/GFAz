@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "cli/common.hpp"
-#include "codec/serialization.hpp"
-#include "workflows/extraction_workflow.hpp"
+#include "core/codec/serialization.hpp"
+#include "compress/extraction_workflow.hpp"
 
 namespace gfaz::cli {
 

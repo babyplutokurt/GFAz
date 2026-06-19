@@ -8,11 +8,11 @@
 #include <iostream>
 #include <sstream>
 
-#include "utils/debug_log.hpp"
+#include "core/utils/debug_log.hpp"
 
 #ifdef ENABLE_CUDA
-#include "gpu/compression/compression_workflow_gpu.hpp"
-#include "gpu/decompression/decompression_workflow_gpu.hpp"
+#include "compress/gpu/compression/compression_workflow_gpu.hpp"
+#include "compress/gpu/decompression/decompression_workflow_gpu.hpp"
 #endif
 
 namespace gfaz::cli {

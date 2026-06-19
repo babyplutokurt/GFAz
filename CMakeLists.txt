@@ -124,61 +124,71 @@ else()
   message(WARNING "OpenMP not found - k-mer collection will be single-threaded")
 endif()
 
-# Shared source lists
-set(GFA_CORE_SOURCES
-  src/io/gfa_parser.cpp
-  src/grammar/rule_generator.cpp
-  src/grammar/path_encoder.cpp
-  src/grammar/rule_processor.cpp
-  src/workflows/add_haplotypes_workflow.cpp
-  src/workflows/extraction_workflow.cpp
-  src/workflows/compression_workflow.cpp
-  src/workflows/compression_debug.cpp
-  src/workflows/decompression_workflow.cpp
-  src/workflows/decompression_debug.cpp
-  src/workflows/growth_workflow.cpp
-  src/workflows/pav_workflow.cpp
-  src/workflows/traversal_query.cpp
-  src/workflows/deconstruct_workflow.cpp
-  src/workflows/snarl_finder.cpp
-  src/utils/runtime_utils.cpp
-  src/codec/codec.cpp
-  src/codec/serialization.cpp
-  src/io/gfa_writer.cpp
-  src/io/gfa_write_utils.cpp
-  src/workflows/compression_utils.cpp
+# Module source lists. GFAz is two modules on a shared foundation:
+#   core     - shared model/codec/utils (no compress- or compute-specific code)
+#   compress - the .gfa <-> .gfaz compressor (+ optional GPU backend)
+#   compute  - the compute engine that runs directly on .gfaz
+# compress and compute each depend only on core; they never depend on each other.
+set(GFAZ_CORE_SOURCES
+  src/core/codec/codec.cpp
+  src/core/codec/serialization.cpp
+  src/core/utils/runtime_utils.cpp
 )
 
-set(GFA_CUDA_SOURCES
+set(GFAZ_COMPRESS_SOURCES
+  src/compress/io/gfa_parser.cpp
+  src/compress/io/gfa_writer.cpp
+  src/compress/io/gfa_write_utils.cpp
+  src/compress/grammar/rule_generator.cpp
+  src/compress/grammar/path_encoder.cpp
+  src/compress/compression_workflow.cpp
+  src/compress/compression_utils.cpp
+  src/compress/compression_debug.cpp
+  src/compress/decompression_workflow.cpp
+  src/compress/decompression_debug.cpp
+  src/compress/extraction_workflow.cpp
+  src/compress/add_haplotypes_workflow.cpp
+)
+
+set(GFAZ_COMPUTE_SOURCES
+  src/compute/growth_workflow.cpp
+  src/compute/pav_workflow.cpp
+  src/compute/deconstruct_workflow.cpp
+  src/compute/snarl_finder.cpp
+  src/compute/traversal_query.cpp
+)
+
+# GPU backend (part of the compress module; built only when ENABLE_CUDA).
+set(GFAZ_COMPRESS_CUDA_SOURCES
   # GPU backend core + host-side helpers
-  src/gpu/core/gfa_graph_gpu.cpp
-  src/gpu/core/path_chunk_planner.cpp
-  src/gpu/io/gfa_writer_gpu_direct.cpp
+  src/compress/gpu/core/gfa_graph_gpu.cpp
+  src/compress/gpu/core/path_chunk_planner.cpp
+  src/compress/gpu/io/gfa_writer_gpu_direct.cpp
 
   # GPU backend core
-  src/gpu/core/codec_gpu.cu
-  src/gpu/core/serialization_gpu.cpp
+  src/compress/gpu/core/codec_gpu.cu
+  src/compress/gpu/core/serialization_gpu.cpp
 
   # GPU compression pipeline
-  src/gpu/compression/compression_workflow_gpu.cu
-  src/gpu/compression/traversal_compression_gpu.cu
-  src/gpu/compression/path_compression_gpu_legacy.cu
-  src/gpu/compression/path_compression_gpu_rolling.cu
-  src/gpu/compression/path_rulebook_gpu.cu
-  src/gpu/compression/path_rule_remap_gpu.cu
-  src/gpu/compression/metadata_codec_gpu.cu
+  src/compress/gpu/compression/compression_workflow_gpu.cu
+  src/compress/gpu/compression/traversal_compression_gpu.cu
+  src/compress/gpu/compression/path_compression_gpu_legacy.cu
+  src/compress/gpu/compression/path_compression_gpu_rolling.cu
+  src/compress/gpu/compression/path_rulebook_gpu.cu
+  src/compress/gpu/compression/path_rule_remap_gpu.cu
+  src/compress/gpu/compression/metadata_codec_gpu.cu
 
   # GPU decompression pipeline
-  src/gpu/decompression/decompression_workflow_gpu.cu
-  src/gpu/decompression/decompression_primitives_gpu.cu
-  src/gpu/decompression/traversal_decode_gpu.cu
-  src/gpu/decompression/path_decompression_gpu_plan.cu
-  src/gpu/decompression/path_decompression_gpu_legacy.cu
-  src/gpu/decompression/path_decompression_gpu_rolling.cu
-  src/gpu/decompression/path_expand_gpu.cu
+  src/compress/gpu/decompression/decompression_workflow_gpu.cu
+  src/compress/gpu/decompression/decompression_primitives_gpu.cu
+  src/compress/gpu/decompression/traversal_decode_gpu.cu
+  src/compress/gpu/decompression/path_decompression_gpu_plan.cu
+  src/compress/gpu/decompression/path_decompression_gpu_legacy.cu
+  src/compress/gpu/decompression/path_decompression_gpu_rolling.cu
+  src/compress/gpu/decompression/path_expand_gpu.cu
 
   # GPU direct writer
-  src/gpu/io/gfa_writer_gpu.cu
+  src/compress/gpu/io/gfa_writer_gpu.cu
 )
 
 function(configure_gfa_target target_name)
@@ -219,22 +229,34 @@ function(configure_gfa_target target_name)
   endif()
 endfunction()
 
-# Core Static Library
-add_library(gfa_compression_core STATIC ${GFA_CORE_SOURCES})
-set_target_properties(gfa_compression_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-if(ENABLE_CUDA)
-  target_sources(gfa_compression_core PRIVATE ${GFA_CUDA_SOURCES})
-endif()
-configure_gfa_target(gfa_compression_core)
+# Static libraries — one per module. compress and compute both depend on core;
+# the boundary is enforced at link time (compute does not link compress, so any
+# accidental use of compressor symbols from compute fails to link).
+add_library(gfaz_core STATIC ${GFAZ_CORE_SOURCES})
+set_target_properties(gfaz_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+configure_gfa_target(gfaz_core)
+# Public so every consumer of any module gets the include root.
+target_include_directories(gfaz_core PUBLIC include)
 
-# Target include directories so consumers can use it
-target_include_directories(gfa_compression_core PUBLIC include)
+add_library(gfaz_compress STATIC ${GFAZ_COMPRESS_SOURCES})
+set_target_properties(gfaz_compress PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(ENABLE_CUDA)
+  target_sources(gfaz_compress PRIVATE ${GFAZ_COMPRESS_CUDA_SOURCES})
+endif()
+configure_gfa_target(gfaz_compress)
+target_link_libraries(gfaz_compress PUBLIC gfaz_core)
+
+add_library(gfaz_compute STATIC ${GFAZ_COMPUTE_SOURCES})
+set_target_properties(gfaz_compute PROPERTIES POSITION_INDEPENDENT_CODE ON)
+configure_gfa_target(gfaz_compute)
+target_link_libraries(gfaz_compute PUBLIC gfaz_core)
 
 if(BUILD_PYTHON_BINDINGS)
-  # Python extension module
+  # Python extension module (import name `gfa_compression`).
   add_library(gfa_compression MODULE src/python/bindings.cpp)
   set_target_properties(gfa_compression PROPERTIES PREFIX "")
-  target_link_libraries(gfa_compression PRIVATE pybind11::module gfa_compression_core)
+  target_link_libraries(gfa_compression PRIVATE pybind11::module
+    gfaz_compress gfaz_compute gfaz_core)
   configure_gfa_target(gfa_compression)
 endif()
 
@@ -255,7 +277,7 @@ if(BUILD_CLI)
   set_target_properties(gfaz PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/bin"
   )
-  target_link_libraries(gfaz PRIVATE gfa_compression_core)
+  target_link_libraries(gfaz PRIVATE gfaz_compress gfaz_compute gfaz_core)
   configure_gfa_target(gfaz)
 
   # Profiling support for CLI only

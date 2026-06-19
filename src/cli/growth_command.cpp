@@ -6,8 +6,8 @@
 #include <string>
 
 #include "cli/common.hpp"
-#include "codec/serialization.hpp"
-#include "workflows/growth_workflow.hpp"
+#include "core/codec/serialization.hpp"
+#include "compute/growth_workflow.hpp"
 
 namespace gfaz::cli {
 

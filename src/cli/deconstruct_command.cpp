@@ -5,8 +5,8 @@
 #include <string>
 
 #include "cli/common.hpp"
-#include "codec/serialization.hpp"
-#include "workflows/deconstruct_workflow.hpp"
+#include "core/codec/serialization.hpp"
+#include "compute/deconstruct_workflow.hpp"
 
 namespace gfaz::cli {
 

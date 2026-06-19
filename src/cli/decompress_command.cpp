@@ -7,15 +7,21 @@
 #include <string>
 
 #include "cli/common.hpp"
-#include "codec/serialization.hpp"
-#include "io/gfa_writer.hpp"
-#include "utils/debug_log.hpp"
-#include "utils/runtime_utils.hpp"
-#include "workflows/decompression_workflow.hpp"
+#include "core/codec/serialization.hpp"
+#include "compress/io/gfa_writer.hpp"
+#include "core/utils/debug_log.hpp"
+#include "core/utils/runtime_utils.hpp"
+#include "core/utils/threading_utils.hpp"
+#include "compress/decompression_workflow.hpp"
 
 #ifdef ENABLE_CUDA
-#include "gpu/decompression/decompression_workflow_gpu.hpp"
-#include "gpu/io/gfa_writer_gpu.hpp"
+#include "compress/gpu/decompression/decompression_workflow_gpu.hpp"
+#include "compress/gpu/io/gfa_writer_gpu.hpp"
+
+static_assert(gfaz::cli::kDefaultGpuRollingOutputChunkMb * 1024ull * 1024ull ==
+                  gpu_decompression::kDefaultRollingOutputChunkBytes,
+              "CLI default GPU rolling-output chunk size is out of sync with "
+              "gpu_decompression::kDefaultRollingOutputChunkBytes");
 #endif
 
 namespace gfaz::cli {
@@ -28,8 +34,7 @@ int do_decompress(int argc, char *argv[]) {
   bool show_stats = false;
   bool debug = false;
   unsigned long long gpu_max_expanded_chunk_mb =
-      gpu_decompression::kDefaultRollingOutputChunkBytes /
-      (1024ull * 1024ull);
+      kDefaultGpuRollingOutputChunkMb;
 
   static struct option long_options[] = {{"threads", required_argument, 0, 'j'},
                                          {"legacy", no_argument, 0, 'l'},
@@ -94,9 +99,7 @@ int do_decompress(int argc, char *argv[]) {
   std::string output_path;
 
   if (!use_gpu &&
-      (gpu_max_expanded_chunk_mb !=
-           gpu_decompression::kDefaultRollingOutputChunkBytes /
-               (1024ull * 1024ull) ||
+      (gpu_max_expanded_chunk_mb != kDefaultGpuRollingOutputChunkMb ||
        use_gpu_legacy)) {
     std::cerr << "Error: --gpu-rolling-output-chunk-mb and --gpu-legacy "
                  "require --gpu\n";
@@ -133,9 +136,7 @@ int do_decompress(int argc, char *argv[]) {
               << std::endl;
   }
   if (use_gpu && use_gpu_legacy &&
-      (gpu_max_expanded_chunk_mb !=
-           gpu_decompression::kDefaultRollingOutputChunkBytes /
-               (1024ull * 1024ull))) {
+      (gpu_max_expanded_chunk_mb != kDefaultGpuRollingOutputChunkMb)) {
     std::cerr << "Note: --gpu-rolling-output-chunk-mb is ignored with "
                  "--gpu-legacy."
               << std::endl;

@@ -1,25 +1,25 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "workflows/add_haplotypes_workflow.hpp"
-#include "codec/codec.hpp"
-#include "workflows/compression_workflow.hpp"
-#include "utils/debug_log.hpp"
-#include "workflows/decompression_workflow.hpp"
-#include "workflows/extraction_workflow.hpp"
-#include "io/gfa_parser.hpp"
-#include "io/gfa_writer.hpp"
-#include "gpu/core/gfa_graph_gpu.hpp"
-#include "codec/serialization.hpp"
+#include "compress/add_haplotypes_workflow.hpp"
+#include "core/codec/codec.hpp"
+#include "compress/compression_workflow.hpp"
+#include "core/utils/debug_log.hpp"
+#include "compress/decompression_workflow.hpp"
+#include "compress/extraction_workflow.hpp"
+#include "compress/io/gfa_parser.hpp"
+#include "compress/io/gfa_writer.hpp"
+#include "compress/gpu/core/gfa_graph_gpu.hpp"
+#include "core/codec/serialization.hpp"
 #include <iostream>
 #include <stack>
 
 #ifdef ENABLE_CUDA
-#include "gpu/core/codec_gpu.cuh"
-#include "gpu/compression/compression_workflow_gpu.hpp"
-#include "gpu/decompression/decompression_workflow_gpu.hpp"
-#include "gpu/core/serialization_gpu.hpp"
-#include "gpu/io/gfa_writer_gpu.hpp"
+#include "compress/gpu/core/codec_gpu.cuh"
+#include "compress/gpu/compression/compression_workflow_gpu.hpp"
+#include "compress/gpu/decompression/decompression_workflow_gpu.hpp"
+#include "compress/gpu/core/serialization_gpu.hpp"
+#include "compress/gpu/io/gfa_writer_gpu.hpp"
 
 #endif
 

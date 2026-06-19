@@ -7,13 +7,13 @@
 #include <string>
 
 #include "cli/common.hpp"
-#include "codec/serialization.hpp"
-#include "utils/debug_log.hpp"
-#include "utils/runtime_utils.hpp"
-#include "workflows/compression_workflow.hpp"
+#include "core/codec/serialization.hpp"
+#include "core/utils/debug_log.hpp"
+#include "core/utils/runtime_utils.hpp"
+#include "compress/compression_workflow.hpp"
 
 #ifdef ENABLE_CUDA
-#include "gpu/compression/compression_workflow_gpu.hpp"
+#include "compress/gpu/compression/compression_workflow_gpu.hpp"
 #endif
 
 namespace gfaz::cli {

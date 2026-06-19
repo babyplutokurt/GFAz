@@ -5,8 +5,8 @@
 #include <string>
 
 #include "cli/common.hpp"
-#include "codec/serialization.hpp"
-#include "workflows/add_haplotypes_workflow.hpp"
+#include "core/codec/serialization.hpp"
+#include "compress/add_haplotypes_workflow.hpp"
 
 namespace gfaz::cli {
 

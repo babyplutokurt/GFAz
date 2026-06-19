@@ -6,8 +6,8 @@
 #include <string>
 
 #include "cli/common.hpp"
-#include "codec/serialization.hpp"
-#include "workflows/pav_workflow.hpp"
+#include "core/codec/serialization.hpp"
+#include "compute/pav_workflow.hpp"
 
 namespace gfaz::cli {
 

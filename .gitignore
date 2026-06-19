@@ -41,6 +41,11 @@ env/
 example.gfaz
 output.gfaz
 chrY*
+# Root-level scratch (compressed containers / BED / TSV) — tests/fixtures/*.bed
+# stay tracked because these are anchored to the repo root only.
+/*.gfaz
+/*.bed
+/*.tsv
 data/
 test_data/
 reference_repo/
