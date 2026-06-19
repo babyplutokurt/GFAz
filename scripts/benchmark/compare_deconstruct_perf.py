@@ -25,6 +25,11 @@ Examples:
 
   # Auto-detect the reference (first P/W line) and keep the output VCFs:
   python scripts/benchmark/compare_deconstruct_perf.py --gfa graph.gfa --keep-output
+
+  # Time AND check position concordance vs vg at 32 threads (fail under 99.9%):
+  python scripts/benchmark/compare_deconstruct_perf.py --preset chr1 \
+      --gfa /home/kurty/data/chr1.pan...smooth.gfa --threads 32 \
+      --concordance --min-coverage 0.999
 """
 
 from __future__ import annotations
@@ -164,6 +169,35 @@ def count_vcf_records(path: Path) -> int:
     return n
 
 
+def vcf_pos_keys(path: Path) -> set[tuple[str, str]]:
+    """Set of (CHROM, POS) keys for a VCF file.
+
+    This is the position-level concordance metric documented for gfaz vs vg:
+    REF/ALT spelling and GT legitimately differ at complex sites on whole
+    chromosomes, but the called positions should match closely.
+    """
+    keys: set[tuple[str, str]] = set()
+    with path.open("rt", errors="replace") as handle:
+        for line in handle:
+            if not line or line.startswith("#"):
+                continue
+            cols = line.split("\t", 2)
+            if len(cols) >= 2:
+                keys.add((cols[0], cols[1]))
+    return keys
+
+
+@dataclass
+class Concordance:
+    gfaz_tool: str
+    vg_records: int
+    gfaz_records: int
+    shared: int
+    pos_overlap: float   # |shared| / max(|vg|, |gfaz|)
+    count_delta: float   # |vg - gfaz| / |vg|
+    passed: bool
+
+
 def require_file(path: Path, label: str, executable: bool = False) -> None:
     if not path.exists():
         raise FileNotFoundError(f"{label} not found: {path}")
@@ -299,6 +333,53 @@ def print_report(results: list[BenchResult], ref: str, gfa: Path, gfaz: Path, ou
             print(f"{t}\tspeedup\t{speedup:.3f}x\trss_reduction\t{rss_red:.3f}x")
 
 
+def compute_concordance(
+    results: list[BenchResult], min_coverage: float
+) -> list[Concordance]:
+    """Position-level (CHROM, POS) overlap of each gfaz mode's VCF vs vg's."""
+    by_tool = {r.tool: r for r in results}
+    vg = by_tool.get("vg")
+    if vg is None or vg.stdout_path == os.devnull or not Path(vg.stdout_path).exists():
+        return []
+    vg_keys = vcf_pos_keys(Path(vg.stdout_path))
+    out: list[Concordance] = []
+    for r in results:
+        if not r.tool.startswith("gfaz-decon"):
+            continue
+        if r.stdout_path == os.devnull or not Path(r.stdout_path).exists():
+            continue
+        g_keys = vcf_pos_keys(Path(r.stdout_path))
+        shared = len(vg_keys & g_keys)
+        denom = max(len(vg_keys), len(g_keys)) or 1
+        overlap = shared / denom
+        count_delta = (abs(len(vg_keys) - len(g_keys)) / len(vg_keys)
+                       if vg_keys else float("nan"))
+        out.append(Concordance(
+            gfaz_tool=r.tool,
+            vg_records=len(vg_keys),
+            gfaz_records=len(g_keys),
+            shared=shared,
+            pos_overlap=overlap,
+            count_delta=count_delta,
+            passed=overlap >= min_coverage,
+        ))
+    return out
+
+
+def print_concordance(concordances: list[Concordance], min_coverage: float) -> None:
+    if not concordances:
+        print("\nconcordance: skipped (vg or gfaz VCF unavailable)")
+        return
+    print(f"\nconcordance vs vg (POS overlap, min={min_coverage:.4f})")
+    print("tool\tvg_recs\tgfaz_recs\tshared\tpos_overlap\tcount_delta\tresult")
+    for c in concordances:
+        print(
+            f"{c.gfaz_tool}\t{c.vg_records}\t{c.gfaz_records}\t{c.shared}"
+            f"\t{c.pos_overlap:.5f}\t{c.count_delta:.5f}"
+            f"\t{'PASS' if c.passed else 'FAIL'}"
+        )
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -322,9 +403,26 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--timeout", type=int, default=3600, help="Per-command timeout in seconds.")
     parser.add_argument("--out-dir", type=Path)
     parser.add_argument("--keep-output", action="store_true", help="Keep VCF stdout files (default: count then delete).")
+    parser.add_argument(
+        "--concordance",
+        action="store_true",
+        help="After timing, compare each gfaz mode's VCF against vg's at the "
+             "(CHROM, POS) position level and report coverage.",
+    )
+    parser.add_argument(
+        "--min-coverage",
+        type=float,
+        default=0.999,
+        help="With --concordance, fail (exit 3) if any gfaz mode's POS overlap "
+             "with vg is below this fraction (default: 0.999).",
+    )
     parser.add_argument("--skip-vg", action="store_true")
     parser.add_argument("--skip-gfaz", action="store_true")
     args = parser.parse_args(argv)
+
+    if args.concordance and (args.skip_vg or args.skip_gfaz):
+        parser.error("--concordance requires both vg and gfaz to run "
+                     "(drop --skip-vg / --skip-gfaz)")
 
     preset = PRESETS.get(args.preset, {}) if args.preset else {}
     gfa = args.gfa or preset.get("gfa")
@@ -355,6 +453,9 @@ def main(argv: list[str]) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     results: list[BenchResult] = []
+    # Concordance needs both VCFs on disk after timing; keep them, then clean up
+    # at the end unless the user also asked to keep output.
+    keep_vcf = args.keep_output or args.concordance
 
     # --- gfaz: ensure a .gfaz exists, timing compression if we build it. ---
     gfaz = Path(args.gfaz) if args.gfaz else (preset.get("gfaz") if preset else None)
@@ -388,7 +489,7 @@ def main(argv: list[str]) -> int:
                 out_dir=out_dir,
                 timeout=args.timeout,
                 is_vcf=True,
-                keep_output=args.keep_output,
+                keep_output=keep_vcf,
             )
         )
 
@@ -407,15 +508,39 @@ def main(argv: list[str]) -> int:
                     out_dir=out_dir,
                     timeout=args.timeout,
                     is_vcf=True,
-                    keep_output=args.keep_output,
+                    keep_output=keep_vcf,
                 )
             )
 
     if not results:
         raise RuntimeError("No tools selected")
+
+    # --- optional position-level concordance of each gfaz mode vs vg. ---
+    concordances: list[Concordance] = []
+    if args.concordance:
+        concordances = compute_concordance(results, args.min_coverage)
+        if not args.keep_output:
+            # We forced the VCFs to stay on disk for the comparison; remove them.
+            for r in results:
+                if r.stdout_path and r.stdout_path.endswith(".vcf"):
+                    p = Path(r.stdout_path)
+                    if p.exists():
+                        p.unlink()
+
     write_reports(results, out_dir)
     print_report(results, ref, gfa, gfaz if gfaz else Path("-"), out_dir)
-    return 0 if all((not r.timed_out and r.exit_code == 0) for r in results) else 2
+    if args.concordance:
+        print_concordance(concordances, args.min_coverage)
+        (out_dir / "concordance.json").write_text(
+            json.dumps([asdict(c) for c in concordances], indent=2) + "\n")
+
+    runs_ok = all((not r.timed_out and r.exit_code == 0) for r in results)
+    concordance_ok = all(c.passed for c in concordances)
+    if not runs_ok:
+        return 2
+    if not concordance_ok:
+        return 3
+    return 0
 
 
 if __name__ == "__main__":
