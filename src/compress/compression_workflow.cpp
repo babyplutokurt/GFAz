@@ -5,6 +5,7 @@
 #include "compress/grammar/rule_generator.hpp"
 #include "compress/io/gfa_parser.hpp"
 #include "core/utils/debug_log.hpp"
+#include "core/utils/runtime_utils.hpp"
 #include "core/utils/threading_utils.hpp"
 #include "compress/compression_debug.hpp"
 #include "compress/compression_utils.hpp"

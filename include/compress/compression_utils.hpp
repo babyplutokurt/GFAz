@@ -3,7 +3,6 @@
 #include "compress/grammar/packed_2mer.hpp"
 #include "core/model/compressed_data.hpp"
 #include "core/model/gfa_graph.hpp"
-#include "core/utils/runtime_utils.hpp"
 
 #include <string>
 #include <vector>

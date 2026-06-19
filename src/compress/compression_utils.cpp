@@ -1,6 +1,7 @@
 #include "compress/compression_utils.hpp"
 #include "core/codec/codec.hpp"
 #include "compress/grammar/packed_2mer.hpp"
+#include "core/utils/runtime_utils.hpp"
 
 #include <iomanip>
 #include <iostream>
