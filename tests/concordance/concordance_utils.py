@@ -209,6 +209,20 @@ def vcf_concordant(gfaz_text: str, vg_text: str, min_key_overlap=1.0,
   return True, "ok"
 
 
+def vcf_pos_keys(text: str):
+  """Set of (CHROM, POS) over a VCF's records. Used for position-level
+  concordance on large graphs, where REF/ALT spelling legitimately differs at
+  complex sites but positions should match closely."""
+  keys = set()
+  for line in text.splitlines():
+    if line.startswith("#") or not line.strip():
+      continue
+    f = line.split("\t")
+    if len(f) >= 2:
+      keys.add((f[0], f[1]))
+  return keys
+
+
 def normalize_vcf_for_golden(text: str) -> str:
   """Canonical, sorted, comparable VCF body for storage as a golden:
   one line per record `CHROM\tPOS\tREF\tALT\t<sample=gt;...>`."""

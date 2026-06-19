@@ -49,6 +49,9 @@
   grouping modes.
 - `test_deconstruct_vs_vg.py` — `gfaz deconstruct` (default snarl mode) vs
   `vg deconstruct` compared at (CHROM,POS,REF,ALT) -> per-sample GT.
+- `test_deconstruct_vs_vg_large.py` — opt-in chrY-scale concordance run against
+  `vg` live (position-level overlap >= 0.99, record-count delta <= 0.5%). Skips
+  unless `GFAZ_LARGE_CONCORDANCE=1` and the chrY inputs + vg are present.
 - Shared normalizers live in `tests/concordance/concordance_utils.py`.
 
 ## Running
