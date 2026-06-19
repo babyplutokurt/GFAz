@@ -28,6 +28,9 @@
   fixtures, both CPU decompress paths (default streaming and `--legacy`), and a
   `--delta`/`--rounds`/`--threshold` parameter sweep. It always runs (no
   bindings) and is the floor under the deeper binding-based suite below.
+- `test_thread_determinism.py` asserts pav/growth/deconstruct produce
+  byte-identical output at 1/4/8 threads (the OpenMP reductions must be
+  thread-count invariant).
 
 `tests/concordance/`
 - Golden-file concordance tests that lock gfaz's compute engine to the reference
