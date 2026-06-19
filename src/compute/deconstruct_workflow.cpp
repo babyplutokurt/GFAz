@@ -283,25 +283,23 @@ void append_gt_columns(std::ostringstream &line,
 void append_info_fields(std::ostringstream &line,
                         const std::vector<uint64_t> &ac, uint64_t an,
                         uint64_t ns, bool guard) {
-  std::ostringstream info;
-  info << "AC=";
+  line << "AC=";
   for (size_t a = 1; a < ac.size(); ++a) {
     if (a > 1)
-      info << ',';
-    info << (guard ? an - ac[0] : ac[a]);
+      line << ',';
+    line << (guard ? an - ac[0] : ac[a]);
     if (guard)
       break;
   }
-  info << ";AN=" << an << ";AF=";
+  line << ";AN=" << an << ";AF=";
   for (size_t a = 1; a < ac.size(); ++a) {
     if (a > 1)
-      info << ',';
-    info << format_af(guard ? an - ac[0] : ac[a], an);
+      line << ',';
+    line << format_af(guard ? an - ac[0] : ac[a], an);
     if (guard)
       break;
   }
-  info << ";NS=" << ns;
-  line << info.str();
+  line << ";NS=" << ns;
 }
 
 // Write the CHROM/POS/ID/REF/ALT/QUAL/FILTER head of one VCF record into `line`
