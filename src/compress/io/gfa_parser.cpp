@@ -139,6 +139,92 @@ inline uint32_t parse_overlap_num(std::string_view overlap_view, char &op) {
   return num;
 }
 
+// Parse a SAM/GFA 'B' optional field value ("<subtype>,<v1>,<v2>,...") into the
+// column's byte-array storage. Appends exactly one entry to b_subtypes/b_lengths
+// (and the packed bytes); callers handle any leading padding to the row index.
+// Shared by segment- and link-field parsing.
+void parse_b_array(std::string_view value_view, gfaz::OptionalFieldColumn &col) {
+  if (value_view.size() < 2 || value_view[1] != ',') {
+    col.b_subtypes.push_back('\0');
+    col.b_lengths.push_back(0);
+    return;
+  }
+
+  char subtype = value_view[0];
+  col.b_subtypes.push_back(subtype);
+
+  size_t elem_size = 0;
+  switch (subtype) {
+  case 'c':
+  case 'C':
+    elem_size = 1;
+    break;
+  case 's':
+  case 'S':
+    elem_size = 2;
+    break;
+  case 'i':
+  case 'I':
+  case 'f':
+    elem_size = 4;
+    break;
+  }
+
+  if (elem_size == 0) {
+    col.b_lengths.push_back(0);
+    return;
+  }
+
+  std::vector<uint8_t> bytes;
+  std::string values_str(value_view.substr(2));
+  std::istringstream vss(values_str);
+  std::string token;
+  uint32_t count = 0;
+
+  while (std::getline(vss, token, ',')) {
+    if (token.empty())
+      continue;
+    count++;
+
+    if (subtype == 'f') {
+      float fval = parse_float(token);
+      auto *ptr = reinterpret_cast<uint8_t *>(&fval);
+      for (size_t b = 0; b < 4; ++b)
+        bytes.push_back(ptr[b]);
+    } else if (subtype == 'c') {
+      auto ival = static_cast<int8_t>(parse_int64(token));
+      bytes.push_back(static_cast<uint8_t>(ival));
+    } else if (subtype == 'C') {
+      auto ival = static_cast<uint8_t>(parse_uint32(token));
+      bytes.push_back(ival);
+    } else if (subtype == 's') {
+      auto ival = static_cast<int16_t>(parse_int64(token));
+      auto *ptr = reinterpret_cast<uint8_t *>(&ival);
+      for (size_t b = 0; b < 2; ++b)
+        bytes.push_back(ptr[b]);
+    } else if (subtype == 'S') {
+      auto ival = static_cast<uint16_t>(parse_uint32(token));
+      auto *ptr = reinterpret_cast<uint8_t *>(&ival);
+      for (size_t b = 0; b < 2; ++b)
+        bytes.push_back(ptr[b]);
+    } else if (subtype == 'i') {
+      auto ival = static_cast<int32_t>(parse_int64(token));
+      auto *ptr = reinterpret_cast<uint8_t *>(&ival);
+      for (size_t b = 0; b < 4; ++b)
+        bytes.push_back(ptr[b]);
+    } else if (subtype == 'I') {
+      uint32_t ival = parse_uint32(token);
+      auto *ptr = reinterpret_cast<uint8_t *>(&ival);
+      for (size_t b = 0; b < 4; ++b)
+        bytes.push_back(ptr[b]);
+    }
+  }
+
+  col.b_lengths.push_back(count);
+  col.b_concat_bytes.insert(col.b_concat_bytes.end(), bytes.begin(),
+                            bytes.end());
+}
+
 } // namespace
 
 using gfaz::runtime_utils::format_memory_snapshot;
@@ -237,15 +323,6 @@ size_t containment_bytes(const gfaz::GfaGraph &graph) {
          string_vector_owned_bytes(graph.containments.rest_fields);
 }
 
-size_t node_name_map_bytes(const gfaz::GfaGraph &graph) {
-  // Approximation: bucket array + nodes already accounted for by string storage
-  // in node_id_to_name. The per-entry pair/node overhead is estimated here.
-  constexpr size_t kApproxMapNodeOverhead =
-      sizeof(void *) * 4 + sizeof(uint32_t);
-  return graph.node_name_to_id.bucket_count() * sizeof(void *) +
-         graph.node_name_to_id.size() * kApproxMapNodeOverhead;
-}
-
 void print_graph_memory_breakdown(const gfaz::GfaGraph &graph) {
   const size_t segment_data = segment_bytes(graph);
   const size_t path_data = path_bytes(graph);
@@ -257,15 +334,14 @@ void print_graph_memory_breakdown(const gfaz::GfaGraph &graph) {
       optional_field_columns_bytes(graph.segments.optional_fields);
   const size_t link_optional =
       optional_field_columns_bytes(graph.link_optional_fields);
-  const size_t node_name_map = node_name_map_bytes(graph);
+  // node_name_to_id is intentionally empty on the CPU parse path (see
+  // parse_s_line), so it is not tracked here.
   const size_t total = segment_data + path_data + walk_data + link_data +
                        jump_data + containment_data + segment_optional +
-                       link_optional + node_name_map;
+                       link_optional;
 
   std::cerr << "[GfaParser] approximate graph memory:" << std::endl;
   std::cerr << "  segments:                 " << format_size(segment_data)
-            << std::endl;
-  std::cerr << "  node_name_to_id map:      " << format_size(node_name_map)
             << std::endl;
   std::cerr << "  paths:                    " << format_size(path_data)
             << std::endl;
@@ -350,6 +426,13 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   }
   size_t file_size = sb.st_size;
 
+  // mmap() rejects a zero-length mapping; a 0-byte GFA is simply an empty graph
+  // (the index-0 placeholder segment is already in place).
+  if (file_size == 0) {
+    close(fd);
+    return graph;
+  }
+
   const char *mmap_data = static_cast<const char *>(
       mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0));
   if (mmap_data == MAP_FAILED) {
@@ -370,6 +453,10 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   for (size_t i = 0; i <= file_size; ++i) {
     if (i == file_size || mmap_data[i] == '\n') {
       size_t line_len = i - line_start;
+      // Drop a trailing CR so CRLF (Windows) line endings don't leak a '\r'
+      // into the last field of every line (e.g. a segment sequence).
+      if (line_len > 0 && mmap_data[line_start + line_len - 1] == '\r')
+        --line_len;
       if (line_len > 0) {
         char line_type = mmap_data[line_start];
         switch (line_type) {
@@ -615,10 +702,10 @@ void GfaParser::parse_s_line(std::string_view line, gfaz::GfaGraph &graph) {
     }
 
     std::string node_name(node_name_view);
-    // Compression does not use graph.node_name_to_id after parse, and name
-    // resolution during parsing already goes through node_name_lookup_.
-    // Leave graph.node_name_to_id empty for now so we can measure the effect of
-    // skipping this duplicate map population.
+    // Invariant: the CPU compressor never reads graph.node_name_to_id (name
+    // resolution during parsing goes through the parser-local node_name_lookup_),
+    // so it is intentionally left empty here. The decompress and GPU paths
+    // rebuild it when they need name->id lookups.
     graph.segments.node_id_to_name.push_back(node_name);
     graph.segments.node_sequences.emplace_back(sequence_view);
     node_name_lookup_.emplace(graph.segments.node_id_to_name.back(), new_id);
@@ -779,9 +866,12 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
   graph.walks.walks[index] = std::move(walk);
   graph.walks.sample_ids[index] = std::string(sample_id_view);
   graph.walks.hap_indices[index] = 0;
-  for (char c : hap_index_view)
+  for (char c : hap_index_view) {
+    if (c < '0' || c > '9')
+      break;
     graph.walks.hap_indices[index] =
-        graph.walks.hap_indices[index] * 10 + (c - '0');
+        graph.walks.hap_indices[index] * 10 + static_cast<uint32_t>(c - '0');
+  }
   graph.walks.seq_ids[index] = std::string(seq_id_view);
   graph.walks.seq_starts[index] =
       (seq_start_view == "*") ? -1 : parse_int64(seq_start_view);
@@ -868,86 +958,7 @@ void GfaParser::parse_segment_field(std::string_view field,
       col.b_subtypes.push_back('\0');
       col.b_lengths.push_back(0);
     }
-
-    if (value_view.size() < 2 || value_view[1] != ',') {
-      col.b_subtypes.push_back('\0');
-      col.b_lengths.push_back(0);
-      break;
-    }
-
-    char subtype = value_view[0];
-    col.b_subtypes.push_back(subtype);
-
-    size_t elem_size = 0;
-    switch (subtype) {
-    case 'c':
-    case 'C':
-      elem_size = 1;
-      break;
-    case 's':
-    case 'S':
-      elem_size = 2;
-      break;
-    case 'i':
-    case 'I':
-    case 'f':
-      elem_size = 4;
-      break;
-    }
-
-    if (elem_size == 0) {
-      col.b_lengths.push_back(0);
-      break;
-    }
-
-    std::vector<uint8_t> bytes;
-    std::string values_str(value_view.substr(2));
-    std::istringstream vss(values_str);
-    std::string token;
-    uint32_t count = 0;
-
-    while (std::getline(vss, token, ',')) {
-      if (token.empty())
-        continue;
-      count++;
-
-      if (subtype == 'f') {
-        float fval = parse_float(token);
-        auto *ptr = reinterpret_cast<uint8_t *>(&fval);
-        for (size_t b = 0; b < 4; ++b)
-          bytes.push_back(ptr[b]);
-      } else if (subtype == 'c') {
-        auto ival = static_cast<int8_t>(parse_int64(token));
-        bytes.push_back(static_cast<uint8_t>(ival));
-      } else if (subtype == 'C') {
-        auto ival = static_cast<uint8_t>(parse_uint32(token));
-        bytes.push_back(ival);
-      } else if (subtype == 's') {
-        auto ival = static_cast<int16_t>(parse_int64(token));
-        auto *ptr = reinterpret_cast<uint8_t *>(&ival);
-        for (size_t b = 0; b < 2; ++b)
-          bytes.push_back(ptr[b]);
-      } else if (subtype == 'S') {
-        auto ival = static_cast<uint16_t>(parse_uint32(token));
-        auto *ptr = reinterpret_cast<uint8_t *>(&ival);
-        for (size_t b = 0; b < 2; ++b)
-          bytes.push_back(ptr[b]);
-      } else if (subtype == 'i') {
-        auto ival = static_cast<int32_t>(parse_int64(token));
-        auto *ptr = reinterpret_cast<uint8_t *>(&ival);
-        for (size_t b = 0; b < 4; ++b)
-          bytes.push_back(ptr[b]);
-      } else if (subtype == 'I') {
-        uint32_t ival = parse_uint32(token);
-        auto *ptr = reinterpret_cast<uint8_t *>(&ival);
-        for (size_t b = 0; b < 4; ++b)
-          bytes.push_back(ptr[b]);
-      }
-    }
-
-    col.b_lengths.push_back(count);
-    col.b_concat_bytes.insert(col.b_concat_bytes.end(), bytes.begin(),
-                              bytes.end());
+    parse_b_array(value_view, col);
     break;
   }
 
@@ -1041,86 +1052,7 @@ void GfaParser::parse_link_field(std::string_view field, size_t link_index,
       col.b_subtypes.push_back('\0');
       col.b_lengths.push_back(0);
     }
-
-    if (value_view.size() < 2 || value_view[1] != ',') {
-      col.b_subtypes.push_back('\0');
-      col.b_lengths.push_back(0);
-      break;
-    }
-
-    char subtype = value_view[0];
-    col.b_subtypes.push_back(subtype);
-
-    size_t elem_size = 0;
-    switch (subtype) {
-    case 'c':
-    case 'C':
-      elem_size = 1;
-      break;
-    case 's':
-    case 'S':
-      elem_size = 2;
-      break;
-    case 'i':
-    case 'I':
-    case 'f':
-      elem_size = 4;
-      break;
-    }
-
-    if (elem_size == 0) {
-      col.b_lengths.push_back(0);
-      break;
-    }
-
-    std::vector<uint8_t> bytes;
-    std::string values_str(value_view.substr(2));
-    std::istringstream vss(values_str);
-    std::string token;
-    uint32_t count = 0;
-
-    while (std::getline(vss, token, ',')) {
-      if (token.empty())
-        continue;
-      count++;
-
-      if (subtype == 'f') {
-        float fval = parse_float(token);
-        auto *ptr = reinterpret_cast<uint8_t *>(&fval);
-        for (size_t b = 0; b < 4; ++b)
-          bytes.push_back(ptr[b]);
-      } else if (subtype == 'c') {
-        auto ival = static_cast<int8_t>(parse_int64(token));
-        bytes.push_back(static_cast<uint8_t>(ival));
-      } else if (subtype == 'C') {
-        auto ival = static_cast<uint8_t>(parse_uint32(token));
-        bytes.push_back(ival);
-      } else if (subtype == 's') {
-        auto ival = static_cast<int16_t>(parse_int64(token));
-        auto *ptr = reinterpret_cast<uint8_t *>(&ival);
-        for (size_t b = 0; b < 2; ++b)
-          bytes.push_back(ptr[b]);
-      } else if (subtype == 'S') {
-        auto ival = static_cast<uint16_t>(parse_uint32(token));
-        auto *ptr = reinterpret_cast<uint8_t *>(&ival);
-        for (size_t b = 0; b < 2; ++b)
-          bytes.push_back(ptr[b]);
-      } else if (subtype == 'i') {
-        auto ival = static_cast<int32_t>(parse_int64(token));
-        auto *ptr = reinterpret_cast<uint8_t *>(&ival);
-        for (size_t b = 0; b < 4; ++b)
-          bytes.push_back(ptr[b]);
-      } else if (subtype == 'I') {
-        uint32_t ival = parse_uint32(token);
-        auto *ptr = reinterpret_cast<uint8_t *>(&ival);
-        for (size_t b = 0; b < 4; ++b)
-          bytes.push_back(ptr[b]);
-      }
-    }
-
-    col.b_lengths.push_back(count);
-    col.b_concat_bytes.insert(col.b_concat_bytes.end(), bytes.begin(),
-                              bytes.end());
+    parse_b_array(value_view, col);
     break;
   }
 

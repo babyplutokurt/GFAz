@@ -331,9 +331,11 @@ size_t read_varint(const uint8_t *data, size_t max_len, uint32_t &out_value) {
   out_value = 0;
   size_t i = 0;
   int shift = 0;
-  while (i < max_len) {
+  // shift < 32 caps a 32-bit varint at 5 bytes and prevents shift-overflow UB
+  // on corrupt input (a continuation byte that never terminates).
+  while (i < max_len && shift < 32) {
     uint8_t byte = data[i++];
-    out_value |= (byte & 0x7F) << shift;
+    out_value |= static_cast<uint32_t>(byte & 0x7F) << shift;
     if (!(byte & 0x80))
       break;
     shift += 7;
@@ -397,6 +399,12 @@ decompress_delta_varint_uint32(const ZstdCompressedBlock &block,
     deltas.push_back(val);
   }
 
+  // A corrupt/truncated payload can decode to zero deltas while num_elements>0;
+  // bail out before indexing result[0]/deltas[0].
+  if (deltas.empty()) {
+    return {};
+  }
+
   // Inverse delta (accumulate signed deltas back to unsigned values)
   std::vector<uint32_t> result(deltas.size());
   result[0] = static_cast<uint32_t>(deltas[0]);
@@ -435,6 +443,16 @@ std::vector<char> decompress_orientations(const ZstdCompressedBlock &block,
   }
 
   std::string packed_str = zstd_decompress_string(block);
+
+  // Guard against a truncated/corrupt block: reading bit i needs byte i/8.
+  const size_t required_bytes = (num_elements + 7) / 8;
+  if (packed_str.size() < required_bytes) {
+    std::cerr << "Warning: orientation block is truncated (have "
+              << packed_str.size() << " bytes, need " << required_bytes
+              << "); returning empty orientations." << std::endl;
+    return orients;
+  }
+
   const uint8_t *packed = reinterpret_cast<const uint8_t *>(packed_str.data());
 
   orients.reserve(num_elements);
@@ -474,7 +492,9 @@ size_t read_varint_64(const uint8_t *data, size_t max_len,
   out_value = 0;
   size_t i = 0;
   int shift = 0;
-  while (i < max_len) {
+  // shift < 64 caps a 64-bit varint at 10 bytes and prevents shift-overflow UB
+  // on corrupt input.
+  while (i < max_len && shift < 64) {
     uint8_t byte = data[i++];
     out_value |= static_cast<uint64_t>(byte & 0x7F) << shift;
     if (!(byte & 0x80))
