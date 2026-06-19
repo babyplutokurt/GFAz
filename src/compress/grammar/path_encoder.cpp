@@ -1,8 +1,6 @@
 #include "compress/grammar/path_encoder.hpp"
 #include "compress/grammar/packed_2mer.hpp"
-#include <algorithm>
-#include <cmath>
-#include <iostream>
+#include <utility>
 
 #ifdef _OPENMP
 #include <omp.h>
