@@ -24,6 +24,10 @@
   expected curve for every grouping mode.
 - `test_compression_optional_fields.py` is a pure-CLI round-trip exercising
   J-lines, C-lines, and S-line optional fields of every type (i/f/A/Z/B).
+- `test_cpu_roundtrip.py` is a pure-CLI compress->decompress matrix over several
+  fixtures, both CPU decompress paths (default streaming and `--legacy`), and a
+  `--delta`/`--rounds`/`--threshold` parameter sweep. It always runs (no
+  bindings) and is the floor under the deeper binding-based suite below.
 
 `tests/concordance/`
 - Golden-file concordance tests that lock gfaz's compute engine to the reference
@@ -47,10 +51,16 @@ The hermetic CPU-only suite (CLI regressions + concordance, no bindings needed):
     python3 tests/run_all.py            # PASS / SKIP / FAIL summary
     ctest --test-dir build              # same, via the `gfaz_tests` CTest entry
 
-A suite that cannot run (e.g. a missing golden) exits 77 and is reported as SKIP
-rather than FAIL. The binding-dependent round-trip suites (`test_compression_
-regression.py`, `tests/cpu`, `tests/gpu`) are run directly when the bindings are
-built; they are intentionally excluded from `run_all.py`.
+A suite that cannot run (e.g. a missing golden, or the bindings module not being
+importable) exits 77 and is reported as SKIP rather than FAIL.
+
+`run_all.py` also runs the binding-based structural round-trip suite
+(`test_compression_regression.py --skip-gpu`). The compiled `gfa_compression`
+module is ABI-tied to the Python it was built against, so the runner discovers a
+binding-capable interpreter (from `build/CMakeCache.txt`, falling back to the
+current one) and runs the suite with it; if none is found, the suite is skipped.
+GPU is skipped because it is experimental and often not built. The `tests/cpu`
+and `tests/gpu` path-specific scripts are still run directly when desired.
 
 Legacy root-level test scripts remain as wrappers so older commands still
 run, but new commands should use the files under `tests/`.

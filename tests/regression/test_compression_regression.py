@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tests.regression.regression_utils import (
     CLI_PATH,
+    SkipTest,
     add_repo_and_build_to_syspath,
     ensure_cli_exists,
     graph_summary,
@@ -31,10 +32,19 @@ from tests.regression.regression_utils import (
     is_gpu_runtime_unavailable,
     require_success,
     run_command,
+    run_main,
 )
 
 add_repo_and_build_to_syspath()
-import gfa_compression as gfa_lib
+# The compiled bindings are ABI-specific to the Python they were built against.
+# If they are absent or built for a different interpreter, skip rather than
+# crash (run with the matching interpreter to actually exercise this suite).
+try:
+  import gfa_compression as gfa_lib
+  _BINDINGS_IMPORT_ERROR = None
+except ImportError as exc:  # pragma: no cover - environment dependent
+  gfa_lib = None
+  _BINDINGS_IMPORT_ERROR = exc
 
 
 DEFAULT_GPU_ROLLING_CHUNK_BYTES = 4096
@@ -496,6 +506,10 @@ def test_gpu_container_to_cpu(args, original_graph):
 
 
 def main():
+  if gfa_lib is None:
+    raise SkipTest(
+        f"gfa_compression bindings not importable: {_BINDINGS_IMPORT_ERROR}. "
+        "Run with the interpreter the bindings were built against.")
   args = parse_args()
   cli_path = Path(args.gfaz)
   ensure_cli_exists(cli_path)
@@ -526,8 +540,7 @@ def main():
 
   print_header("Regression Summary")
   print(f"✅ PASS all requested regressions in {total:.3f}s")
-  return 0
 
 
 if __name__ == "__main__":
-  sys.exit(main())
+  run_main(main)
