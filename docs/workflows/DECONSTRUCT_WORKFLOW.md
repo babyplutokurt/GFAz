@@ -3,8 +3,8 @@
 > **Status:** Implemented. `gfaz deconstruct` derives a VCF directly from
 > compressed paths/walks in a `.gfaz` container, without materializing the
 > original GFA — the same path-iterative, low-memory approach used by `growth`
-> and `pav`. Workflow: `src/workflows/deconstruct_workflow.cpp` (shared decode
-> machinery in `src/workflows/traversal_query.cpp`); CLI:
+> and `pav`. Workflow: `src/compute/deconstruct_workflow.cpp` (shared decode
+> machinery in `src/compute/traversal_query.cpp`); CLI:
 > `src/cli/deconstruct_command.cpp`; tests:
 > `tests/regression/test_deconstruct.py`.
 >
@@ -261,15 +261,15 @@ reconciliation, and minimal-allele normalization (defer to `bcftools norm`).
 ## 7. Code plan
 
 ### New files
-- `include/workflows/deconstruct_workflow.hpp`
+- `include/compute/deconstruct_workflow.hpp`
   - `struct DeconstructOptions { std::vector<std::string> reference_names;
     GroupingMode grouping = Sample; int num_threads; bool emit_gt = true; };`
   - `void deconstruct_to_vcf(const CompressedData&, const DeconstructOptions&,
     std::ostream&);` (streaming emit; large outputs should not be buffered).
-- `src/workflows/deconstruct_workflow.cpp` — the four passes above.
+- `src/compute/deconstruct_workflow.cpp` — the four passes above.
 - `src/cli/deconstruct_command.cpp` — `do_deconstruct`, arg parsing (mirrors
   `pav_command.cpp`), VCF header emission.
-- `include/utils/sequence_utils.hpp` (+ `.cpp`) — `reverse_complement(...)`.
+- `include/core/utils/sequence_utils.hpp` (header-only) — `reverse_complement(...)`.
 
 ### Shared read-layer
 
@@ -331,7 +331,7 @@ structure. The topology modes instead derive sites from the **graph structure**
 recovered from the stored L-line links, matching how `vg deconstruct` defines
 sites. Both reuse the same streaming allele-observation machinery, so the
 low-memory, path-iterative envelope is unchanged — only *which* intervals become
-sites differs. Code: `src/workflows/snarl_finder.cpp` +
+sites differs. Code: `src/compute/snarl_finder.cpp` +
 `deconstruct_workflow.cpp::deconstruct_contig_snarl`.
 
 ### 11.1 `--snarl` (leaf-bubble superset)
