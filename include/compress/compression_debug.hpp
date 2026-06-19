@@ -63,13 +63,6 @@ void print_traversal_reduction(const TraversalReductionDebugInfo &info);
 
 void log_cpu_memory_checkpoint(const std::string &label);
 
-CompressionRatio sum_optional_field_ratio(
-    const std::vector<gfaz::CompressedOptionalFieldColumn> &cols);
-
-CompressionRatio block_ratio(const gfaz::ZstdCompressedBlock &block);
-
-CompressionRatio sum_ratios(std::initializer_list<CompressionRatio> ratios);
-
 CompressionRatio collect_rules_ratio(const gfaz::CompressedData &data);
 CompressionRatio collect_path_ratio(const gfaz::CompressedData &data);
 CompressionRatio collect_walk_ratio(const gfaz::CompressedData &data);

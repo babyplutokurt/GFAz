@@ -102,6 +102,10 @@ void log_cpu_memory_checkpoint(const std::string &label) {
             << " | " << format_memory_snapshot(snapshot) << std::endl;
 }
 
+// Internal helpers for the collect_*_ratio aggregators below. Kept out of the
+// public header since only this file uses them.
+namespace {
+
 CompressionRatio sum_optional_field_ratio(
     const std::vector<gfaz::CompressedOptionalFieldColumn> &cols) {
   CompressionRatio total;
@@ -130,6 +134,8 @@ CompressionRatio sum_ratios(std::initializer_list<CompressionRatio> ratios) {
   }
   return total;
 }
+
+} // namespace
 
 CompressionRatio collect_rules_ratio(const gfaz::CompressedData &data) {
   return sum_ratios({block_ratio(data.rules_first_zstd),
