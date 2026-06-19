@@ -181,6 +181,32 @@ std::string format_af(uint64_t ac, uint64_t an) {
   return std::string(buf);
 }
 
+// Append the per-column GT genotype fields ("\tGT\t<gt>...") for one VCF record.
+// Shared by the linear and snarl contig writers so genotypes are emitted
+// identically. Phased '|' join; '.' for missing/conflict; under a megasite
+// guard alleles collapse to 0/1.
+void append_gt_columns(std::ostringstream &line,
+                       const std::vector<std::vector<int>> &column_slot_allele,
+                       bool guard, const DeconstructOptions &options) {
+  if (!options.emit_gt)
+    return;
+  line << "\tGT";
+  for (const std::vector<int> &slot_alleles : column_slot_allele) {
+    line << '\t';
+    for (size_t h = 0; h < slot_alleles.size(); ++h) {
+      if (h)
+        line << '|';
+      const int a = slot_alleles[h];
+      if (a < 0) // missing or conflict
+        line << '.';
+      else if (guard)
+        line << (a == 0 ? 0 : 1);
+      else
+        line << a;
+    }
+  }
+}
+
 // Deconstruct one reference contig. Appends VCF records to `records`, returns
 // the contig length (sum of reference segment lengths).
 uint64_t deconstruct_contig(
@@ -488,24 +514,7 @@ uint64_t deconstruct_contig(
       line << info.str();
     }
 
-    if (options.emit_gt) {
-      line << "\tGT";
-      for (size_t c = 0; c < num_columns; ++c) {
-        line << '\t';
-        const auto &slot_alleles = column_slot_allele[c];
-        for (size_t h = 0; h < slot_alleles.size(); ++h) {
-          if (h)
-            line << '|';
-          const int a = slot_alleles[h];
-          if (a < 0) // missing or conflict
-            line << '.';
-          else if (guard)
-            line << (a == 0 ? 0 : 1);
-          else
-            line << a;
-        }
-      }
-    }
+    append_gt_columns(line, column_slot_allele, guard, options);
 
     records.push_back(VcfRecord{pos, line.str()});
   }
@@ -812,24 +821,7 @@ uint64_t deconstruct_contig_snarl(
       info << ";NS=" << ns;
       line << info.str();
     }
-    if (options.emit_gt) {
-      line << "\tGT";
-      for (size_t c = 0; c < num_columns; ++c) {
-        line << '\t';
-        const auto &slot_alleles = column_slot_allele[c];
-        for (size_t h = 0; h < slot_alleles.size(); ++h) {
-          if (h)
-            line << '|';
-          const int a = slot_alleles[h];
-          if (a < 0)
-            line << '.';
-          else if (guard)
-            line << (a == 0 ? 0 : 1);
-          else
-            line << a;
-        }
-      }
-    }
+    append_gt_columns(line, column_slot_allele, guard, options);
     records.push_back(VcfRecord{pos, line.str()});
 
     for (uint32_t t : touched)
