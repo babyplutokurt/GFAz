@@ -1,6 +1,6 @@
 #include "core/codec/codec.hpp"
 #include <algorithm>
-#include <cmath>
+#include <cstdlib>
 #include <iostream>
 
 #ifdef _OPENMP
@@ -96,8 +96,6 @@ void delta_decode_int32(std::vector<int32_t> &data) {
 
 // --- ZSTD Compression ---
 #include "zstd.h"
-#include <cstdlib>
-
 
 namespace {
 // Get ZSTD compression level from environment variable, default to 9
