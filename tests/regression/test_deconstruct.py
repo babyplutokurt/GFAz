@@ -41,6 +41,7 @@ INVERSION_FIXTURE = FIXTURE_DIR / "deconstruct_inversion_fixture.gfa"
 PANSN_REF_FIXTURE = FIXTURE_DIR / "deconstruct_pansn_ref_fixture.gfa"
 REVERSE_PATH_FIXTURE = FIXTURE_DIR / "deconstruct_reverse_path_fixture.gfa"
 LINKS_FIXTURE = FIXTURE_DIR / "deconstruct_links_fixture.gfa"
+SUBRANGE_FIXTURE = FIXTURE_DIR / "deconstruct_subrange_fixture.gfa"
 
 
 def temp_gfaz(prefix: str) -> Path:
@@ -229,6 +230,35 @@ def test_per_path(cli: Path, gfaz: Path):
   assert_lines(data_lines(result.stdout), expected, "deconstruct -p")
 
 
+def test_subrange_reference(cli: Path, gfaz: Path):
+  """A W-line reference covering a non-zero subrange of its contig.
+
+  REF#0#chr1 is the walk over chr1[1000,1009) (nodes 1,2,3 = AAAA C GGGG);
+  HG001 carries the SNP C->T at node2. The variant sits at walk-offset 5, so its
+  reference-frame POS must be 1000 + 5 = 1005, and the contig length must be the
+  subrange end (1009). Also checks that the PanSN base name resolves without the
+  ":start-end" suffix (matching vg's -P), in both snarl (default) and --linear
+  modes.
+  """
+  expected = [
+      "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG001",
+      "chr1\t1005\t.\tC\tT\t.\t.\tAC=1;AN=1;AF=1;NS=1\tGT\t1",
+  ]
+  for ref in ("REF#0#chr1:1000-1009", "REF#0#chr1"):
+    for mode in ([], ["--linear"]):
+      result = run_command(
+          [str(cli), "deconstruct", "-i", str(gfaz), "-r", ref, "-S", *mode]
+      )
+      require_success(result, f"deconstruct subrange ref={ref} {mode}")
+      if "##contig=<ID=chr1,length=1009>" not in result.stdout:
+        raise AssertionError(
+            f"deconstruct subrange ({ref} {mode}): contig length must be the "
+            f"subrange end 1009.\n" + result.stdout
+        )
+      assert_lines(data_lines(result.stdout), expected,
+                   f"deconstruct subrange ref={ref} {mode}")
+
+
 def test_missing_reference_errors(cli: Path, gfaz: Path):
   result = run_command(
       [str(cli), "deconstruct", "-i", str(gfaz), "-r", "nope", "-S"]
@@ -249,6 +279,7 @@ def main():
   pansn_gfaz = compress(cli, PANSN_REF_FIXTURE)
   reverse_path_gfaz = compress(cli, REVERSE_PATH_FIXTURE)
   links_gfaz = compress(cli, LINKS_FIXTURE)
+  subrange_gfaz = compress(cli, SUBRANGE_FIXTURE)
   try:
     test_main_records(cli, main_gfaz)
     test_no_gt(cli, main_gfaz)
@@ -262,10 +293,11 @@ def main():
     test_reverse_path_block(cli, reverse_path_gfaz)
     test_group_by_haplotype(cli, links_gfaz)
     test_per_path(cli, links_gfaz)
+    test_subrange_reference(cli, subrange_gfaz)
     print("✅ PASS deconstruct_regressions")
   finally:
     for p in (main_gfaz, rc_gfaz, inv_gfaz, pansn_gfaz, reverse_path_gfaz,
-              links_gfaz):
+              links_gfaz, subrange_gfaz):
       if p.exists():
         p.unlink()
 

@@ -29,6 +29,40 @@ namespace {
 
 using namespace gfaz::tquery;
 
+// Strip a trailing ":<start>-<end>" decimal subrange from a reference name,
+// returning the PanSN base (sample#hap#seq). Mirrors how walk reference names
+// are formed -- walk_reference_name appends ":start-end" -- so a user-friendly
+// "CHM13#0#chrY" resolves the stored "CHM13#0#chrY:0-57227415". Returns the
+// input unchanged when there is no such suffix.
+std::string strip_trailing_subrange(const std::string &s) {
+  const size_t colon = s.rfind(':');
+  if (colon == std::string::npos || colon == 0)
+    return s;
+  const size_t dash = s.find('-', colon + 1);
+  if (dash == std::string::npos || colon + 1 == dash || dash + 1 == s.size())
+    return s;
+  for (size_t i = colon + 1; i < dash; ++i)
+    if (!std::isdigit(static_cast<unsigned char>(s[i])))
+      return s;
+  for (size_t i = dash + 1; i < s.size(); ++i)
+    if (!std::isdigit(static_cast<unsigned char>(s[i])))
+      return s;
+  return s.substr(0, colon);
+}
+
+// Parse the <start> of a trailing ":<start>-<end>" subrange (0 if absent). Used
+// to place VCF POS in the reference contig's coordinate frame when the reference
+// path is a subrange of its contig (e.g. a path name "...:2771644-26682252").
+uint64_t trailing_subrange_start(const std::string &s) {
+  const std::string base = strip_trailing_subrange(s);
+  if (base.size() == s.size())
+    return 0; // no subrange suffix
+  uint64_t v = 0;
+  for (size_t i = base.size() + 1; i < s.size() && s[i] != '-'; ++i)
+    v = v * 10 + static_cast<uint64_t>(s[i] - '0');
+  return v;
+}
+
 // ---------------------------------------------------------------------------
 // Segment sequence access (forward storage; reverse handled per node id sign).
 // ---------------------------------------------------------------------------
@@ -98,9 +132,10 @@ SegmentSeqs load_segments(const CompressedData &data) {
 
 // Per-slice identity used to form VCF sample columns.
 struct SliceIdentity {
-  std::vector<std::string> names;   // reference-lookup name per slice
-  std::vector<std::string> samples; // grouping key per slice
-  std::vector<uint32_t> haps;       // haplotype index per slice
+  std::vector<std::string> names;     // reference-lookup name per slice
+  std::vector<std::string> samples;   // grouping key per slice
+  std::vector<uint32_t> haps;         // haplotype index per slice
+  std::vector<uint64_t> ref_starts;   // 0-based subrange start in the contig
   size_t num_paths = 0;
 };
 
@@ -113,6 +148,7 @@ SliceIdentity build_slice_identity(const CompressedData &data,
   id.names.reserve(num_paths + num_walks);
   id.samples.reserve(num_paths + num_walks);
   id.haps.reserve(num_paths + num_walks);
+  id.ref_starts.reserve(num_paths + num_walks);
 
   if (num_paths) {
     std::vector<std::string> path_names =
@@ -130,6 +166,8 @@ SliceIdentity build_slice_identity(const CompressedData &data,
       id.names.push_back(name);
       id.samples.push_back(path_group_key(name, grouping));
       id.haps.push_back(hap);
+      // P-lines carry no structured subrange; honor one encoded in the name.
+      id.ref_starts.push_back(trailing_subrange_start(name));
     }
   }
 
@@ -142,6 +180,9 @@ SliceIdentity build_slice_identity(const CompressedData &data,
       id.samples.push_back(
           walk_group_key(w.samples[i], w.haps[i], w.seqs[i], grouping));
       id.haps.push_back(w.haps[i]);
+      // W-line seqStart is authoritative; a sentinel (-1) means "from 0".
+      id.ref_starts.push_back(w.starts[i] > 0 ? static_cast<uint64_t>(w.starts[i])
+                                              : 0);
     }
   }
 
@@ -242,7 +283,8 @@ uint64_t write_record_head(std::ostringstream &line,
                            const std::string &contig_name, bool guard,
                            bool substitution, uint64_t interior_start, char prev,
                            const std::string &ref_allele,
-                           const std::vector<std::string> &alleles) {
+                           const std::vector<std::string> &alleles,
+                           uint64_t ref_start) {
   uint64_t pos;
   std::string ref_field;
   std::vector<std::string> alt_fields;
@@ -264,6 +306,10 @@ uint64_t write_record_head(std::ostringstream &line,
     for (size_t a = 1; a < alleles.size(); ++a)
       alt_fields.push_back(std::string(1, prev) + alleles[a]);
   }
+
+  // Shift into the reference contig's coordinate frame when the reference path
+  // is a subrange of its contig (ref_start == 0 for whole-contig references).
+  pos += ref_start;
 
   line << contig_name << '\t' << pos << "\t.\t" << ref_field << '\t';
   for (size_t a = 0; a < alt_fields.size(); ++a) {
@@ -287,7 +333,7 @@ uint64_t deconstruct_contig(
     const std::vector<int32_t> &rules_second, const RuleLeafCache &rule_cache,
     uint32_t min_rule_id, uint32_t max_rule_id, int delta_round,
     const DeconstructOptions &options, const std::string &contig_name,
-    std::vector<VcfRecord> &records) {
+    uint64_t ref_start, std::vector<VcfRecord> &records) {
   // --- Pass 1: reference profile ---
   std::vector<NodeId> ref_nodes;
   {
@@ -302,7 +348,9 @@ uint64_t deconstruct_contig(
   std::vector<uint64_t> offset_at(ref_len + 1, 0);
   for (size_t i = 0; i < ref_len; ++i)
     offset_at[i + 1] = offset_at[i] + seg.length_of(ref_nodes[i]);
-  const uint64_t contig_length = offset_at[ref_len];
+  // Contig length spans [0, ref_start + walk_length): the subrange end, so the
+  // declared length stays >= every emitted POS.
+  const uint64_t contig_length = ref_start + offset_at[ref_len];
 
   // Anchors = reference nodes occurring exactly once. Ordinal = reference order.
   std::unordered_map<uint32_t, int64_t> occ; // abs id -> ref index or -1 if dup
@@ -526,7 +574,7 @@ uint64_t deconstruct_contig(
     std::ostringstream line;
     const uint64_t pos =
         write_record_head(line, contig_name, guard, substitution, interior_start,
-                          prev, ref_allele, alleles);
+                          prev, ref_allele, alleles, ref_start);
 
     // INFO
     append_info_fields(line, ac, an, ns, guard);
@@ -574,7 +622,7 @@ uint64_t deconstruct_contig_snarl(
     const std::vector<int32_t> &rules_second, const RuleLeafCache &rule_cache,
     uint32_t min_rule_id, uint32_t max_rule_id, int delta_round,
     const DeconstructOptions &options, const std::string &contig_name,
-    std::vector<VcfRecord> &records) {
+    uint64_t ref_start, std::vector<VcfRecord> &records) {
   // --- Pass 1: reference profile ---
   std::vector<NodeId> ref_nodes;
   {
@@ -588,7 +636,9 @@ uint64_t deconstruct_contig_snarl(
   std::vector<uint64_t> offset_at(ref_len + 1, 0);
   for (size_t i = 0; i < ref_len; ++i)
     offset_at[i + 1] = offset_at[i] + seg.length_of(ref_nodes[i]);
-  const uint64_t contig_length = offset_at[ref_len];
+  // Contig length spans [0, ref_start + walk_length): the subrange end, so the
+  // declared length stays >= every emitted POS.
+  const uint64_t contig_length = ref_start + offset_at[ref_len];
 
   // --- Pass 2: topology-based snarls projected on the reference ---
   // vg-compat uses the global biconnected decomposition (top-level snarls,
@@ -858,7 +908,8 @@ uint64_t deconstruct_contig_snarl(
         std::ostringstream line;
         const uint64_t pos = write_record_head(line, contig_name, guard,
                                                substitution, interior_start,
-                                               prev, ref_allele, alleles);
+                                               prev, ref_allele, alleles,
+                                               ref_start);
         append_info_fields(line, ac, an, ns, guard);
         append_gt_columns(line, column_slot_allele, guard, options);
         local_records.push_back(VcfRecord{pos, line.str()});
@@ -895,20 +946,39 @@ void deconstruct_to_vcf(const CompressedData &data,
   if (ident.names.size() != slices.size())
     throw std::runtime_error("deconstruct: slice/identity count mismatch");
 
-  // Resolve reference names to slice ids.
+  // Resolve reference names to slice ids. Exact match wins; otherwise fall back
+  // to a PanSN base-name match that ignores the ":start-end" subrange, so a
+  // friendly "CHM13#0#chrY" resolves the stored "CHM13#0#chrY:0-57227415"
+  // (vg accepts the base name via -P; gfaz should too).
   std::unordered_map<std::string, uint32_t> name_to_slice;
+  std::unordered_map<std::string, std::vector<uint32_t>> base_to_slices;
   name_to_slice.reserve(slices.size() * 2 + 1);
-  for (uint32_t i = 0; i < slices.size(); ++i)
+  base_to_slices.reserve(slices.size() * 2 + 1);
+  for (uint32_t i = 0; i < slices.size(); ++i) {
     name_to_slice.emplace(ident.names[i], i);
+    base_to_slices[strip_trailing_subrange(ident.names[i])].push_back(i);
+  }
 
   std::vector<uint32_t> ref_slices;
   std::vector<uint8_t> is_ref(slices.size(), 0);
   for (const std::string &rn : options.reference_names) {
+    uint32_t slice_id;
     auto it = name_to_slice.find(rn);
-    if (it == name_to_slice.end())
-      throw std::runtime_error("deconstruct: reference path not found: " + rn);
-    ref_slices.push_back(it->second);
-    is_ref[it->second] = 1;
+    if (it != name_to_slice.end()) {
+      slice_id = it->second;
+    } else {
+      auto bit = base_to_slices.find(strip_trailing_subrange(rn));
+      if (bit == base_to_slices.end())
+        throw std::runtime_error("deconstruct: reference path not found: " + rn);
+      if (bit->second.size() != 1)
+        throw std::runtime_error(
+            "deconstruct: reference '" + rn + "' matches " +
+            std::to_string(bit->second.size()) +
+            " subrange fragments; specify the exact name including :start-end");
+      slice_id = bit->second.front();
+    }
+    ref_slices.push_back(slice_id);
+    is_ref[slice_id] = 1;
   }
 
   // Flatten non-ref slices; assign each a dense local index used by per-site
@@ -989,17 +1059,19 @@ void deconstruct_to_vcf(const CompressedData &data,
   for (size_t r = 0; r < ref_slices.size(); ++r) {
     ContigOut co;
     co.name = vcf_contig_name_for_reference(options.reference_names[r]);
+    const uint64_t ref_start = ident.ref_starts[ref_slices[r]];
     co.length =
         options.use_snarls
             ? deconstruct_contig_snarl(
                   seg, snarl_graph, seg_graph, slices, ref_slices[r],
                   sample_slices, columns_local, rules_first, rules_second,
                   rule_cache, min_rule_id, max_rule_id, delta_round, options,
-                  co.name, co.records)
+                  co.name, ref_start, co.records)
             : deconstruct_contig(
                   seg, slices, ref_slices[r], sample_slices, columns_local,
                   rules_first, rules_second, rule_cache, min_rule_id,
-                  max_rule_id, delta_round, options, co.name, co.records);
+                  max_rule_id, delta_round, options, co.name, ref_start,
+                  co.records);
     std::sort(co.records.begin(), co.records.end(),
               [](const VcfRecord &a, const VcfRecord &b) {
                 return a.pos < b.pos;
