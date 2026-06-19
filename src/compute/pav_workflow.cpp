@@ -153,14 +153,9 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
 
   // Tier 2 #5: bottom-up rule-leaf cache. Built single-threaded; read-only
   // during slice decoding so no synchronisation is needed.
-  tquery::RuleLeafCache rule_cache;
-  rule_cache.min_rule_id = min_rule_id;
-  rule_cache.max_rule_id = max_rule_id;
-  rule_cache.budget_bytes = tquery::resolve_rule_cache_budget(
-      "GFAZ_PAV_RULE_CACHE_BYTES", static_cast<size_t>(1) << 30);
-  rule_cache.forward.assign(rules_first.size(), {});
-  rule_cache.ready.assign(rules_first.size(), 0);
-  tquery::build_rule_cache(rule_cache, rules_first, rules_second);
+  tquery::RuleLeafCache rule_cache = tquery::make_rule_cache(
+      min_rule_id, rules_first, rules_second, "GFAZ_PAV_RULE_CACHE_BYTES",
+      static_cast<size_t>(1) << 30);
 
   // Map BED chrom -> reference slice id.
   std::unordered_map<std::string, uint32_t> path_name_to_slice;

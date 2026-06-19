@@ -929,14 +929,9 @@ void deconstruct_to_vcf(const CompressedData &data,
   const uint32_t min_rule_id = data.min_rule_id();
   const uint32_t max_rule_id =
       min_rule_id + static_cast<uint32_t>(rules_first.size());
-  RuleLeafCache rule_cache;
-  rule_cache.min_rule_id = min_rule_id;
-  rule_cache.max_rule_id = max_rule_id;
-  rule_cache.budget_bytes = resolve_rule_cache_budget(
-      "GFAZ_DECONSTRUCT_RULE_CACHE_BYTES", static_cast<size_t>(1) << 30);
-  rule_cache.forward.assign(rules_first.size(), {});
-  rule_cache.ready.assign(rules_first.size(), 0);
-  build_rule_cache(rule_cache, rules_first, rules_second);
+  RuleLeafCache rule_cache = make_rule_cache(
+      min_rule_id, rules_first, rules_second, "GFAZ_DECONSTRUCT_RULE_CACHE_BYTES",
+      static_cast<size_t>(1) << 30);
 
   const int delta_round = data.delta_round;
 

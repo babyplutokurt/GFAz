@@ -54,6 +54,15 @@ void build_rule_cache(RuleLeafCache &cache,
                       const std::vector<int32_t> &first,
                       const std::vector<int32_t> &second);
 
+// Construct a ready-to-use RuleLeafCache for a rulebook: sets the id range,
+// resolves the byte budget from budget_env (falling back to default_budget),
+// sizes the cache, and populates it. The shared one-call setup every
+// path-iterative module uses before decoding slices.
+RuleLeafCache make_rule_cache(uint32_t min_rule_id,
+                              const std::vector<int32_t> &rules_first,
+                              const std::vector<int32_t> &rules_second,
+                              const char *budget_env, size_t default_budget);
+
 inline uint32_t abs_node_id(NodeId node) {
   return static_cast<uint32_t>(node < 0 ? -static_cast<int64_t>(node) : node);
 }
