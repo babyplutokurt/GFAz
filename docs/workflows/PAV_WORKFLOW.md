@@ -136,8 +136,8 @@ correctly into their parent sample/haplotype.
 
 ```
 src/cli/pav_command.cpp            # arg parsing + output formatting
-src/workflows/pav_workflow.cpp     # compute_pav implementation
-include/workflows/pav_workflow.hpp # PavOptions / PavResult / compute_pav
+src/compute/pav_workflow.cpp     # compute_pav implementation
+include/compute/pav_workflow.hpp # PavOptions / PavResult / compute_pav
 tests/regression/test_cli_commands.py   # pav fixture regressions (long + matrix + grouped + -B)
 tests/concordance/test_pav_vs_odgi.py   # golden-file concordance vs odgi pav
 tests/fixtures/pav_*.bed           # test BEDs
