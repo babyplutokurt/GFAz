@@ -938,12 +938,17 @@ void deconstruct_to_vcf(const CompressedData &data,
     columns_local.push_back(std::move(slots));
   }
 
-  // Rule-leaf cache (shared, read-only during decoding).
+  // Rule-leaf cache (shared, read-only during decoding). Disabled by default
+  // for deconstruct: every sample slice is streamed exactly once, so eagerly
+  // expanding the whole rulebook to leaf arrays costs build time + up to a GiB
+  // of RAM without paying off. Measured on chr1/chrY, a zero budget is both
+  // faster and ~1.2 GiB smaller than the former 1 GiB default, with byte-
+  // identical output. Set GFAZ_DECONSTRUCT_RULE_CACHE_BYTES to re-enable it.
   const uint32_t min_rule_id = rulebook.min_rule_id;
   const uint32_t max_rule_id = rulebook.max_rule_id;
   RuleLeafCache rule_cache = make_rule_cache(
       min_rule_id, rules_first, rules_second, "GFAZ_DECONSTRUCT_RULE_CACHE_BYTES",
-      static_cast<size_t>(1) << 30);
+      /*default_budget=*/0);
 
   const int delta_round = data.delta_round;
 
