@@ -702,9 +702,20 @@ uint64_t deconstruct_contig_snarl(
       total_recs += per_thread[t].size();
       total_pool += per_thread_pool[t].size();
     }
+    // off/len index the interior pool; the observation index k (below) and the
+    // obs_by_snarl entries index the observations array. Both are 32-bit, so a
+    // contig whose observation count (~haplotypes x snarls-spanned) or interior
+    // pool would exceed 2^32 is rejected cleanly rather than silently wrapping.
+    // Current inputs sit ~30x under this (chr1: ~142M); widen these indices to
+    // 64-bit only when a real input needs it (doubles obs_by_snarl).
     if (total_pool > std::numeric_limits<uint32_t>::max())
       throw std::runtime_error(
-          "deconstruct: snarl interior pool exceeds 2^32 nodes");
+          "deconstruct: snarl interior pool exceeds 2^32 nodes; "
+          "widen ObsRec off/len to 64-bit");
+    if (total_recs > std::numeric_limits<uint32_t>::max())
+      throw std::runtime_error(
+          "deconstruct: snarl observation count exceeds 2^32; "
+          "widen the observation index / obs_by_snarl to 64-bit");
     observations.reserve(total_recs);
     interior_pool.reserve(total_pool);
     for (int t = 0; t < T; ++t) {
