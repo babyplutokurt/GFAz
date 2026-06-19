@@ -135,26 +135,14 @@ SliceIdentity build_slice_identity(const CompressedData &data,
   }
 
   if (num_walks) {
-    std::vector<std::string> samples = decompress_strings(
-        data.walk_sample_ids_zstd, data.walk_sample_id_lengths_zstd,
-        "walk sample");
-    std::vector<std::string> seqs = decompress_strings(
-        data.walk_seq_ids_zstd, data.walk_seq_id_lengths_zstd, "walk seq");
-    std::vector<uint32_t> haps =
-        Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
-    std::vector<int64_t> starts =
-        Codec::decompress_varint_int64(data.walk_seq_starts_zstd, num_walks);
-    std::vector<int64_t> ends =
-        Codec::decompress_varint_int64(data.walk_seq_ends_zstd, num_walks);
-    if (samples.size() != num_walks || seqs.size() != num_walks ||
-        haps.size() != num_walks || starts.size() != num_walks ||
-        ends.size() != num_walks)
-      throw std::runtime_error("deconstruct: walk metadata count mismatch");
+    const WalkIdentityColumns w =
+        load_walk_identity(data, num_walks, "deconstruct");
     for (size_t i = 0; i < num_walks; ++i) {
-      id.names.push_back(
-          walk_reference_name(samples[i], haps[i], seqs[i], starts[i], ends[i]));
-      id.samples.push_back(walk_group_key(samples[i], haps[i], seqs[i], grouping));
-      id.haps.push_back(haps[i]);
+      id.names.push_back(walk_reference_name(w.samples[i], w.haps[i], w.seqs[i],
+                                             w.starts[i], w.ends[i]));
+      id.samples.push_back(
+          walk_group_key(w.samples[i], w.haps[i], w.seqs[i], grouping));
+      id.haps.push_back(w.haps[i]);
     }
   }
 

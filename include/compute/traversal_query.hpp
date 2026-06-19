@@ -208,6 +208,26 @@ std::vector<std::string> decompress_strings(const ZstdCompressedBlock &strings,
                                             const ZstdCompressedBlock &lengths,
                                             const char *label);
 
+// ---------------------------------------------------------------------------
+// W-line identity columns
+// ---------------------------------------------------------------------------
+
+// The per-walk identity columns (sample, seqid, hap, start, end) decoded from a
+// CompressedData. Shared so every compute module reconstructs walk identity the
+// same way.
+struct WalkIdentityColumns {
+  std::vector<std::string> samples;
+  std::vector<std::string> seqs;
+  std::vector<uint32_t> haps;
+  std::vector<int64_t> starts;
+  std::vector<int64_t> ends;
+};
+
+// Decode and validate the W-line identity columns; throws "<label>: walk
+// metadata count mismatch" if any column does not have num_walks entries.
+WalkIdentityColumns load_walk_identity(const CompressedData &data,
+                                       size_t num_walks, const char *label);
+
 } // namespace tquery
 } // namespace gfaz
 

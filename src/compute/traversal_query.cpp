@@ -246,5 +246,24 @@ std::vector<std::string> decompress_strings(const ZstdCompressedBlock &strings,
   return out;
 }
 
+WalkIdentityColumns load_walk_identity(const CompressedData &data,
+                                       size_t num_walks, const char *label) {
+  WalkIdentityColumns w;
+  w.samples = decompress_strings(data.walk_sample_ids_zstd,
+                                 data.walk_sample_id_lengths_zstd, "walk sample");
+  w.seqs = decompress_strings(data.walk_seq_ids_zstd,
+                              data.walk_seq_id_lengths_zstd, "walk seq");
+  w.haps = Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
+  w.starts =
+      Codec::decompress_varint_int64(data.walk_seq_starts_zstd, num_walks);
+  w.ends = Codec::decompress_varint_int64(data.walk_seq_ends_zstd, num_walks);
+  if (w.samples.size() != num_walks || w.seqs.size() != num_walks ||
+      w.haps.size() != num_walks || w.starts.size() != num_walks ||
+      w.ends.size() != num_walks)
+    throw std::runtime_error(std::string(label) +
+                             ": walk metadata count mismatch");
+  return w;
+}
+
 } // namespace tquery
 } // namespace gfaz
