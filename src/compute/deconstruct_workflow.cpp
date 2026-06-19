@@ -369,6 +369,37 @@ int resolve_slot(const std::vector<uint32_t> &slot,
   return allele;
 }
 
+// Tally one site's genotypes across the VCF sample columns. For each column,
+// resolves every haplotype slot to an allele (column_slot_allele) and
+// accumulates the per-allele counts (ac, sized num_alleles), the total called
+// alleles (an), and the number of samples with data (ns). Shared by both contig
+// writers. Outputs are reset on entry so callers can reuse buffers.
+void tally_columns(const std::vector<std::vector<std::vector<uint32_t>>> &columns,
+                   const std::vector<int> &slice_allele, size_t num_alleles,
+                   std::vector<std::vector<int>> &column_slot_allele,
+                   std::vector<uint64_t> &ac, uint64_t &an, uint64_t &ns) {
+  const size_t num_columns = columns.size();
+  column_slot_allele.assign(num_columns, {});
+  ac.assign(num_alleles, 0);
+  an = 0;
+  ns = 0;
+  for (size_t c = 0; c < num_columns; ++c) {
+    column_slot_allele[c].reserve(columns[c].size());
+    bool has = false;
+    for (const auto &slot : columns[c]) {
+      const int a = resolve_slot(slot, slice_allele);
+      column_slot_allele[c].push_back(a);
+      if (a >= 0) {
+        ++an;
+        ++ac[a];
+        has = true;
+      }
+    }
+    if (has)
+      ++ns;
+  }
+}
+
 // Deconstruct one reference contig. Appends VCF records to `records`, returns
 // the contig length (sum of reference segment lengths).
 uint64_t deconstruct_contig(
@@ -511,8 +542,6 @@ uint64_t deconstruct_contig(
   if (breakpoints.size() < 2)
     return contig_length;
 
-  const size_t num_columns = columns.size();
-
   // --- Pass 3 + assembly: one record per varying site ---
   for (size_t b = 0; b + 1 < breakpoints.size(); ++b) {
     const uint32_t src_ord = breakpoints[b];
@@ -580,25 +609,11 @@ uint64_t deconstruct_contig(
 
     // Resolve each haplotype slot to a single allele, then count per slot
     // (not per slice) so a sample's tiling contigs collapse to its ploidy.
-    std::vector<std::vector<int>> column_slot_allele(num_columns);
-    std::vector<uint64_t> ac(alleles.size(), 0);
-    uint64_t an = 0;
-    uint64_t ns = 0;
-    for (size_t c = 0; c < num_columns; ++c) {
-      column_slot_allele[c].reserve(columns[c].size());
-      bool has = false;
-      for (const auto &slot : columns[c]) {
-        const int a = resolve_slot(slot, slice_allele);
-        column_slot_allele[c].push_back(a);
-        if (a >= 0) {
-          ++an;
-          ++ac[a];
-          has = true;
-        }
-      }
-      if (has)
-        ++ns;
-    }
+    std::vector<std::vector<int>> column_slot_allele;
+    std::vector<uint64_t> ac;
+    uint64_t an = 0, ns = 0;
+    tally_columns(columns, slice_allele, alleles.size(), column_slot_allele, ac,
+                  an, ns);
 
     const char prev = seg.last_base(ref_nodes[src_ref_index]);
     std::ostringstream line;
@@ -826,8 +841,6 @@ uint64_t deconstruct_contig_snarl(
       return observations[a].slice_local < observations[b].slice_local;
     });
 
-  const size_t num_columns = columns.size();
-
   // --- Pass 4: assemble + emit one record per varying snarl ---
   // Per-snarl iterations are independent: every working buffer is either
   // iteration-local or a thread-private scratch (slice_allele, reset via
@@ -909,25 +922,11 @@ uint64_t deconstruct_contig_snarl(
         const bool guard =
             options.max_site_length != 0 && span > options.max_site_length;
 
-        std::vector<std::vector<int>> column_slot_allele(num_columns);
-        std::vector<uint64_t> ac(alleles.size(), 0);
-        uint64_t an = 0;
-        uint64_t ns = 0;
-        for (size_t c = 0; c < num_columns; ++c) {
-          column_slot_allele[c].reserve(columns[c].size());
-          bool has = false;
-          for (const auto &slot : columns[c]) {
-            const int a = resolve_slot(slot, slice_allele);
-            column_slot_allele[c].push_back(a);
-            if (a >= 0) {
-              ++an;
-              ++ac[a];
-              has = true;
-            }
-          }
-          if (has)
-            ++ns;
-        }
+        std::vector<std::vector<int>> column_slot_allele;
+        std::vector<uint64_t> ac;
+        uint64_t an = 0, ns = 0;
+        tally_columns(columns, slice_allele, alleles.size(), column_slot_allele,
+                      ac, an, ns);
 
         const char prev = seg.last_base(ref_nodes[src_ref_index]);
         // -a: snarl boundary id (>src>sink in gfaz's node space) for the ID
