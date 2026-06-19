@@ -108,6 +108,18 @@ Rulebook load_rulebook(const CompressedData &data) {
   return rb;
 }
 
+LoadedTraversals load_traversals(const CompressedData &data) {
+  LoadedTraversals t;
+  t.paths_flat = Codec::zstd_decompress_int32_vector(data.paths_zstd);
+  t.walks_flat = Codec::zstd_decompress_int32_vector(data.walks_zstd);
+  t.slices.reserve(data.sequence_lengths.size() + data.walk_lengths.size());
+  build_slices(t.paths_flat, data.sequence_lengths, data.original_path_lengths,
+               t.slices);
+  build_slices(t.walks_flat, data.walk_lengths, data.original_walk_lengths,
+               t.slices);
+  return t;
+}
+
 void build_slices(const std::vector<int32_t> &flat,
                   const std::vector<uint32_t> &lengths,
                   const std::vector<uint32_t> &original_lengths,

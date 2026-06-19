@@ -852,17 +852,8 @@ void deconstruct_to_vcf(const CompressedData &data,
   const std::vector<int32_t> &rules_first = rulebook.rules_first;
   const std::vector<int32_t> &rules_second = rulebook.rules_second;
 
-  std::vector<int32_t> paths_flat =
-      Codec::zstd_decompress_int32_vector(data.paths_zstd);
-  std::vector<int32_t> walks_flat =
-      Codec::zstd_decompress_int32_vector(data.walks_zstd);
-
-  std::vector<HapSlice> slices;
-  slices.reserve(data.sequence_lengths.size() + data.walk_lengths.size());
-  build_slices(paths_flat, data.sequence_lengths, data.original_path_lengths,
-               slices);
-  build_slices(walks_flat, data.walk_lengths, data.original_walk_lengths,
-               slices);
+  LoadedTraversals loaded = load_traversals(data);
+  const std::vector<HapSlice> &slices = loaded.slices;
 
   SliceIdentity ident = build_slice_identity(data, options.grouping);
   if (ident.names.size() != slices.size())

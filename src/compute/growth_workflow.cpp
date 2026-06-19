@@ -147,23 +147,13 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads,
   const std::vector<int32_t> &rules_first = rulebook.rules_first;
   const std::vector<int32_t> &rules_second = rulebook.rules_second;
 
-  std::vector<int32_t> paths_flat =
-      Codec::zstd_decompress_int32_vector(data.paths_zstd);
-  std::vector<int32_t> walks_flat =
-      Codec::zstd_decompress_int32_vector(data.walks_zstd);
-
   const uint32_t min_rule_id = rulebook.min_rule_id;
   const uint32_t max_rule_id = rulebook.max_rule_id;
   const int delta_round = data.delta_round;
 
   // Unified slice vector: [paths ... walks]. Index order is preserved so the
   // slice-to-group mapping below can address walks with offset num_paths.
-  std::vector<tquery::HapSlice> slices;
-  slices.reserve(total_slices);
-  tquery::build_slices(paths_flat, data.sequence_lengths,
-                       data.original_path_lengths, slices);
-  tquery::build_slices(walks_flat, data.walk_lengths, data.original_walk_lengths,
-                       slices);
+  tquery::LoadedTraversals loaded = tquery::load_traversals(data);
 
   // Build groups[] -- each group is a list of slice indices sharing the same
   // haplotype identity per the selected GroupingMode. Each group is processed
@@ -301,13 +291,13 @@ GrowthResult compute_growth(const CompressedData &data, int num_threads,
       bump_stamp();
       const auto &group = groups[static_cast<size_t>(g)];
       for (uint32_t si : group) {
-        process_slice(slices[si]);
+        process_slice(loaded.slices[si]);
       }
     }
   }
-  paths_flat = std::vector<int32_t>{};
-  walks_flat = std::vector<int32_t>{};
-  slices = std::vector<tquery::HapSlice>{};
+  // Release the decoded traversals (flat arrays + slices) before the growth-curve
+  // math to keep peak memory down on large graphs.
+  loaded = tquery::LoadedTraversals{};
 
   // Build coverage histogram from the shared cov[] array.
   result.hist.assign(static_cast<size_t>(N) + 1, 0);

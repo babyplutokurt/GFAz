@@ -126,17 +126,8 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
   const std::vector<int32_t> &rules_first = rulebook.rules_first;
   const std::vector<int32_t> &rules_second = rulebook.rules_second;
 
-  std::vector<int32_t> paths_flat =
-      Codec::zstd_decompress_int32_vector(data.paths_zstd);
-  std::vector<int32_t> walks_flat =
-      Codec::zstd_decompress_int32_vector(data.walks_zstd);
-
-  std::vector<tquery::HapSlice> slices;
-  slices.reserve(data.sequence_lengths.size() + data.walk_lengths.size());
-  tquery::build_slices(paths_flat, data.sequence_lengths,
-                       data.original_path_lengths, slices);
-  tquery::build_slices(walks_flat, data.walk_lengths,
-                       data.original_walk_lengths, slices);
+  tquery::LoadedTraversals loaded = tquery::load_traversals(data);
+  const std::vector<tquery::HapSlice> &slices = loaded.slices;
 
   TraversalMetadata meta = build_metadata(data, options.grouping);
   result.group_names = meta.group_names;

@@ -166,6 +166,19 @@ void build_slices(const std::vector<int32_t> &flat,
                   const std::vector<uint32_t> &original_lengths,
                   std::vector<HapSlice> &out);
 
+// The decoded P/W traversals: the flat node arrays plus the per-haplotype slices
+// over them, ordered [paths... walks...]. The flat arrays are owned here because
+// each HapSlice points into them, so this object must outlive any slice use
+// (it is safe to move/return: moving a vector preserves its buffer address).
+struct LoadedTraversals {
+  std::vector<int32_t> paths_flat;
+  std::vector<int32_t> walks_flat;
+  std::vector<HapSlice> slices;
+};
+
+// Decompress the path/walk node arrays and build the combined slice list.
+LoadedTraversals load_traversals(const CompressedData &data);
+
 // Fully decode one haplotype slice (delta_round arbitrary) into signed node
 // ids. Used for the general delta path; the streaming visitors below handle
 // the common delta_round 0/1 cases without materializing the vector.
