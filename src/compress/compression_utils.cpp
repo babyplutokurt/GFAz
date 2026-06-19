@@ -143,25 +143,6 @@ compress_optional_column(const gfaz::OptionalFieldColumn &col) {
   return out;
 }
 
-void flatten_paths(const std::vector<std::vector<gfaz::NodeId>> &paths,
-                   const std::vector<std::string> &path_names,
-                   const std::vector<std::string> &path_overlaps,
-                   std::vector<int32_t> &flattened,
-                   std::vector<uint32_t> &lengths, std::string &names_concat,
-                   std::vector<uint32_t> &name_lengths,
-                   std::string &overlaps_concat,
-                   std::vector<uint32_t> &overlap_lengths) {
-  flatten_path_metadata(paths, path_names, path_overlaps, names_concat,
-                        name_lengths, overlaps_concat, overlap_lengths);
-  flatten_traversal_sequences(paths, flattened, lengths);
-}
-
-void flatten_segments(const std::vector<std::string> &sequences,
-                      std::string &concat, std::vector<uint32_t> &lengths,
-                      uint32_t max_id) {
-  flatten_segment_sequences(sequences, concat, lengths, max_id);
-}
-
 void process_rules(const std::vector<Packed2mer> &rulebook,
                    uint32_t layer_start_id,
                    const std::vector<gfaz::LayerRuleRange> &ranges,
@@ -190,12 +171,6 @@ void process_rules(const std::vector<Packed2mer> &rulebook,
 
   gfaz::Codec::delta_encode_int32(first);
   gfaz::Codec::delta_encode_int32(second);
-}
-
-void flatten_walks(const std::vector<std::vector<gfaz::NodeId>> &walks,
-                   std::vector<int32_t> &flattened,
-                   std::vector<uint32_t> &lengths) {
-  flatten_traversal_sequences(walks, flattened, lengths);
 }
 
 void remap_rule_ids(std::vector<std::vector<gfaz::NodeId>> &sequences,

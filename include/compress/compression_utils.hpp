@@ -44,27 +44,10 @@ void flatten_segment_sequences(const std::vector<std::string> &sequences,
 gfaz::CompressedOptionalFieldColumn
 compress_optional_column(const gfaz::OptionalFieldColumn &col);
 
-void flatten_paths(const std::vector<std::vector<gfaz::NodeId>> &paths,
-                   const std::vector<std::string> &path_names,
-                   const std::vector<std::string> &path_overlaps,
-                   std::vector<int32_t> &flattened,
-                   std::vector<uint32_t> &lengths, std::string &names_concat,
-                   std::vector<uint32_t> &name_lengths,
-                   std::string &overlaps_concat,
-                   std::vector<uint32_t> &overlap_lengths);
-
-void flatten_segments(const std::vector<std::string> &sequences,
-                      std::string &concat, std::vector<uint32_t> &lengths,
-                      uint32_t max_id);
-
 void process_rules(const std::vector<Packed2mer> &rulebook,
                    uint32_t layer_start_id,
                    const std::vector<gfaz::LayerRuleRange> &ranges,
                    std::vector<int32_t> &first, std::vector<int32_t> &second);
-
-void flatten_walks(const std::vector<std::vector<gfaz::NodeId>> &walks,
-                   std::vector<int32_t> &flattened,
-                   std::vector<uint32_t> &lengths);
 
 void remap_rule_ids(std::vector<std::vector<gfaz::NodeId>> &sequences,
                     uint32_t rules_start_id,
