@@ -138,8 +138,8 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
   const uint32_t max_rule_id = rulebook.max_rule_id;
   const int delta_round = data.delta_round;
 
-  // Tier 2 #5: bottom-up rule-leaf cache. Built single-threaded; read-only
-  // during slice decoding so no synchronisation is needed.
+  // Bottom-up rule-leaf cache. Built single-threaded; read-only during slice
+  // decoding so no synchronisation is needed.
   tquery::RuleLeafCache rule_cache = tquery::make_rule_cache(
       min_rule_id, rules_first, rules_second, "GFAZ_PAV_RULE_CACHE_BYTES",
       static_cast<size_t>(1) << 30);
@@ -188,7 +188,7 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
   }
 
   // -------------------------------------------------------------------------
-  // Pass 1 (Tier 1 #1, #3): parallel over slices, lock-free.
+  // Pass 1: parallel over slices, lock-free.
   //   - For every slice produce a sorted-unique list of visited node ids.
   //   - For reference slices additionally emit the ordered node-id stream so
   //     the BED sweep in pass 3 needs no further rule expansion.
@@ -249,7 +249,7 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
   rule_cache.bytes_used = 0;
 
   // -------------------------------------------------------------------------
-  // Pass 2 (Tier 2 #4): build per-group sorted-unique node lists, then a
+  // Pass 2: build per-group sorted-unique node lists, then a
   // CSR-shaped node->groups index. CSR avoids the per-node vector overhead
   // (24 bytes empty * num_nodes) of the previous representation.
   // -------------------------------------------------------------------------
@@ -302,7 +302,7 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
   group_nodes = std::vector<std::vector<uint32_t>>();
 
   // -------------------------------------------------------------------------
-  // Pass 3 (Tier 1 #1 payoff): parallel over distinct BED chroms, sweep using
+  // Pass 3: parallel over distinct BED chroms, sweep using
   // the cached reference node streams. No rule expansion happens here.
   // -------------------------------------------------------------------------
   {
