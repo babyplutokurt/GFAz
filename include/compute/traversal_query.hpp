@@ -45,15 +45,6 @@ struct RuleLeafCache {
   size_t budget_bytes = 0;
 };
 
-// Resolve a rule-cache byte budget from an environment variable, falling back
-// to default_bytes when unset/invalid.
-size_t resolve_rule_cache_budget(const char *env_name, size_t default_bytes);
-
-// Populate cache.forward/ready for every rule that fits within the budget.
-void build_rule_cache(RuleLeafCache &cache,
-                      const std::vector<int32_t> &first,
-                      const std::vector<int32_t> &second);
-
 // Construct a ready-to-use RuleLeafCache for a rulebook: sets the id range,
 // resolves the byte budget from budget_env (falling back to default_budget),
 // sizes the cache, and populates it. The shared one-call setup every
@@ -231,7 +222,6 @@ struct PansnParts {
   bool has_seq = false;
 };
 
-void strip_pansn_coords_inplace(std::string &s);
 PansnParts parse_pansn_path_name(const std::string &name);
 std::string path_group_key(const std::string &name, GroupingMode mode);
 std::string walk_group_key(const std::string &sample, uint32_t hap,

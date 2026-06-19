@@ -60,8 +60,8 @@ bool build_rule_recursive(uint32_t rule_id, RuleLeafCache &cache,
   return true;
 }
 
-} // namespace
-
+// Resolve a rule-cache byte budget from an environment variable, falling back
+// to default_bytes when unset/invalid.
 size_t resolve_rule_cache_budget(const char *env_name, size_t default_bytes) {
   if (const char *env = std::getenv(env_name)) {
     char *end = nullptr;
@@ -72,6 +72,7 @@ size_t resolve_rule_cache_budget(const char *env_name, size_t default_bytes) {
   return default_bytes;
 }
 
+// Populate cache.forward/ready for every rule that fits within the budget.
 void build_rule_cache(RuleLeafCache &cache, const std::vector<int32_t> &first,
                       const std::vector<int32_t> &second) {
   if (cache.budget_bytes == 0)
@@ -80,6 +81,8 @@ void build_rule_cache(RuleLeafCache &cache, const std::vector<int32_t> &first,
     build_rule_recursive(rid, cache, first, second);
   }
 }
+
+} // namespace
 
 RuleLeafCache make_rule_cache(uint32_t min_rule_id,
                               const std::vector<int32_t> &rules_first,
@@ -155,6 +158,8 @@ void decode_one_haplotype_general(const int32_t *encoded, size_t encoded_len,
   }
 }
 
+namespace {
+
 void strip_pansn_coords_inplace(std::string &s) {
   const size_t colon = s.rfind(':');
   if (colon == std::string::npos || colon == 0)
@@ -170,6 +175,8 @@ void strip_pansn_coords_inplace(std::string &s) {
       return;
   s.erase(colon);
 }
+
+} // namespace
 
 // PanSN parse mirroring Panacus's from_str + clear_coords: regex
 // ^([^#]+)(#[^#]+)?(#[^#].*)?$, with ":start-end" stripped from the last
