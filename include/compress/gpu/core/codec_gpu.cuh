@@ -327,21 +327,6 @@ RollingDecodeSchedule build_rolling_decode_schedule(
     size_t max_expanded_chunk_bytes);
 
 /**
- * @deprecated Use expand_path_device_vec instead.
- *
- * Iterative multi-pass expansion. Each pass expands one level of rules.
- * Kept for performance comparison with the new single-pass algorithm.
- *
- * Complexity: O(num_compression_rounds * path_size)
- */
-thrust::device_vector<int32_t> expand_path_device_vec_iterative(
-    const thrust::device_vector<int32_t>& d_encoded_path,
-    const thrust::device_vector<int32_t>& d_rules_first,
-    const thrust::device_vector<int32_t>& d_rules_second,
-    uint32_t min_rule_id,
-    size_t num_rules);
-
-/**
  * Inverse delta-encode a device vector (prefix sum).
  *
  * @param d_delta_encoded Input: delta-encoded values
