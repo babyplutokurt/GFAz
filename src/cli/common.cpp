@@ -8,8 +8,6 @@
 #include <iostream>
 #include <sstream>
 
-#include "core/utils/debug_log.hpp"
-
 #ifdef ENABLE_CUDA
 #include "compress/gpu/compression/compression_workflow_gpu.hpp"
 #include "compress/gpu/decompression/decompression_workflow_gpu.hpp"
