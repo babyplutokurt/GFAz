@@ -1,6 +1,5 @@
 #include "compute/depth_workflow.hpp"
 
-#include "core/codec/codec.hpp"
 #include "core/utils/threading_utils.hpp"
 #include "compute/traversal_query.hpp"
 
@@ -17,8 +16,7 @@ using namespace gfaz::tquery;
 
 void depth_to_tsv(const CompressedData &data, const DepthOptions &options,
                   std::ostream &out) {
-  const std::vector<uint32_t> segment_lengths =
-      Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
+  const std::vector<uint32_t> segment_lengths = load_segment_lengths(data);
   const uint32_t num_nodes = static_cast<uint32_t>(segment_lengths.size());
   uint64_t graph_length = 0;
   for (uint32_t len : segment_lengths)

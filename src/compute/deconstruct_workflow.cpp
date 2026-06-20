@@ -131,7 +131,7 @@ SegmentSeqs load_segments(const CompressedData &data) {
     for (long long i = 0; i < n; ++i)
       p[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(p[i])));
   }
-  seg.lengths = Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
+  seg.lengths = load_segment_lengths(data);
   seg.num_nodes = static_cast<uint32_t>(seg.lengths.size());
   seg.offset.assign(seg.num_nodes + 1, 0);
   for (uint32_t i = 0; i < seg.num_nodes; ++i)

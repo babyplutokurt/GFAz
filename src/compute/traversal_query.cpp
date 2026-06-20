@@ -112,6 +112,10 @@ Rulebook load_rulebook(const CompressedData &data) {
   return rb;
 }
 
+std::vector<uint32_t> load_segment_lengths(const CompressedData &data) {
+  return Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
+}
+
 LoadedTraversals load_traversals(const CompressedData &data) {
   LoadedTraversals t;
   t.paths_flat = Codec::zstd_decompress_int32_vector(data.paths_zstd);

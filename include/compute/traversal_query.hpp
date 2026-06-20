@@ -67,6 +67,11 @@ struct Rulebook {
 // Decompress and delta-decode both rule-element arrays and compute the id range.
 Rulebook load_rulebook(const CompressedData &data);
 
+// Decompress the per-segment sequence lengths (1-based node id n -> result[n-1]).
+// The segment count (result.size()) is the node count. Shared by the
+// path-iterative workflows that need node lengths or just the node count.
+std::vector<uint32_t> load_segment_lengths(const CompressedData &data);
+
 inline uint32_t abs_node_id(NodeId node) {
   return static_cast<uint32_t>(node < 0 ? -static_cast<int64_t>(node) : node);
 }

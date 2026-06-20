@@ -1,6 +1,5 @@
 #include "compute/pav_workflow.hpp"
 
-#include "core/codec/codec.hpp"
 #include "core/utils/threading_utils.hpp"
 #include "compute/traversal_query.hpp"
 
@@ -114,8 +113,7 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
   PavResult result;
   result.ranges = read_bed(options.bed_path);
 
-  const std::vector<uint32_t> segment_lengths =
-      Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
+  const std::vector<uint32_t> segment_lengths = load_segment_lengths(data);
   const uint32_t num_nodes = static_cast<uint32_t>(segment_lengths.size());
 
   tquery::Rulebook rulebook = tquery::load_rulebook(data);

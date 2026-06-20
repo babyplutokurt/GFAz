@@ -117,9 +117,7 @@ double frac_covered_union(uint32_t N, uint32_t c, uint32_t k) {
 }
 
 uint32_t infer_num_nodes(const CompressedData &data) {
-  std::vector<uint32_t> seg_lens =
-      Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
-  return static_cast<uint32_t>(seg_lens.size());
+  return static_cast<uint32_t>(tquery::load_segment_lengths(data).size());
 }
 
 // Haplotype slicing (tquery::HapSlice + tquery::build_slices) and PanSN
