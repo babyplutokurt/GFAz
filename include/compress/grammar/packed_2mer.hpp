@@ -26,12 +26,6 @@ inline int32_t unpack_second(Packed2mer packed) {
     return static_cast<int32_t>(packed);  // Truncates to low 32 bits
 }
 
-// Unpack both NodeIds at once
-inline void unpack_2mer(Packed2mer packed, int32_t& first, int32_t& second) {
-    first = unpack_first(packed);
-    second = unpack_second(packed);
-}
-
 // Reverse a 2-mer: (-second, -first)
 // GFA convention: reversing path orientation negates all node IDs and reverses order
 inline Packed2mer reverse_2mer(Packed2mer packed) {
