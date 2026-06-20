@@ -12,20 +12,8 @@ namespace gfaz {
 namespace Codec {
 
 // --- Delta Encoding ---
-void delta_transform(std::vector<std::vector<NodeId>> &paths) {
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic)
-#endif
-  for (size_t p = 0; p < paths.size(); ++p) {
-    auto &path = paths[p];
-    if (path.size() < 2)
-      continue;
-    for (size_t i = path.size() - 1; i > 0; --i) {
-      path[i] = path[i] - path[i - 1];
-    }
-  }
-}
-
+// (Forward delta encoding is done by the fused delta_transform_and_max_abs
+// below, which also tracks the max absolute value in a single pass.)
 void inverse_delta_transform(std::vector<std::vector<NodeId>> &paths) {
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)

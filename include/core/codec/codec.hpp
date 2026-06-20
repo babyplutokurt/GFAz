@@ -12,7 +12,8 @@ namespace gfaz {
 namespace Codec {
 
 // --- Delta Encoding for Paths ---
-void delta_transform(std::vector<std::vector<NodeId>> &paths);
+// Forward delta encoding is performed by delta_transform_and_max_abs (fused with
+// max-abs tracking); only the inverse is needed as a standalone.
 void inverse_delta_transform(std::vector<std::vector<NodeId>> &paths);
 
 // Fused delta transform + max absolute value (single pass optimization)
