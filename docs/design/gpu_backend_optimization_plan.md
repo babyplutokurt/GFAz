@@ -208,7 +208,7 @@ Apply the same measurement and workspace discipline to the GPU compression backe
 
 For each phase, run at minimum:
 
-- [ ] `python tests/regression/test_example_regression.py example.gfa`
+- [ ] `python tests/regression/test_compression_regression.py example.gfa`
 - [ ] a larger GPU-capable decompression benchmark
 - [ ] before/after timing comparison for:
   - total wall time
