@@ -9,7 +9,6 @@
 #include "cli/common.hpp"
 #include "core/codec/serialization.hpp"
 #include "core/utils/debug_log.hpp"
-#include "core/utils/runtime_utils.hpp"
 #include "compress/compression_workflow.hpp"
 
 #ifdef ENABLE_CUDA
