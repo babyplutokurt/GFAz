@@ -154,6 +154,8 @@ set(GFAZ_COMPUTE_SOURCES
   src/compute/growth_workflow.cpp
   src/compute/pav_workflow.cpp
   src/compute/similarity_workflow.cpp
+  src/compute/stats_workflow.cpp
+  src/compute/depth_workflow.cpp
   src/compute/deconstruct_workflow.cpp
   src/compute/snarl_finder.cpp
   src/compute/traversal_query.cpp
@@ -274,6 +276,8 @@ if(BUILD_CLI)
     src/cli/growth_command.cpp
     src/cli/pav_command.cpp
     src/cli/similarity_command.cpp
+    src/cli/stats_command.cpp
+    src/cli/depth_command.cpp
     src/cli/deconstruct_command.cpp
   )
   set_target_properties(gfaz PROPERTIES

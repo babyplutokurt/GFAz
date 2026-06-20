@@ -117,6 +117,27 @@ def normalize_similarity(text: str) -> str:
 
 
 # --------------------------------------------------------------------------
+# stats / depth normalization
+# --------------------------------------------------------------------------
+def normalize_stats(text: str) -> str:
+  """Non-blank lines verbatim. gfaz and odgi emit the same fixed row order
+  (summary: header + one line; -b: A/C/G/T), so no sorting is needed."""
+  return "\n".join(ln for ln in text.splitlines() if ln.strip() != "")
+
+
+def normalize_depth(text: str) -> str:
+  """Header line verbatim + body lines sorted. gfaz emits the -d table in node-id
+  order; odgi emits it in internal (thread-dependent) order, so compare after
+  sorting the body. The summary is header + one line (sorting is a no-op). Node
+  ids match only when the GFA segment names are 1..N (true for the fixtures)."""
+  lines = [ln for ln in text.splitlines() if ln.strip() != ""]
+  if not lines:
+    return ""
+  header, body = lines[0], sorted(lines[1:])
+  return "\n".join([header] + body)
+
+
+# --------------------------------------------------------------------------
 # growth normalization
 # --------------------------------------------------------------------------
 def parse_growth_gfaz(text: str) -> dict:

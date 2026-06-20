@@ -1,0 +1,6 @@
+## tool: 0cfc3b19
+## command: odgi stats -i <og> -S
+## fixture: similarity_fixture.gfa
+## normalize: non-blank lines verbatim
+#length	nodes	edges	paths	steps
+19	7	7	5	15

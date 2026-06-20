@@ -11,6 +11,8 @@ int do_add_haplotypes(int argc, char *argv[]);
 int do_growth(int argc, char *argv[]);
 int do_pav(int argc, char *argv[]);
 int do_similarity(int argc, char *argv[]);
+int do_stats(int argc, char *argv[]);
+int do_depth(int argc, char *argv[]);
 int do_deconstruct(int argc, char *argv[]);
 
 } // namespace gfaz::cli

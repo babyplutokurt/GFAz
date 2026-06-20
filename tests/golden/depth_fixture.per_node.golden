@@ -1,0 +1,13 @@
+## tool: 0cfc3b19
+## command: odgi depth -i <og> -t 2 -d
+## fixture: similarity_fixture.gfa
+## gfaz mode: per-node table (gfaz -d)
+## normalize: non-blank lines verbatim (node ids 1..N coincide)
+#node.id	depth	depth.uniq
+1	4	4
+2	4	3
+3	3	3
+4	1	1
+5	1	1
+6	1	1
+7	1	1

@@ -26,8 +26,10 @@ from tests.concordance.concordance_utils import (
     ODGI_BIN,
     PANACUS_BIN,
     VG_BIN,
+    normalize_depth,
     normalize_pav,
     normalize_similarity,
+    normalize_stats,
     normalize_vcf_for_golden,
     parse_growth_panacus,
     tool_or_skip,
@@ -151,12 +153,61 @@ def gen_similarity():
       print(f"  wrote tests/golden/{name}")
 
 
+def gen_stats():
+  odgi = tool_or_skip(ODGI_BIN, "odgi")
+  ver = tool_version(odgi)
+  gfa = FIXTURE_DIR / "similarity_fixture.gfa"
+  with tempfile.TemporaryDirectory() as d:
+    og = Path(d) / "g.og"
+    run([str(odgi), "build", "-g", str(gfa), "-o", str(og), "-t", "2"])
+    for odgi_flags, name in (
+        (["-S"], "stats_fixture.summarize.golden"),
+        (["-b"], "stats_fixture.base.golden"),
+    ):
+      r = run([str(odgi), "stats", "-i", str(og)] + odgi_flags)
+      body = normalize_stats(r.stdout)
+      cmd = f"odgi stats -i <og> {' '.join(odgi_flags)}".strip()
+      write_golden(
+          name,
+          [f"tool: {ver}", f"command: {cmd}", f"fixture: {gfa.name}",
+           "normalize: non-blank lines verbatim"],
+          body,
+      )
+      print(f"  wrote tests/golden/{name}")
+
+
+def gen_depth():
+  odgi = tool_or_skip(ODGI_BIN, "odgi")
+  ver = tool_version(odgi)
+  gfa = FIXTURE_DIR / "similarity_fixture.gfa"
+  with tempfile.TemporaryDirectory() as d:
+    og = Path(d) / "g.og"
+    run([str(odgi), "build", "-g", str(gfa), "-o", str(og), "-t", "2"])
+    for odgi_flags, mode, name in (
+        (["-S"], "summary (gfaz default)", "depth_fixture.summarize.golden"),
+        (["-d"], "per-node table (gfaz -d)", "depth_fixture.per_node.golden"),
+    ):
+      r = run([str(odgi), "depth", "-i", str(og), "-t", "2"] + odgi_flags)
+      body = normalize_depth(r.stdout)
+      cmd = f"odgi depth -i <og> -t 2 {' '.join(odgi_flags)}".strip()
+      write_golden(
+          name,
+          [f"tool: {ver}", f"command: {cmd}", f"fixture: {gfa.name}",
+           f"gfaz mode: {mode}",
+           "normalize: non-blank lines verbatim (node ids 1..N coincide)"],
+          body,
+      )
+      print(f"  wrote tests/golden/{name}")
+
+
 def main():
   any_written = False
   for label, fn in (("pav/odgi", gen_pav),
                     ("growth/panacus", gen_growth),
                     ("deconstruct/vg", gen_deconstruct),
-                    ("similarity/odgi", gen_similarity)):
+                    ("similarity/odgi", gen_similarity),
+                    ("stats/odgi", gen_stats),
+                    ("depth/odgi", gen_depth)):
     print(f"[{label}]")
     try:
       fn()

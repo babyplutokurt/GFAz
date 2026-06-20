@@ -1,0 +1,7 @@
+## tool: 0cfc3b19
+## command: odgi depth -i <og> -t 2 -S
+## fixture: similarity_fixture.gfa
+## gfaz mode: summary (gfaz default)
+## normalize: non-blank lines verbatim (node ids 1..N coincide)
+#node.count	graph.length	step.count	path.length	mean.node.depth	mean.graph.depth
+7	19	15	43	2.14286	2.26316

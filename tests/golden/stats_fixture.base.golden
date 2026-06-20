@@ -1,0 +1,8 @@
+## tool: 0cfc3b19
+## command: odgi stats -i <og> -b
+## fixture: similarity_fixture.gfa
+## normalize: non-blank lines verbatim
+A	8
+C	3
+G	7
+T	1

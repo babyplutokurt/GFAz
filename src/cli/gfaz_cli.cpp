@@ -34,6 +34,10 @@ int main(int argc, char *argv[]) {
     return gfaz::cli::do_pav(argc - 1, argv + 1);
   } else if (command == "similarity") {
     return gfaz::cli::do_similarity(argc - 1, argv + 1);
+  } else if (command == "stats") {
+    return gfaz::cli::do_stats(argc - 1, argv + 1);
+  } else if (command == "depth") {
+    return gfaz::cli::do_depth(argc - 1, argv + 1);
   } else if (command == "deconstruct") {
     return gfaz::cli::do_deconstruct(argc - 1, argv + 1);
   } else {

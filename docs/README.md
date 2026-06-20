@@ -28,6 +28,10 @@ This directory holds the project documentation. The top-level
   odgi-equivalent presence/absence ratio computation over BED ranges.
 - [workflows/SIMILARITY_WORKFLOW.md](workflows/SIMILARITY_WORKFLOW.md) —
   `gfaz similarity`, the odgi-equivalent all-vs-all group similarity matrix.
+- [workflows/STATS_WORKFLOW.md](workflows/STATS_WORKFLOW.md) — `gfaz stats`, the
+  odgi-equivalent graph dimension summary.
+- [workflows/DEPTH_WORKFLOW.md](workflows/DEPTH_WORKFLOW.md) — `gfaz depth`, the
+  odgi-equivalent node coverage depth.
 - [workflows/DECONSTRUCT_WORKFLOW.md](workflows/DECONSTRUCT_WORKFLOW.md) —
   `gfaz deconstruct`, the vg-equivalent GFA→VCF workflow.
 

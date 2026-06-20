@@ -57,6 +57,8 @@ engine for GFA downstream tasks, not just a file compressor.
 | 1b | PAV over BED ranges (odgi-equivalent) | ✅ shipped | `gfaz pav` — long/matrix/binary output, record/sample/sample#hap grouping. See [PAV_WORKFLOW.md](../workflows/PAV_WORKFLOW.md). |
 | 1c | Deconstruct GFA → VCF (vg-equivalent) | ✅ shipped | `gfaz deconstruct` — default matches `vg deconstruct` at ~99.99% concordance, 17–24× faster, ~6.7× less RAM (HPRC-v1.1 whole-genome). See [DECONSTRUCT_WORKFLOW.md](../workflows/DECONSTRUCT_WORKFLOW.md). |
 | 2 | All-vs-all similarity matrix (odgi-equivalent) | ✅ shipped | `gfaz similarity` — **first path-pair-iterative app**; matches `odgi similarity` *exactly* (values agree at %.6f, not just position-level, since output is group-name/bp only). Full parity: similarities, `-d` distances, `-a` all-pairs, `-S/-H/-p` grouping. See [SIMILARITY_WORKFLOW.md](../workflows/SIMILARITY_WORKFLOW.md). |
+| 3 | Graph stats (odgi-equivalent) | ✅ shipped | `gfaz stats` — `#length nodes edges paths steps` summary (`-S`) + A/C/G/T base content (`-b`), byte-identical to `odgi stats`. Metadata-only summary (no traversal decode). See [STATS_WORKFLOW.md](../workflows/STATS_WORKFLOW.md). |
+| 3b | Node coverage depth (odgi-equivalent) | ✅ shipped | `gfaz depth` — `-S` summary + `-d` per-node `depth`/`depth.uniq` table, matching `odgi depth`. Streams into one shared O(num_nodes) counter (no materialized graph). See [DEPTH_WORKFLOW.md](../workflows/DEPTH_WORKFLOW.md). |
 
 `growth`/`pav`/`deconstruct` are **path-iterative** (stream one path at a time);
 `similarity` opens the **path-pair-iterative** regime (N² comparisons, coverage-
@@ -88,22 +90,22 @@ follows just ranks them for execution.
 Scored on fit-to-GFAz (does it match the path-iterative / path-pair streaming
 model?), effort, paper value, and what it reuses from the extension surface.
 
-The rank-1 flagship — the all-vs-all similarity matrix — is now **shipped** as
-`gfaz similarity` (see Shipped above). Remaining candidates:
+The rank-1 flagship (all-vs-all similarity matrix) and the rank-2 companions
+(`stats` / `depth`) are now **shipped** (see Shipped above). Remaining candidates:
 
 | Rank | App | Regime | Fit | Effort | Paper value | Reuses |
 |---|---|---|---|---|---|---|
 | 1 (quick win) | Per-haplotype FASTA / GFA extraction by PanSN selector | path-iterative | ★★★ | low | ★ | `stream_decoded_nodes` + segment sequences; the "samtools view" of pangenomes |
-| 2 (companions) | `depth` / `stats` (node-window coverage histograms, path/metadata summaries) | path-iterative | ★★★ | low | ★ | same coverage accumulator as `growth`/`pav` |
-| 3 (PAV extension) | Novelty / panel metrics (private/accessory/core bp, non-panel burden) | path-iterative | ★★ | medium | ★★ | panel node bitset + stream; Phase 3 in [COMPUTE_ENGINE_DIRECTION.md](COMPUTE_ENGINE_DIRECTION.md) |
+| 2 (PAV extension) | Novelty / panel metrics (private/accessory/core bp, non-panel burden) | path-iterative | ★★ | medium | ★★ | panel node bitset + stream; Phase 3 in [COMPUTE_ENGINE_DIRECTION.md](COMPUTE_ENGINE_DIRECTION.md) |
 | — (deferred) | All-vs-all IBD / shared-run detection | path-pair | ★★ | high | ★★★ | builds on `similarity`'s pair machinery; needs careful match definitions |
 
 **Recommended order and rationale:**
 
-1. **`extraction` and `depth`/`stats`** — both low-effort, reuse existing
-   machinery, and broaden adoption (extraction unlocks interactive users;
-   depth/stats round out the odgi/vg-equivalent surface), each with a baseline
-   (`vg paths --extract-fasta` / `odgi paths -f`; `odgi depth` / `vg stats`).
+1. **`extraction`** — low-effort, reuses `stream_decoded_nodes` + segment
+   sequences, and broadens adoption (the "samtools view" of pangenomes, unlocking
+   interactive users); baseline `vg paths --extract-fasta` / `odgi paths -f`.
+   Note `gfaz extract-path` / `extract-walk` already cover single-line extraction,
+   so this is mostly a PanSN-selector + FASTA wrapper on top.
 2. **Then novelty/panel metrics** as the PAV-engine extension once multi-reference
    panel input is wanted.
 3. **IBD / shared-runs** is the natural deeper follow-up to `similarity` in the

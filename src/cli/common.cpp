@@ -78,6 +78,8 @@ USAGE:
     gfaz growth [OPTIONS] <input.gfaz>
     gfaz pav -i <input.gfaz> -b <ranges.bed> [OPTIONS]
     gfaz similarity -i <input.gfaz> [OPTIONS]
+    gfaz stats -i <input.gfaz> [OPTIONS]
+    gfaz depth -i <input.gfaz> [OPTIONS]
     gfaz deconstruct -i <input.gfaz> -r <reference-name> [OPTIONS]
 
 SUBCOMMANDS:
@@ -89,6 +91,8 @@ SUBCOMMANDS:
     growth        Compute pangenome growth curve (Panacus-equivalent, count=node)
     pav           Compute PAV ratios over BED ranges from compressed traversals
     similarity    All-vs-all group similarity matrix (odgi similarity-equivalent)
+    stats         Graph dimension summary (odgi stats-equivalent)
+    depth         Node coverage depth (odgi depth-equivalent)
     deconstruct   Derive a VCF (GFA -> VCF) relative to a reference path
 
 OPTIONS (compress):
@@ -325,6 +329,70 @@ NOTES:
     Streams compressed P/W traversals into per-group node-coverage vectors and a
     transient node->group index; it does not materialize a full graph. Memory is
     proportional to the traversal coverage, not the graph object.
+
+)";
+}
+
+void print_stats_help() {
+  std::cout << R"(
+gfaz stats - Graph dimension summary from a GFAZ file
+
+USAGE:
+    gfaz stats -i <input.gfaz> [OPTIONS]
+    gfaz stats [OPTIONS] <input.gfaz>
+
+OPTIONS:
+    -i, --idx <FILE>        Input .gfaz file. --input is also accepted.
+    -S, --summarize         Print the graph-dimension summary (default).
+    -b, --base-content      Print A/C/G/T counts over the segment sequences
+                            instead of the summary (matches `odgi stats -b`).
+    -h, --help              Show this help message.
+
+OUTPUT:
+    Default (matches `odgi stats -S`), tab-delimited:
+      #length  nodes  edges  paths  steps
+    where length = total segment bp, nodes = #segments, edges = #L-lines,
+    paths = #P-lines + #W-lines, steps = total node visits across all paths.
+
+NOTES:
+    Computed directly from the compressed container metadata (no traversal
+    decode for the summary), so it is near-instant. Node counts are independent
+    of node identity; gfaz uses its own 1-based node ids.
+
+)";
+}
+
+void print_depth_help() {
+  std::cout << R"(
+gfaz depth - Node coverage depth from a GFAZ file
+
+USAGE:
+    gfaz depth -i <input.gfaz> [OPTIONS]
+    gfaz depth [OPTIONS] <input.gfaz>
+
+OPTIONS:
+    -i, --idx <FILE>        Input .gfaz file. --input is also accepted.
+    -S, --summarize         Print the depth-distribution summary (default).
+    -d, --graph-depth-table Print the per-node depth table (matches
+                            `odgi depth -d`).
+    -t, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP.
+    -j, --threads <N>       Alias for -t.
+    -h, --help              Show this help message.
+
+OUTPUT:
+    Default (matches `odgi depth -S`), tab-delimited:
+      #node.count  graph.length  step.count  path.length  mean.node.depth
+      mean.graph.depth
+    With -d (matches `odgi depth -d`):
+      #node.id  depth  depth.uniq
+    where depth = total steps on the node (multiplicity-counted) and depth.uniq
+    = number of distinct paths visiting it.
+
+NOTES:
+    Streams the compressed P/W traversals into a single shared per-node counter
+    (peak memory ~ num_nodes, not num_nodes x threads), so it does not
+    materialize a full graph. The -d node ids are gfaz's own 1-based ids, so the
+    table matches odgi byte-for-byte only when the GFA segment names are 1..N.
 
 )";
 }
