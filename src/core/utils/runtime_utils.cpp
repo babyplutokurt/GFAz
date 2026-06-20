@@ -7,10 +7,6 @@
 
 namespace gfaz::runtime_utils {
 
-double gbps_from_mb(double size_mb, double time_ms) {
-  return (time_ms > 0) ? (size_mb / 1024.0) / (time_ms / 1000.0) : 0;
-}
-
 std::string format_size(size_t bytes) {
   std::ostringstream oss;
   if (bytes >= 1024 * 1024)
