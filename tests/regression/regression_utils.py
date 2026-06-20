@@ -33,10 +33,6 @@ def add_repo_and_build_to_syspath():
   sys.path.insert(0, str(BUILD_DIR))
 
 
-def format_size_mb(num_bytes: int) -> str:
-  return f"{num_bytes / (1024 * 1024):.2f} MB"
-
-
 def run_command(cmd, cwd=None):
   return subprocess.run(
       cmd,
@@ -58,86 +54,6 @@ def require_success(result, step_name: str):
       result.stderr.strip() or "<empty>",
   ]
   raise AssertionError("\n".join(message))
-
-
-def assert_stats_output(output: str, expect_ratio: bool):
-  required = ["Time:", "Input:", "Output:"]
-  if expect_ratio:
-    required.append("Ratio:")
-  missing = [token for token in required if token not in output]
-  if missing:
-    raise AssertionError(
-        f"Missing stats fields {missing} in CLI output:\n{output.strip()}"
-    )
-
-
-def calculate_gpu_compressed_size(compressed):
-  total = 0
-  for attr in [
-      "paths_zstd",
-      "walks_zstd",
-      "rules_first_zstd",
-      "rules_second_zstd",
-      "names_zstd",
-      "name_lengths_zstd",
-      "overlaps_zstd",
-      "overlap_lengths_zstd",
-      "segment_sequences_zstd",
-      "segment_seq_lengths_zstd",
-      "link_from_ids_zstd",
-      "link_to_ids_zstd",
-      "link_from_orients_zstd",
-      "link_to_orients_zstd",
-      "link_overlap_nums_zstd",
-      "link_overlap_ops_zstd",
-      "walk_sample_ids_zstd",
-      "walk_sample_id_lengths_zstd",
-      "walk_hap_indices_zstd",
-      "walk_seq_ids_zstd",
-      "walk_seq_id_lengths_zstd",
-      "walk_seq_starts_zstd",
-      "walk_seq_ends_zstd",
-      "jump_from_ids_zstd",
-      "jump_to_ids_zstd",
-      "jump_from_orients_zstd",
-      "jump_to_orients_zstd",
-      "jump_distances_zstd",
-      "jump_distance_lengths_zstd",
-      "jump_rest_fields_zstd",
-      "jump_rest_lengths_zstd",
-      "containment_container_ids_zstd",
-      "containment_contained_ids_zstd",
-      "containment_container_orients_zstd",
-      "containment_contained_orients_zstd",
-      "containment_positions_zstd",
-      "containment_overlaps_zstd",
-      "containment_overlap_lengths_zstd",
-      "containment_rest_fields_zstd",
-      "containment_rest_lengths_zstd",
-  ]:
-    block = getattr(compressed, attr, None)
-    if block and block.payload:
-      total += len(block.payload)
-
-  for col in compressed.segment_optional_fields_zstd:
-    for attr in [
-        "int_values_zstd",
-        "float_values_zstd",
-        "char_values_zstd",
-        "strings_zstd",
-        "string_lengths_zstd",
-        "b_subtypes_zstd",
-        "b_lengths_zstd",
-        "b_concat_bytes_zstd",
-    ]:
-      block = getattr(col, attr, None)
-      if block and block.payload:
-        total += len(block.payload)
-
-  if hasattr(compressed, "header_line") and compressed.header_line:
-    total += len(compressed.header_line)
-
-  return total
 
 
 def has_gpu_bindings(gfa_lib) -> bool:
