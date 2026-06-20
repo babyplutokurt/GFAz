@@ -17,11 +17,6 @@ struct CompressionRules2Mer {
   uint32_t rules_start_id;
   uint32_t next_available_id;
 
-  // Helper: get kmer for a rule_id (O(1) vector access)
-  Packed2mer get_kmer(uint32_t rule_id) const {
-    return rule_id_to_kmer[rule_id - rules_start_id];
-  }
-
   // Helper: number of rules
   size_t num_rules() const { return rule_id_to_kmer.size(); }
 };
