@@ -146,6 +146,18 @@ def main():
   nfail = results.count("FAIL") + results.count("MISSING")
   print(f"\nSummary: {npass} passed, {nskip} skipped, {nfail} failed "
         f"({len(results)} suites)")
+
+  # GPU is never exercised by this script: the binding suites run with
+  # --skip-gpu (GPU is experimental and often not built). Surface that
+  # explicitly so a green run is not mistaken for GPU coverage.
+  if binding_py is None:
+    print("Note: GPU/CUDA roundtrip NOT exercised, and no binding-capable "
+          "interpreter was found, so the CPU binding roundtrip was skipped too.")
+  else:
+    print("Note: GPU/CUDA roundtrip NOT exercised here. To run it:\n"
+          f"  PYTHONPATH=build {binding_py} "
+          "tests/regression/test_compression_regression.py")
+
   sys.exit(1 if nfail else 0)
 
 
