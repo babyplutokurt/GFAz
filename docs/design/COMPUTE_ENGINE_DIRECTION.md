@@ -194,6 +194,11 @@ large GFA -> .gfaz -> path-derived matrices/statistics
 > `gfaz growth` ships the Panacus-equivalent curve. See
 > [PAV_WORKFLOW.md](../workflows/PAV_WORKFLOW.md), [GROWTH_WORKFLOW.md](../workflows/GROWTH_WORKFLOW.md), and
 > [DECONSTRUCT_WORKFLOW.md](../workflows/DECONSTRUCT_WORKFLOW.md). Phases 3–4 remain future work.
+> The shared layer is now documented as a stable extension surface in
+> [EXTENDING_COMPUTE_ENGINE.md](../EXTENDING_COMPUTE_ENGINE.md) (how to add a new
+> compute app). All shipped apps are **path-iterative**; the next frontier is the
+> **path-pair-iterative** regime (all-vs-all distances) — see the ranked next
+> builds in [DOWNSTREAM_APPLICATIONS.md](DOWNSTREAM_APPLICATIONS.md).
 
 ### Phase 1: Shared Traversal Streaming Layer — ✅ shipped
 

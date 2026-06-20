@@ -14,6 +14,12 @@ This directory holds the project documentation. The top-level
 - [WORKFLOW.md](WORKFLOW.md) — CPU/GPU compression & decompression workflows and
   the shared `.gfaz` serialization contract (magic `GFAZ`, version 5).
 
+## Extending the compute engine
+
+- [EXTENDING_COMPUTE_ENGINE.md](EXTENDING_COMPUTE_ENGINE.md) — developer guide for
+  adding a new compute app: the shared extension surface, the canonical app
+  skeleton, every wiring touch point, and the determinism/memory conventions.
+
 ## Compute-engine workflows (`reference` specs for shipped subcommands)
 
 - [workflows/GROWTH_WORKFLOW.md](workflows/GROWTH_WORKFLOW.md) — `gfaz growth`,

@@ -49,20 +49,81 @@ engine for GFA downstream tasks, not just a file compressor.
 | PWAS / per-node genotype vectors | node→paths inverse index |
 | Reference-coordinate region queries | ref path bp→node offset index |
 
-## Prioritized First Implementations
+## Shipped
 
 | # | Target | Status | Notes |
 |---|---|---|---|
 | 1 | Pangenome growth (Panacus-equivalent) | ✅ shipped | `gfaz growth` — multithreaded (OpenMP), node-counted, all grouping modes (path / sample-hap-seq / sample-hap / sample). See [GROWTH_WORKFLOW.md](../workflows/GROWTH_WORKFLOW.md). Core/variable + bp + grammar push-down remain follow-ups. |
 | 1b | PAV over BED ranges (odgi-equivalent) | ✅ shipped | `gfaz pav` — long/matrix/binary output, record/sample/sample#hap grouping. See [PAV_WORKFLOW.md](../workflows/PAV_WORKFLOW.md). |
-| 1c | Deconstruct GFA → VCF (vg-equivalent) | ✅ shipped | `gfaz deconstruct` — default matches `vg deconstruct` at ~99.99% concordance, 17–24× faster. See [DECONSTRUCT_WORKFLOW.md](../workflows/DECONSTRUCT_WORKFLOW.md). |
-| 2 | All-vs-all haplotype distance matrix (Jaccard / shared-node) | planned | N² work, O(1) memory — nothing on the market does this streamingly at scale. |
-| 3 | Haplotype k-mer scoring for PanGenie / Giraffe subsampling | planned | Highest downstream impact; validate that panel loading (not k-mer index build) is the real bottleneck first. |
-| 4 | Per-haplotype FASTA / GFA extraction CLI + Python API | planned | Trivial to build; becomes the "samtools view" of pangenomes; unlocks interactive users. |
+| 1c | Deconstruct GFA → VCF (vg-equivalent) | ✅ shipped | `gfaz deconstruct` — default matches `vg deconstruct` at ~99.99% concordance, 17–24× faster, ~6.7× less RAM (HPRC-v1.1 whole-genome). See [DECONSTRUCT_WORKFLOW.md](../workflows/DECONSTRUCT_WORKFLOW.md). |
+
+All three shipped apps are **path-iterative** (stream one path at a time). They
+are built on the shared traversal layer documented in
+[../EXTENDING_COMPUTE_ENGINE.md](../EXTENDING_COMPUTE_ENGINE.md) — read that
+before starting any new app.
+
+## 2026 external scan
+
+A quick landscape check (June 2026) — the planned directions still have no direct
+streaming-at-scale competitor, and the field is moving toward exactly the
+matrix/feature representations GFAz is positioned to emit:
+
+- **Allele-centric / pan-graph-matrix representations** are an active direction
+  for scalable analysis ([arXiv 2512.21320](https://arxiv.org/html/2512.21320v1)),
+  reinforcing the matrix/feature-table framing in
+  [COMPUTE_ENGINE_DIRECTION.md](COMPUTE_ENGINE_DIRECTION.md).
+- **Graph/path comparison tools** — gretl (graph QC metrics) and PANCAT (variation-
+  graph diffs via edit distance) — show demand for path-similarity/QC outputs.
+- **Low-coverage pangenome genotyping** continues to grow, keeping the
+  haplotype-scoring/subsampling direction relevant.
+- General catalog: [awesome-pangenomes](https://github.com/colindaven/awesome-pangenomes).
+
+Takeaway: no change of course needed — the existing picks are well-aimed; what
+follows just ranks them for execution.
+
+## Recommended next builds (ranked)
+
+Scored on fit-to-GFAz (does it match the path-iterative / path-pair streaming
+model?), effort, paper value, and what it reuses from the extension surface.
+
+| Rank | App | Regime | Fit | Effort | Paper value | Reuses |
+|---|---|---|---|---|---|---|
+| **1 (flagship)** | All-vs-all haplotype distance/similarity matrix (Jaccard / Dice / shared-node) | **path-pair** | ★★★ | medium | ★★★ | `stream_decoded_nodes` per pair → node-set/shared-count accumulator (O(2 paths) resident) |
+| 2 (quick win) | Per-haplotype FASTA / GFA extraction by PanSN selector | path-iterative | ★★★ | low | ★ | `stream_decoded_nodes` + segment sequences; the "samtools view" of pangenomes |
+| 3 (companions) | `depth` / `stats` (node-window coverage histograms, path/metadata summaries) | path-iterative | ★★★ | low | ★ | same coverage accumulator as `growth`/`pav` |
+| 4 (PAV extension) | Novelty / panel metrics (private/accessory/core bp, non-panel burden) | path-iterative | ★★ | medium | ★★ | panel node bitset + stream; Phase 3 in [COMPUTE_ENGINE_DIRECTION.md](COMPUTE_ENGINE_DIRECTION.md) |
+
+**Recommended order and rationale:**
+
+1. **Flagship: the all-vs-all distance matrix.** It opens the **path-pair-iterative
+   regime** — the one workload class GFAz has not yet demonstrated — where N²
+   decodes run against O(2 paths) resident memory. No materialized-graph tool does
+   this streamingly at HPRC scale, so it is the strongest standalone paper claim
+   and the natural input to clustering/phylogeny. Medium effort: the per-pair
+   accumulator is small; the work is choosing the metric set and an efficient
+   pair-iteration schedule.
+2. **Ship `extraction` and `depth`/`stats` alongside it** — both are low-effort,
+   reuse machinery that already exists, and broaden adoption (extraction unlocks
+   interactive users; depth/stats round out the odgi/vg-equivalent surface).
+3. **Then novelty/panel metrics** as the PAV-engine extension once multi-reference
+   panel input is wanted.
+
+(`Haplotype k-mer scoring` for PanGenie/Giraffe subsampling remains the highest
+*downstream* impact but is gated on the open profiling question below — confirm
+the bottleneck is panel loading before committing.)
 
 ## Strategic Framing
 
-GFAz wins where the workload is **path-iterative or path-pair-iterative**.
+GFAz wins where the workload is **path-iterative or path-pair-iterative**. The
+two regimes are the load-bearing distinction:
+
+- **path-iterative** — stream one path at a time into a small accumulator
+  (O(nodes) or O(windows)). All three shipped apps (`growth`, `pav`,
+  `deconstruct`) live here.
+- **path-pair-iterative** — nested loop over paths, only O(2 paths) resident
+  (all-vs-all distances, IBD, LD). **Not yet demonstrated** — the flagship next
+  build (the distance matrix) is what opens it.
+
 Framing for the paper / docs:
 
 - **GBZ** is the format for read mappers (Giraffe, GBWT-style bidirectional
