@@ -22,17 +22,9 @@ inline char complement_base(char c) {
   }
 }
 
-// Reverse-complement a DNA string. Used when a traversal visits a segment in
-// reverse orientation (negative node id), since the segment sequence is stored
-// in forward orientation.
-inline std::string reverse_complement(const std::string &seq) {
-  std::string out;
-  out.resize(seq.size());
-  for (size_t i = 0; i < seq.size(); ++i)
-    out[seq.size() - 1 - i] = complement_base(seq[i]);
-  return out;
-}
-
+// Reverse-complement a DNA string in place. Used when a traversal visits a
+// segment in reverse orientation (negative node id), since the segment sequence
+// is stored in forward orientation.
 inline void reverse_complement_inplace(std::string &seq) {
   const size_t n = seq.size();
   for (size_t i = 0; i < n / 2; ++i) {
