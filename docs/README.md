@@ -26,6 +26,8 @@ This directory holds the project documentation. The top-level
   the Panacus-equivalent pangenome growth curve.
 - [workflows/PAV_WORKFLOW.md](workflows/PAV_WORKFLOW.md) — `gfaz pav`, the
   odgi-equivalent presence/absence ratio computation over BED ranges.
+- [workflows/SIMILARITY_WORKFLOW.md](workflows/SIMILARITY_WORKFLOW.md) —
+  `gfaz similarity`, the odgi-equivalent all-vs-all group similarity matrix.
 - [workflows/DECONSTRUCT_WORKFLOW.md](workflows/DECONSTRUCT_WORKFLOW.md) —
   `gfaz deconstruct`, the vg-equivalent GFA→VCF workflow.
 

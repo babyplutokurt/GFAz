@@ -77,6 +77,7 @@ USAGE:
     gfaz add-haplotypes [OPTIONS] <input.gfaz> <paths_or_walks.gfa> [output.gfaz]
     gfaz growth [OPTIONS] <input.gfaz>
     gfaz pav -i <input.gfaz> -b <ranges.bed> [OPTIONS]
+    gfaz similarity -i <input.gfaz> [OPTIONS]
     gfaz deconstruct -i <input.gfaz> -r <reference-name> [OPTIONS]
 
 SUBCOMMANDS:
@@ -87,6 +88,7 @@ SUBCOMMANDS:
     add-haplotypes  Append path-only or walk-only haplotypes using the existing rulebook
     growth        Compute pangenome growth curve (Panacus-equivalent, count=node)
     pav           Compute PAV ratios over BED ranges from compressed traversals
+    similarity    All-vs-all group similarity matrix (odgi similarity-equivalent)
     deconstruct   Derive a VCF (GFA -> VCF) relative to a reference path
 
 OPTIONS (compress):
@@ -285,6 +287,44 @@ NOTES:
     The implementation builds a temporary reference-window index from BED
     ranges, then streams compressed P/W traversals to fill the matrix. It does
     not materialize a full graph or a persistent node-to-step index.
+
+)";
+}
+
+void print_similarity_help() {
+  std::cout << R"(
+gfaz similarity - All-vs-all group similarity matrix from a GFAZ file
+
+USAGE:
+    gfaz similarity -i <input.gfaz> [OPTIONS] > matrix.tsv
+    gfaz similarity [OPTIONS] <input.gfaz>
+
+OPTIONS:
+    -i, --idx <FILE>        Input .gfaz file. --input is also accepted.
+    -S, --group-by-sample   Group P/W traversals by sample (default).
+    -H, --group-by-haplotype
+                            Group P/W traversals by sample#hap.
+    -p, --per-path          Each P/W line is its own row/column (matches
+                            `odgi similarity`'s no-delimiter default).
+    -d, --distances         Emit dissimilarities plus euclidean/manhattan
+                            distances (matches `odgi similarity -d`).
+    -a, --all               Emit every ordered pair, including pairs with zero
+                            intersection (matches `odgi similarity -a`).
+    -t, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP.
+    -j, --threads <N>       Alias for -t.
+    -h, --help              Show this help message.
+
+OUTPUT:
+    Tab-delimited, one line per ordered group pair, in `odgi similarity`'s
+    column layout. Multiplicity-aware (matches odgi): a group's length and the
+    pairwise intersection count each node visit (node length x visits), not a
+    set/union. Metrics: jaccard, cosine, dice, estimated.identity (or their
+    distances with -d).
+
+NOTES:
+    Streams compressed P/W traversals into per-group node-coverage vectors and a
+    transient node->group index; it does not materialize a full graph. Memory is
+    proportional to the traversal coverage, not the graph object.
 
 )";
 }

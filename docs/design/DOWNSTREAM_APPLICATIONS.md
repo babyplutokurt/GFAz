@@ -56,9 +56,11 @@ engine for GFA downstream tasks, not just a file compressor.
 | 1 | Pangenome growth (Panacus-equivalent) | ✅ shipped | `gfaz growth` — multithreaded (OpenMP), node-counted, all grouping modes (path / sample-hap-seq / sample-hap / sample). See [GROWTH_WORKFLOW.md](../workflows/GROWTH_WORKFLOW.md). Core/variable + bp + grammar push-down remain follow-ups. |
 | 1b | PAV over BED ranges (odgi-equivalent) | ✅ shipped | `gfaz pav` — long/matrix/binary output, record/sample/sample#hap grouping. See [PAV_WORKFLOW.md](../workflows/PAV_WORKFLOW.md). |
 | 1c | Deconstruct GFA → VCF (vg-equivalent) | ✅ shipped | `gfaz deconstruct` — default matches `vg deconstruct` at ~99.99% concordance, 17–24× faster, ~6.7× less RAM (HPRC-v1.1 whole-genome). See [DECONSTRUCT_WORKFLOW.md](../workflows/DECONSTRUCT_WORKFLOW.md). |
+| 2 | All-vs-all similarity matrix (odgi-equivalent) | ✅ shipped | `gfaz similarity` — **first path-pair-iterative app**; matches `odgi similarity` *exactly* (values agree at %.6f, not just position-level, since output is group-name/bp only). Full parity: similarities, `-d` distances, `-a` all-pairs, `-S/-H/-p` grouping. See [SIMILARITY_WORKFLOW.md](../workflows/SIMILARITY_WORKFLOW.md). |
 
-All three shipped apps are **path-iterative** (stream one path at a time). They
-are built on the shared traversal layer documented in
+`growth`/`pav`/`deconstruct` are **path-iterative** (stream one path at a time);
+`similarity` opens the **path-pair-iterative** regime (N² comparisons, coverage-
+vector resident). All are built on the shared traversal layer documented in
 [../EXTENDING_COMPUTE_ENGINE.md](../EXTENDING_COMPUTE_ENGINE.md) — read that
 before starting any new app.
 
@@ -86,27 +88,28 @@ follows just ranks them for execution.
 Scored on fit-to-GFAz (does it match the path-iterative / path-pair streaming
 model?), effort, paper value, and what it reuses from the extension surface.
 
+The rank-1 flagship — the all-vs-all similarity matrix — is now **shipped** as
+`gfaz similarity` (see Shipped above). Remaining candidates:
+
 | Rank | App | Regime | Fit | Effort | Paper value | Reuses |
 |---|---|---|---|---|---|---|
-| **1 (flagship)** | All-vs-all haplotype distance/similarity matrix (Jaccard / Dice / shared-node) | **path-pair** | ★★★ | medium | ★★★ | `stream_decoded_nodes` per pair → node-set/shared-count accumulator (O(2 paths) resident) |
-| 2 (quick win) | Per-haplotype FASTA / GFA extraction by PanSN selector | path-iterative | ★★★ | low | ★ | `stream_decoded_nodes` + segment sequences; the "samtools view" of pangenomes |
-| 3 (companions) | `depth` / `stats` (node-window coverage histograms, path/metadata summaries) | path-iterative | ★★★ | low | ★ | same coverage accumulator as `growth`/`pav` |
-| 4 (PAV extension) | Novelty / panel metrics (private/accessory/core bp, non-panel burden) | path-iterative | ★★ | medium | ★★ | panel node bitset + stream; Phase 3 in [COMPUTE_ENGINE_DIRECTION.md](COMPUTE_ENGINE_DIRECTION.md) |
+| 1 (quick win) | Per-haplotype FASTA / GFA extraction by PanSN selector | path-iterative | ★★★ | low | ★ | `stream_decoded_nodes` + segment sequences; the "samtools view" of pangenomes |
+| 2 (companions) | `depth` / `stats` (node-window coverage histograms, path/metadata summaries) | path-iterative | ★★★ | low | ★ | same coverage accumulator as `growth`/`pav` |
+| 3 (PAV extension) | Novelty / panel metrics (private/accessory/core bp, non-panel burden) | path-iterative | ★★ | medium | ★★ | panel node bitset + stream; Phase 3 in [COMPUTE_ENGINE_DIRECTION.md](COMPUTE_ENGINE_DIRECTION.md) |
+| — (deferred) | All-vs-all IBD / shared-run detection | path-pair | ★★ | high | ★★★ | builds on `similarity`'s pair machinery; needs careful match definitions |
 
 **Recommended order and rationale:**
 
-1. **Flagship: the all-vs-all distance matrix.** It opens the **path-pair-iterative
-   regime** — the one workload class GFAz has not yet demonstrated — where N²
-   decodes run against O(2 paths) resident memory. No materialized-graph tool does
-   this streamingly at HPRC scale, so it is the strongest standalone paper claim
-   and the natural input to clustering/phylogeny. Medium effort: the per-pair
-   accumulator is small; the work is choosing the metric set and an efficient
-   pair-iteration schedule.
-2. **Ship `extraction` and `depth`/`stats` alongside it** — both are low-effort,
-   reuse machinery that already exists, and broaden adoption (extraction unlocks
-   interactive users; depth/stats round out the odgi/vg-equivalent surface).
-3. **Then novelty/panel metrics** as the PAV-engine extension once multi-reference
+1. **`extraction` and `depth`/`stats`** — both low-effort, reuse existing
+   machinery, and broaden adoption (extraction unlocks interactive users;
+   depth/stats round out the odgi/vg-equivalent surface), each with a baseline
+   (`vg paths --extract-fasta` / `odgi paths -f`; `odgi depth` / `vg stats`).
+2. **Then novelty/panel metrics** as the PAV-engine extension once multi-reference
    panel input is wanted.
+3. **IBD / shared-runs** is the natural deeper follow-up to `similarity` in the
+   path-pair regime, but needs careful long-match/positional definitions
+   (see [COMPUTE_ENGINE_DIRECTION.md](COMPUTE_ENGINE_DIRECTION.md) §"Why Not
+   Start With IBD").
 
 (`Haplotype k-mer scoring` for PanGenie/Giraffe subsampling remains the highest
 *downstream* impact but is gated on the open profiling question below — confirm

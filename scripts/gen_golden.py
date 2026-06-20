@@ -27,6 +27,7 @@ from tests.concordance.concordance_utils import (
     PANACUS_BIN,
     VG_BIN,
     normalize_pav,
+    normalize_similarity,
     normalize_vcf_for_golden,
     parse_growth_panacus,
     tool_or_skip,
@@ -119,11 +120,43 @@ def gen_deconstruct():
   print(f"  wrote tests/golden/{name}")
 
 
+def gen_similarity():
+  odgi = tool_or_skip(ODGI_BIN, "odgi")
+  ver = tool_version(odgi)
+  gfa = FIXTURE_DIR / "similarity_fixture.gfa"
+  with tempfile.TemporaryDirectory() as d:
+    og = Path(d) / "g.og"
+    run([str(odgi), "build", "-g", str(gfa), "-o", str(og), "-t", "2"])
+    # (odgi flags, gfaz mode label, golden name). per-path == odgi default
+    # (no -D); per-sample == odgi -D '#' -p 1 == gfaz -S.
+    for odgi_flags, mode, name in (
+        ([], "per-path (gfaz -p)", "similarity_fixture.per_path.golden"),
+        (["-D", "#", "-p", "1"], "per-sample (gfaz -S)",
+         "similarity_fixture.sample.golden"),
+        (["-D", "#", "-p", "1", "-d"], "per-sample distances (gfaz -S -d)",
+         "similarity_fixture.sample.distances.golden"),
+        (["-D", "#", "-p", "1", "-a"], "per-sample all-pairs (gfaz -S -a)",
+         "similarity_fixture.sample.all.golden"),
+    ):
+      r = run([str(odgi), "similarity", "-i", str(og), "-t", "2"] + odgi_flags)
+      body = normalize_similarity(r.stdout)
+      cmd = f"odgi similarity -i <og> -t 2 {' '.join(odgi_flags)}".strip()
+      write_golden(
+          name,
+          [f"tool: {ver}", f"command: {cmd}", f"fixture: {gfa.name}",
+           f"gfaz mode: {mode}",
+           "normalize: header verbatim + body lines sorted"],
+          body,
+      )
+      print(f"  wrote tests/golden/{name}")
+
+
 def main():
   any_written = False
   for label, fn in (("pav/odgi", gen_pav),
                     ("growth/panacus", gen_growth),
-                    ("deconstruct/vg", gen_deconstruct)):
+                    ("deconstruct/vg", gen_deconstruct),
+                    ("similarity/odgi", gen_similarity)):
     print(f"[{label}]")
     try:
       fn()

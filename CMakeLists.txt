@@ -153,6 +153,7 @@ set(GFAZ_COMPRESS_SOURCES
 set(GFAZ_COMPUTE_SOURCES
   src/compute/growth_workflow.cpp
   src/compute/pav_workflow.cpp
+  src/compute/similarity_workflow.cpp
   src/compute/deconstruct_workflow.cpp
   src/compute/snarl_finder.cpp
   src/compute/traversal_query.cpp
@@ -272,6 +273,7 @@ if(BUILD_CLI)
     src/cli/add_haplotypes_command.cpp
     src/cli/growth_command.cpp
     src/cli/pav_command.cpp
+    src/cli/similarity_command.cpp
     src/cli/deconstruct_command.cpp
   )
   set_target_properties(gfaz PROPERTIES

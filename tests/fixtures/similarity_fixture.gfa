@@ -1,0 +1,20 @@
+H	VN:Z:1.0
+S	1	AAAA
+S	2	CC
+S	3	GGG
+S	4	T
+S	5	AC
+S	6	GGGG
+S	7	AAA
+L	1	+	2	+	0M
+L	2	+	3	+	0M
+L	3	+	2	+	0M
+L	1	+	3	+	0M
+L	3	+	4	+	0M
+L	2	+	5	+	0M
+L	6	+	7	+	0M
+P	sampleA#0#chr1	1+,2+,3+	*
+P	sampleA#1#chr1	1+,2+,3+,2+	*
+P	sampleB#0#chr1	1+,3+,4+	*
+P	sampleB#1#chr1	1+,2+,5+	*
+P	sampleC#0#chr2	6+,7+	*

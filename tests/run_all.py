@@ -44,8 +44,10 @@ HERMETIC_SUITES = [
     "tests/regression/test_degenerate_inputs.py",
     "tests/regression/test_input_robustness.py",
     "tests/regression/test_pansn_grouping.py",
+    "tests/regression/test_similarity.py",
     "tests/concordance/test_pav_vs_odgi.py",
     "tests/concordance/test_growth_vs_panacus.py",
+    "tests/concordance/test_similarity_vs_odgi.py",
     "tests/concordance/test_deconstruct_vs_vg.py",
     # Opt-in chrY-scale concordance; SKIPs unless GFAZ_LARGE_CONCORDANCE is set.
     "tests/concordance/test_deconstruct_vs_vg_large.py",

@@ -103,6 +103,20 @@ def normalize_pav(text: str) -> str:
 
 
 # --------------------------------------------------------------------------
+# similarity normalization
+# --------------------------------------------------------------------------
+def normalize_similarity(text: str) -> str:
+  """Header line verbatim + body lines sorted. gfaz emits pairs in (a,b)
+  ascending order, odgi in hash-map order, so compare after sorting the body.
+  Both tools print %.6f, so values compare as exact strings."""
+  lines = [ln for ln in text.splitlines() if ln.strip() != ""]
+  if not lines:
+    return ""
+  header, body = lines[0], sorted(lines[1:])
+  return "\n".join([header] + body)
+
+
+# --------------------------------------------------------------------------
 # growth normalization
 # --------------------------------------------------------------------------
 def parse_growth_gfaz(text: str) -> dict:

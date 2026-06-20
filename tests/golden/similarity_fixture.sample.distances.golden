@@ -1,0 +1,11 @@
+## tool: 0cfc3b19
+## command: odgi similarity -i <og> -t 2 -D # -p 1 -d
+## fixture: similarity_fixture.gfa
+## gfaz mode: per-sample distances (gfaz -S -d)
+## normalize: header verbatim + body lines sorted
+group.a	group.b	group.a.length	group.b.length	intersection	jaccard.distance	cosine.distance	dice.distance	estimated.difference.rate	euclidean.distance	manhattan.distance
+sampleA	sampleA	20	20	20	0.000000	0.000000	0.000000	0.000000	0.000000	0
+sampleA	sampleB	20	16	13	0.434783	0.273278	0.277778	0.277778	3.162278	10
+sampleB	sampleA	16	20	13	0.434783	0.273278	0.277778	0.277778	3.162278	10
+sampleB	sampleB	16	16	16	0.000000	0.000000	0.000000	0.000000	0.000000	0
+sampleC	sampleC	7	7	7	0.000000	0.000000	0.000000	0.000000	0.000000	0
