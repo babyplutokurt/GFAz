@@ -21,7 +21,6 @@ construction. They encode the divergences discovered against the real tools:
                   compare only (CHROM, POS, REF, ALT) -> per-sample GT vector.
 """
 
-import math
 import os
 from pathlib import Path
 
@@ -179,18 +178,6 @@ def parse_growth_panacus(text: str) -> dict:
     except ValueError:
       continue
   return curve
-
-
-def growth_concordant(gfaz_text: str, panacus_text: str):
-  """Return (ok, message). Predicate: panacus[k] == floor(gfaz[k]) for all k."""
-  g = parse_growth_gfaz(gfaz_text)
-  p = parse_growth_panacus(panacus_text)
-  if set(g) != set(p):
-    return False, f"k set mismatch: gfaz={sorted(g)} panacus={sorted(p)}"
-  for k in sorted(g):
-    if math.floor(g[k]) != p[k]:
-      return False, f"k={k}: floor(gfaz {g[k]})={math.floor(g[k])} != panacus {p[k]}"
-  return True, "ok"
 
 
 # --------------------------------------------------------------------------
