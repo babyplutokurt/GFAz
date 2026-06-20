@@ -77,8 +77,26 @@ node-id-ordered emission.
 --concordance` times gfaz vs `odgi build` + `odgi depth -d` (wall + peak RSS) and
 verifies value concordance on graphs whose node ids coincide.
 
-## Out of scope (v1)
+## Parity status vs `odgi depth`
 
-- `odgi depth`'s default per-path table (`#path start end mean.depth`) and the
-  `-D`/`-a`/`-v` vector forms; the gfaz default is the summary.
-- Per-sample / per-haplotype grouping (odgi's `-d` is path-based).
+Implemented modes are **byte-exact** vs odgi (the `-d` table modulo the node-id
+caveat above). The rest is not implemented (v1); this table is the to-do list if
+we extend parity later.
+
+| `odgi depth` mode | Output | gfaz | Notes / what it would take |
+|---|---|---|---|
+| `-S` summarize | `#node.count graph.length step.count path.length mean.node.depth mean.graph.depth` | ✅ byte-exact (gfaz default) | derived from the per-node counter |
+| `-d` graph depth table | `#node.id depth depth.uniq` | ✅ byte-exact* | *ids coincide with odgi only when GFA segment names are 1..N |
+| _default_ per-path table | `#path start end mean.depth` | ❌ | needs the global per-node depth first, then a second per-path weighted-mean pass (`mean = Σ_step depth(n)·len(n) / path_len`) |
+| `-v` graph depth vector | per-base depth, one line | ❌ | expand the per-node depth across each base |
+| `-D` path depth | per-base depth per path | ❌ | second per-path pass over the global node depth |
+| `-a` self depth | per-base self-coverage per path | ❌ | per-path multiplicity, no global table |
+| `-w`/`-W` windows-in/out | BED of depth-bounded intervals | ❌ | needs `-D` path-depth + interval merging |
+| `-s/-r/-R/-g/-G/-p/-F/-b` subset/position queries | filtered depth | ❌ | needs path-position → node-offset indexing (a deferred data structure) |
+
+**Default-mode divergence (intentional):** `odgi depth` with no flag prints the
+per-path table; `gfaz depth` with no flag prints the `-S` summary, chosen for
+one-line ergonomics consistent with `gfaz stats`. The per-path table is the most
+likely first parity extension (it reuses the per-node counter this command
+already builds). Per-sample / per-haplotype grouping is also a follow-up (odgi's
+`-d` is path-based).

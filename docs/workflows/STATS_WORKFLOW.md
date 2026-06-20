@@ -60,9 +60,22 @@ gfaz counts both P- and W-lines.)
 - `-b` reports only A/C/G/T (matching odgi's four-row output); other characters
   (e.g. `N`) are not tallied.
 
-## Out of scope (v1)
+## Parity status vs `odgi stats`
 
-`odgi stats`'s topology metrics (`-W` weakly-connected components, `-L`
-self-loops, `-N` nondeterministic edges, `-a` pangenome sequence-class counts)
-are not implemented; the class counts overlap with `gfaz growth` / planned
-novelty metrics.
+Implemented modes are **byte-exact** vs odgi. The rest is not implemented (v1);
+this table is the to-do list if we extend parity later.
+
+| `odgi stats` flag | Output | gfaz | Notes / what it would take |
+|---|---|---|---|
+| `-S` summarize | `#length nodes edges paths steps` | ✅ byte-exact (gfaz default) | metadata-only |
+| `-b` base content | A/C/G/T counts | ✅ byte-exact | segment-seq tally; only A/C/G/T reported (no `N`) |
+| `-W` weakly-connected components | per-component dims | ❌ | needs a union-find over the L-line edge set (have `build_segment_graph_from_links` in `snarl_finder.hpp` to build on) |
+| `-L` self-loops | count | ❌ | scan L-lines for `from == to` |
+| `-N` nondeterministic edges | edge sets | ❌ | group edges by (node-side, next base); needs segment first/last bases |
+| `-a` pangenome sequence-class counts | private/core/shell bp | ❌ | overlaps `gfaz growth` core/variable + planned novelty metrics |
+| `-D <delim>` group summary | per-group dims | ❌ | reuse `path_group_key` to bucket paths |
+| `-f` file size / sorting-goodness eval | misc | ❌ | low value here |
+
+Note: `gfaz stats` (no flag) emits the `-S` summary; `odgi stats` with no flag
+emits nothing useful (it requires a mode flag), so there is no default-mode
+divergence to worry about.
