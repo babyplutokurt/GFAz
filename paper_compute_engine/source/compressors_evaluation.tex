@@ -1,0 +1,43 @@
+\begin{tabular}{>{\color{black}}l|>{\color{black}}c|>{\color{black}}c>{\color{black}}c>{\color{black}}c>{\color{black}}c>{\color{black}}c>{\color{black}}c|>{\color{black}}c>{\color{black}}c|}
+    \multicolumn{1}{l}{\rotatebox{90}{\color{black}\textbf{Dataset}}}    &
+    \multicolumn{1}{c}{\rotatebox{90}{\color{black}\textbf{metrics}}}    &
+    \multicolumn{1}{c}{\rotatebox{90}{\color{black}\textbf{Gzip}}}       &
+    \multicolumn{1}{c}{\rotatebox{90}{\color{black}\textbf{Zstd}}}       &
+    \multicolumn{1}{c}{\rotatebox{90}{\color{black}\textbf{sqz}}}        &
+    \multicolumn{1}{c}{\rotatebox{90}{\color{black}\textbf{sqz+bgzip}}}  &
+    \multicolumn{1}{c}{\rotatebox{90}{\color{black}\textbf{sqz+Zstd}}}   &
+    \multicolumn{1}{c}{\rotatebox{90}{\color{black}\textbf{GBZ}}}        &
+    \multicolumn{1}{c}{\rotatebox{90}{\color{black}\textbf{\gfaz(CPU)}}} &
+    \multicolumn{1}{c}{\rotatebox{90}{\color{black}\textbf{\gfaz(GPU)}}}                                                                                                               \\
+    \cline{1-2}\cline{3-10}
+
+    \multirow{3}{*}{\TabDataName{chr1.}}                                 & Ratio & 5.59 & 7.54                & 3.09 & 18.0 & 16.7 & 9.52 & \NoBcBestCr{35.4}   & \SecondbestCr{31.7}  \\
+                                                                         & Co.   & 46.2 & \SecondbestCr{2178} & 3.95 & 3.97 & 4.00 & 12.1 & 385                 & \NoBcBestCr{2754}    \\
+                                                                         & De.   & 359  & 1618                & 21.6 & 21.4 & 21.2 & 284  & \SecondbestCr{1658} & \NoBcBestCr{8124}    \\
+    \cline{1-2}\cline{3-10}
+
+    \multirow{3}{*}{\TabDataName{chr6.}}                                 & Ratio & 5.04 & 6.99                & 5.51 & 20.8 & 19.2 & 19.2 & \NoBcBestCr{35.4}   & \SecondbestCr{28.18} \\
+                                                                         & Co.   & 41.0 & \SecondbestCr{1712} & 3.56 & 3.56 & 3.59 & 10.7 & 348                 & \NoBcBestCr{3791}    \\
+                                                                         & De.   & 348  & 1515                & 20.1 & 20.4 & 20.2 & 281  & \SecondbestCr{1758} & \NoBcBestCr{7230}    \\
+    \cline{1-2}\cline{3-10}
+
+    \multirow{3}{*}{\TabDataName{E.coli}}                                & Ratio & 4.69 & 5.67                & 1.26 & 7.46 & 6.79 & 5.58 & \NoBcBestCr{18.3}   & \SecondbestCr{16.7}  \\
+                                                                         & Co.   & 33.3 & \NoBcBestCr{1356}   & 4.57 & 4.53 & 4.62 & 20.2 & 190                 & \SecondbestCr{678}   \\
+                                                                         & De.   & 310  & \SecondbestCr{1258} & 34.0 & 32.2 & 34.5 & 197  & 491                 & \NoBcBestCr{1430}    \\
+    \cline{1-2}\cline{3-10}
+
+    \multirow{3}{*}{\TabDataName{HPRCv1.1}}                              & Ratio & 4.02 & 5.32                & -   & -   & -   & 14.0 & \NoBcBestCr{22.4}   & \SecondbestCr{20.4}  \\
+                                                                         & Co.   & 36.4 & \SecondbestCr{1657} & -   & -   & -   & 84.5 & 231                 & \NoBcBestCr{4843}    \\
+                                                                         & De.   & 319  & \SecondbestCr{1234} & -   & -   & -   & 650  & 1058                & \NoBcBestCr{9435}    \\
+    \cline{1-2}\cline{3-10}
+
+    \multirow{3}{*}{\TabDataName{HPRCv2.0}}                              & Ratio & 4.19 & 6.49                & -   & -   & -   & 66.8 & \NoBcBestCr{83.9}   & \SecondbestCr{76.4}  \\
+                                                                         & Co.   & 49.1 & \NoBcBestCr{1514}   & -   & -   & -   & 130  & \SecondbestCr{367}  & -                   \\
+                                                                         & De.   & 342  & \SecondbestCr{1240} & -   & -   & -   & 648  & \NoBcBestCr{1652}   & -                   \\
+    \cline{1-2}\cline{3-10}
+
+    \multirow{3}{*}{\TabDataName{HPRCv2.1}}                              & Ratio & 4.19 & 6.43                & -   & -   & -   & 64.2 & \NoBcBestCr{82.8}   & \SecondbestCr{74.2}  \\
+                                                                         & Co.   & 48.9 & \NoBcBestCr{1540}   & -   & -   & -   & 136  & \SecondbestCr{348}  & -                   \\
+                                                                         & De.   & 343  & \SecondbestCr{1241} & -   & -   & -   & 652  & \NoBcBestCr{1559}   & -                   \\
+    \cline{1-2}\cline{3-10}
+\end{tabular}

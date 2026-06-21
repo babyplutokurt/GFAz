@@ -1,0 +1,27 @@
+\setlength{\tabcolsep}{2pt}
+\begin{tabular}{l r r r}
+  \hline
+  \textbf{Stage}                     & \textbf{Time (ms)} & \textbf{Tput (GB/s)} & \textbf{Share} \\
+  \hline
+  \multicolumn{4}{l}{\textit{Compression (total: 2322.85\,ms)}}                                   \\
+  Grammar subtotal                   & 571.85              & 3.96                  & 24.6\%         \\
+  \quad find\_max\_abs               & 5.96                & 378.0                 & 0.3\%          \\
+  \quad delta\_encode                & 5.64                & 400.0                 & 0.2\%          \\
+  \quad find\_repeated\_2mers        & 195.59              & 11.5                  & 8.4\%          \\
+  \quad create\_rule\_table          & 18.36               & 122.8                 & 0.8\%          \\
+  \quad apply\_2mer\_rules           & 105.24              & 21.4                  & 4.5\%          \\
+  \quad compact\_rules\_remap        & 25.68               & 87.8                  & 1.1\%          \\
+  \quad sort\_rules\_remap           & 16.70               & 135.0                 & 0.7\%          \\
+  \quad split+delta\_encode          & 0.90                & 102.2                 & 0.0\%          \\
+  \quad Zstd compress (nvComp)       & 197.78              & 11.4                  & 8.5\%          \\
+  Others                             & 1751.00             & --                    & 75.4\%         \\
+  \hline
+  \multicolumn{4}{l}{\textit{Decompression (total: 876.00\,ms)}}                                  \\
+  Grammar subtotal                   & 117.00              & 19.3                  & 13.4\%         \\
+  \quad Zstd decompress (nvComp)     & 85.85               & 26.3                  & 9.8\%          \\
+  \quad decode rules (prefix sum)    & 0.44                & 367.2                 & 0.1\%          \\
+  \quad expand traversals            & 24.73               & 91.2                  & 2.8\%          \\
+  \quad decode traversals (pfx sum)  & 5.98                & 377.1                 & 0.7\%          \\
+  Others                             & 759.00              & --                    & 86.6\%         \\
+  \hline
+\end{tabular}

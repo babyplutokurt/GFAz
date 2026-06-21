@@ -1,0 +1,182 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{lin2024measuring}
+\citation{eizenga2020pangenome,secomandi2025pangenome}
+\citation{liao2023draft}
+\citation{gfaspec}
+\citation{hickey2024pangenome}
+\citation{garrison2024building}
+\citation{siren2022gbz}
+\citation{heringer2025human}
+\@writefile{toc}{\contentsline {section}{Abstract}{1}{section*.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}
+\citation{siren2022gbz}
+\citation{heringer2025human}
+\citation{gfaspec}
+\citation{Wick2015Bandage}
+\citation{Wick2015Bandage}
+\citation{Wick2015Bandage}
+\citation{wang2022human,hprc_timeline}
+\citation{li2009sequence,bonfield2022cram}
+\citation{yang2024gpufastqlz}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Background}{2}{section.2}\protected@file@percent }
+\newlabel{sec:background}{{2}{2}{Background}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}The GFA Format}{2}{subsection.2.1}\protected@file@percent }
+\newlabel{subsec:gfa-format}{{2.1}{2}{The GFA Format}{subsection.2.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Assembly graph in GFA format, visualized with Bandage\nonbreakingspace \citep  {Wick2015Bandage}. Colored elements denote sequence segments (nodes; S records). Black connections indicate edges between oriented segments, represented by L (link), J (jump), or C (containment) records. Any valid traversal through connected segments corresponds to a P (path) or W (walk) record.}}{2}{figure.caption.5}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:gfa_visualization}{{1}{2}{Assembly graph in GFA format, visualized with Bandage~\cite {Wick2015Bandage}. Colored elements denote sequence segments (nodes; S records). Black connections indicate edges between oriented segments, represented by L (link), J (jump), or C (containment) records. Any valid traversal through connected segments corresponds to a P (path) or W (walk) record}{figure.caption.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}The Scalability Challenge}{2}{subsection.2.2}\protected@file@percent }
+\newlabel{subsec:scalability}{{2.2}{2}{The Scalability Challenge}{subsection.2.2}{}}
+\citation{siren2020haplotype,siren2021pangenomics}
+\citation{zouhar2023formal}
+\citation{nvcomp_github}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Mapping from GFA record types to GFAz\xspace  internal integer-based representation.}}{3}{table.caption.6}\protected@file@percent }
+\newlabel{tab:data-mapping}{{1}{3}{Mapping from GFA record types to \gfaz internal integer-based representation}{table.caption.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Existing Compression Approaches}{3}{subsection.2.3}\protected@file@percent }
+\newlabel{subsec:existing}{{2.3}{3}{Existing Compression Approaches}{subsection.2.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Methodology}{3}{section.3}\protected@file@percent }
+\newlabel{sec:methodology}{{3}{3}{Methodology}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Graph View of GFA}{3}{subsection.3.1}\protected@file@percent }
+\newlabel{subsec:graph-view}{{3.1}{3}{Graph View of GFA}{subsection.3.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces GFAz\xspace  compression workflow. The grammar compression loop repeats for $N$ rounds (default 8); each round replaces repeated 2-mers, reducing the traversal stream by up to half.}}{3}{figure.caption.7}\protected@file@percent }
+\newlabel{fig:compression_workflow}{{2}{3}{\thiswork compression workflow. The grammar compression loop repeats for $N$ rounds (default 8); each round replaces repeated 2-mers, reducing the traversal stream by up to half}{figure.caption.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Architecture Overview}{3}{subsection.3.2}\protected@file@percent }
+\newlabel{subsec:architecture}{{3.2}{3}{Architecture Overview}{subsection.3.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Compression Pipeline}{3}{subsection.3.3}\protected@file@percent }
+\newlabel{subsec:pipeline}{{3.3}{3}{Compression Pipeline}{subsection.3.3}{}}
+\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces GFAz\xspace  Compression Pipeline}}{4}{algorithm.1}\protected@file@percent }
+\newlabel{alg:compression}{{1}{4}{\thiswork Compression Pipeline}{algorithm.1}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.3.1}Phase 1: Delta Encoding and Rule Namespace Allocation}{4}{subsubsection.3.3.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Effect of delta encoding rounds on rule search space and final traversal size for \texttt  {chr6.pan.gfa} (human chromosome\nonbreakingspace 6 pangenome GFA). All results use 8 grammar-compression rounds.}}{4}{table.caption.8}\protected@file@percent }
+\newlabel{tab:delta-rounds}{{2}{4}{Effect of delta encoding rounds on rule search space and final traversal size for \texttt {chr6.pan.gfa} (human chromosome~6 pangenome GFA). All results use 8 grammar-compression rounds}{table.caption.8}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.3.2}Phase 2: Hierarchical 2-Mer Grammar Compression}{4}{subsubsection.3.3.2}\protected@file@percent }
+\citation{collet2021rfc}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Internal columnar data structures for each GFA record type before final ZSTD compression.}}{5}{table.caption.9}\protected@file@percent }
+\newlabel{tab:columnar-structures}{{3}{5}{Internal columnar data structures for each GFA record type before final ZSTD compression}{table.caption.9}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.3.3}Phase 3: Field-Specific Encoding}{5}{subsubsection.3.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.3.4}Phase 4: ZSTD Compression}{5}{subsubsection.3.3.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces GFAz\xspace  decompression workflow. Traversal expansion runs in linear time and is dependency-free across records, enabling batched parallel decode and direct streaming output without rebuilding the full graph in memory.}}{6}{figure.caption.10}\protected@file@percent }
+\newlabel{fig:decompression_workflow}{{3}{6}{\thiswork decompression workflow. Traversal expansion runs in linear time and is dependency-free across records, enabling batched parallel decode and direct streaming output without rebuilding the full graph in memory}{figure.caption.10}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Decompression Pipeline}{6}{subsection.3.4}\protected@file@percent }
+\newlabel{subsec:decompression}{{3.4}{6}{Decompression Pipeline}{subsection.3.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Incremental Haplotype Extension and Random Access}{6}{subsection.3.5}\protected@file@percent }
+\newlabel{subsec:random-access}{{3.5}{6}{Incremental Haplotype Extension and Random Access}{subsection.3.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.6}GPU Backend}{6}{subsection.3.6}\protected@file@percent }
+\newlabel{subsec:gpu}{{3.6}{6}{GPU Backend}{subsection.3.6}{}}
+\@writefile{loa}{\contentsline {algorithm}{\numberline {2}{\ignorespaces GPU Parallel 2-mer Mining}}{7}{algorithm.2}\protected@file@percent }
+\newlabel{alg:gpu-mining}{{2}{7}{GPU Parallel 2-mer Mining}{algorithm.2}{}}
+\@writefile{loa}{\contentsline {algorithm}{\numberline {3}{\ignorespaces GPU Parallel Checkerboard Encoding}}{7}{algorithm.3}\protected@file@percent }
+\newlabel{alg:gpu-encoding}{{3}{7}{GPU Parallel Checkerboard Encoding}{algorithm.3}{}}
+\citation{hpp_data_portal}
+\citation{hpp_data_portal}
+\citation{DO1RTF_2025}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Evaluation datasets.}}{8}{table.caption.11}\protected@file@percent }
+\newlabel{tab:datasets}{{4}{8}{Evaluation datasets}{table.caption.11}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Evaluation}{8}{section.4}\protected@file@percent }
+\newlabel{sec:evaluation}{{4}{8}{Evaluation}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Experimental Setup}{8}{subsection.4.1}\protected@file@percent }
+\newlabel{subsec:setup}{{4.1}{8}{Experimental Setup}{subsection.4.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Dataset}{8}{subsection.4.2}\protected@file@percent }
+\newlabel{subsec:dataset}{{4.2}{8}{Dataset}{subsection.4.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Compression ratio, compression (Co.) and decompression (De.) throughput (MB/s) across datasets. {\cellcolor  {blue!15}{Blue}} indicates the best performance, {\cellcolor  {green!15}{green}} denotes the second best.}}{8}{table.caption.12}\protected@file@percent }
+\newlabel{tab:ratio-throughput}{{5}{8}{Compression ratio, compression (Co.) and decompression (De.) throughput (MB/s) across datasets. {\NoBcBestCr {Blue}} indicates the best performance, {\SecondbestCr {green}} denotes the second best}{table.caption.12}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Compression-Decompression Performance}{8}{subsection.4.3}\protected@file@percent }
+\newlabel{subsec:compression-performance}{{4.3}{8}{Compression-Decompression Performance}{subsection.4.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Normalized compression ratio, compression speed, and decompression speed relative to Zstd across all datasets. Results are normalized such that Zstd = 1.0 (dashed horizontal line). Speed metrics are plotted on a log scale (base 2).}}{9}{figure.caption.13}\protected@file@percent }
+\newlabel{fig:eval-norm}{{4}{9}{Normalized compression ratio, compression speed, and decompression speed relative to Zstd across all datasets. Results are normalized such that Zstd = 1.0 (dashed horizontal line). Speed metrics are plotted on a log scale (base 2)}{figure.caption.13}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Pareto trade-off between compression ratio (y-axis) and speed (x-axis), normalized to Zstd (baseline at $1.0$). The dashed diagonal line ($y=1/x$) represents an iso-efficiency curve where a $2\times $ increase in ratio compensates for a $2\times $ drop in speed. Points above this line and to the right represent better trade-offs than the baseline.}}{9}{figure.caption.14}\protected@file@percent }
+\newlabel{fig:pareto}{{5}{9}{Pareto trade-off between compression ratio (y-axis) and speed (x-axis), normalized to Zstd (baseline at $1.0$). The dashed diagonal line ($y=1/x$) represents an iso-efficiency curve where a $2\times $ increase in ratio compensates for a $2\times $ drop in speed. Points above this line and to the right represent better trade-offs than the baseline}{figure.caption.14}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Ablation of \texttt  {Compact} and \texttt  {Sort} on rulebook effectiveness. Each cell shows \(H\) / \(L\), where \(H=r\gg 32\) and \(L=r\,\&\,\texttt  {0xffffffff}\); each entry is the ZSTD-compressed size followed by the compression ratio in parentheses.}}{10}{table.caption.15}\protected@file@percent }
+\newlabel{tab:compact-sort-ablation}{{6}{10}{Ablation of \texttt {Compact} and \texttt {Sort} on rulebook effectiveness. Each cell shows \(H\) / \(L\), where \(H=r\gg 32\) and \(L=r\,\&\,\texttt {0xffffffff}\); each entry is the ZSTD-compressed size followed by the compression ratio in parentheses}{table.caption.15}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Random-access evaluation using \texttt  {extract-traversal}. We measure the time and peak memory required to reconstruct only 1, 4, or 16 selected paths/walks from an existing \texttt  {.gfaz} file.}}{10}{table.caption.16}\protected@file@percent }
+\newlabel{tab:random-access}{{7}{10}{Random-access evaluation using \texttt {extract-traversal}. We measure the time and peak memory required to reconstruct only 1, 4, or 16 selected paths/walks from an existing \texttt {.gfaz} file}{table.caption.16}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Incremental haplotype extension using \texttt  {add-haplotypes}. Each run appends 50 new paths/walks using the rulebook already stored in the input \texttt  {.gfaz} file.}}{10}{table.caption.17}\protected@file@percent }
+\newlabel{tab:incremental-extension}{{8}{10}{Incremental haplotype extension using \texttt {add-haplotypes}. Each run appends 50 new paths/walks using the rulebook already stored in the input \texttt {.gfaz} file}{table.caption.17}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Random Access and Incremental Extension}{10}{subsection.4.4}\protected@file@percent }
+\newlabel{subsec:random-access-eval}{{4.4}{10}{Random Access and Incremental Extension}{subsection.4.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Ablation: Compact and Sort}{10}{subsection.4.5}\protected@file@percent }
+\newlabel{subsec:ablation-compact-sort}{{4.5}{10}{Ablation: Compact and Sort}{subsection.4.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.6}Performance Breakdown}{10}{subsection.4.6}\protected@file@percent }
+\newlabel{subsec:breakdown}{{4.6}{10}{Performance Breakdown}{subsection.4.6}{}}
+\citation{garrison2018variation}
+\citation{guarracino2022odgi}
+\citation{parmigiani2024panacus}
+\citation{guarracino2022odgi}
+\citation{garrison2018variation,hickey2020genotyping}
+\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces CPU stage-level profiling for compression and decompression. Share is computed as \texttt  {time / stage total}.}}{11}{table.caption.18}\protected@file@percent }
+\newlabel{tab:cpu-breakdown}{{9}{11}{CPU stage-level profiling for compression and decompression. Share is computed as \texttt {time / stage total}}{table.caption.18}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {10}{\ignorespaces GPU stage-level profiling for compression and decompression. Share is computed as \texttt  {time / stage total}.}}{11}{table.caption.19}\protected@file@percent }
+\newlabel{tab:gpu-breakdown}{{10}{11}{GPU stage-level profiling for compression and decompression. Share is computed as \texttt {time / stage total}}{table.caption.19}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {11}{\ignorespaces CPU peak resident memory using 16 threads for compression, a legacy decompression baseline that fully materializes the in-memory \texttt  {GfaGraph}, and the implemented streaming decompression path.}}{11}{table.caption.20}\protected@file@percent }
+\newlabel{tab:cpu-memory}{{11}{11}{CPU peak resident memory using 16 threads for compression, a legacy decompression baseline that fully materializes the in-memory \texttt {GfaGraph}, and the implemented streaming decompression path}{table.caption.20}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.7}CPU Memory Profiling}{11}{subsection.4.7}\protected@file@percent }
+\newlabel{subsec:cpu-memory}{{4.7}{11}{CPU Memory Profiling}{subsection.4.7}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}GFAz\xspace  as a Compute Engine}{11}{section.5}\protected@file@percent }
+\newlabel{sec:compute}{{5}{11}{\gfaz as a Compute Engine}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Motivation: Avoiding Materialization}{12}{subsection.5.1}\protected@file@percent }
+\newlabel{subsec:ce-motivation}{{5.1}{12}{Motivation: Avoiding Materialization}{subsection.5.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Execution Model: Streaming Leaf Expansion}{12}{subsection.5.2}\protected@file@percent }
+\newlabel{subsec:ce-model}{{5.2}{12}{Execution Model: Streaming Leaf Expansion}{subsection.5.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{Compressed traversal store.}{12}{section*.21}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Streaming primitive.}{12}{section*.22}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {4}{\ignorespaces Streaming traversal expansion for \texttt  {delta\_round} 0 or 1}}{12}{algorithm.4}\protected@file@percent }
+\newlabel{alg:ce-stream}{{4}{12}{Streaming traversal expansion for \texttt {delta\_round} 0 or 1}{algorithm.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Rule-Leaf Cache}{12}{subsection.5.3}\protected@file@percent }
+\newlabel{subsec:ce-cache}{{5.3}{12}{Rule-Leaf Cache}{subsection.5.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Memory Model}{13}{subsection.5.4}\protected@file@percent }
+\newlabel{subsec:ce-memory}{{5.4}{13}{Memory Model}{subsection.5.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Parallelization}{13}{subsection.5.5}\protected@file@percent }
+\newlabel{subsec:ce-parallel}{{5.5}{13}{Parallelization}{subsection.5.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}Three Instantiations}{13}{subsection.5.6}\protected@file@percent }
+\newlabel{subsec:ce-instances}{{5.6}{13}{Three Instantiations}{subsection.5.6}{}}
+\citation{paten2018superbubbles}
+\@writefile{loa}{\contentsline {algorithm}{\numberline {5}{\ignorespaces Top-level snarl extraction via biconnected decomposition}}{14}{algorithm.5}\protected@file@percent }
+\newlabel{alg:ce-bcc}{{5}{14}{Top-level snarl extraction via biconnected decomposition}{algorithm.5}{}}
+\@writefile{loa}{\contentsline {algorithm}{\numberline {6}{\ignorespaces Streaming allele observation for one haplotype (snarl mode)}}{14}{algorithm.6}\protected@file@percent }
+\newlabel{alg:ce-snarl}{{6}{14}{Streaming allele observation for one haplotype (snarl mode)}{algorithm.6}{}}
+\bibstyle{ACM-Reference-Format}
+\bibdata{ref}
+\bibcite{bonfield2022cram}{{1}{2022}{{Bonfield}}{{}}}
+\bibcite{collet2021rfc}{{2}{2021}{{Collet}}{{}}}
+\bibcite{eizenga2020pangenome}{{3}{2020}{{Eizenga et~al\mbox  {.}}}{{}}}
+\bibcite{garrison2024building}{{4}{2024}{{Garrison et~al\mbox  {.}}}{{}}}
+\bibcite{garrison2018variation}{{5}{2018}{{Garrison et~al\mbox  {.}}}{{}}}
+\bibcite{gfaspec}{{6}{2023}{{GFA Specification Working Group}}{{}}}
+\bibcite{guarracino2022odgi}{{7}{2022}{{Guarracino et~al\mbox  {.}}}{{}}}
+\bibcite{heringer2025human}{{8}{2025}{{Heringer and Doerr}}{{}}}
+\bibcite{hickey2020genotyping}{{9}{2020}{{Hickey et~al\mbox  {.}}}{{}}}
+\bibcite{hickey2024pangenome}{{10}{2024}{{Hickey et~al\mbox  {.}}}{{}}}
+\bibcite{hpp_data_portal}{{11}{2025a}{{Human Pangenome Reference Consortium}}{{}}}
+\bibcite{hprc_timeline}{{12}{2025b}{{Human Pangenome Reference Consortium}}{{}}}
+\bibcite{li2009sequence}{{13}{2009}{{Li et~al\mbox  {.}}}{{}}}
+\bibcite{liao2023draft}{{14}{2023}{{Liao et~al\mbox  {.}}}{{}}}
+\bibcite{lin2024measuring}{{15}{2024}{{Lin et~al\mbox  {.}}}{{}}}
+\bibcite{DO1RTF_2025}{{16}{2025}{{Marthe and Sabot}}{{}}}
+\bibcite{nvcomp_github}{{17}{2026}{{NVIDIA Corporation}}{{}}}
+\bibcite{parmigiani2024panacus}{{18}{2024}{{Parmigiani et~al\mbox  {.}}}{{}}}
+\bibcite{paten2018superbubbles}{{19}{2018}{{Paten et~al\mbox  {.}}}{{}}}
+\bibcite{secomandi2025pangenome}{{20}{2025}{{Secomandi et~al\mbox  {.}}}{{}}}
+\bibcite{siren2020haplotype}{{21}{2020}{{Sir{\'e}n et~al\mbox  {.}}}{{}}}
+\bibcite{siren2021pangenomics}{{22}{2021}{{Sir{\'e}n et~al\mbox  {.}}}{{}}}
+\bibcite{siren2022gbz}{{23}{2022}{{Sir{\'e}n and Paten}}{{}}}
+\bibcite{wang2022human}{{24}{2022}{{Wang et~al\mbox  {.}}}{{}}}
+\bibcite{Wick2015Bandage}{{25}{2015}{{Wick et~al\mbox  {.}}}{{}}}
+\bibcite{yang2024gpufastqlz}{{26}{2024}{{Yang et~al\mbox  {.}}}{{}}}
+\bibcite{zouhar2023formal}{{27}{2023}{{Zouhar et~al\mbox  {.}}}{{}}}
+\newlabel{tocindent-1}{0pt}
+\newlabel{tocindent0}{0pt}
+\newlabel{tocindent1}{4.185pt}
+\newlabel{tocindent2}{10.34999pt}
+\newlabel{tocindent3}{18.198pt}
+\newlabel{tocindent4}{0pt}
+\newlabel{tocindent5}{0pt}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion and Future Work}{15}{section.6}\protected@file@percent }
+\newlabel{sec:conclusion}{{6}{15}{Conclusion and Future Work}{section.6}{}}
+\@writefile{toc}{\contentsline {section}{Acknowledgments}{15}{section*.24}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{References}{15}{section*.26}\protected@file@percent }
+\newlabel{TotPages}{{15}{15}{}{page.15}{}}
+\gdef \@abspage@last{15}

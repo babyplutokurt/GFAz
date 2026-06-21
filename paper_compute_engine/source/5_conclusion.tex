@@ -1,0 +1,5 @@
+\section{Conclusion and Future Work}\label{sec:conclusion}
+
+We presented \gfaz, a high-performance GFA compressor that combines orientation-aware 2-mer grammar compression with a columnar, type-specific encoding of all GFA record types. By exploiting the canonical symmetry of forward and reverse node orientations, \gfaz collapses traversal redundancy in linear time across iterative grammar rounds. Fully parallel CPU (OpenMP) and GPU (CUDA/nvComp) backends deliver state-of-the-art compression ratios (20--80$\times$) and throughput on datasets ranging from microbial pangenomes to whole-genome human graphs.
+
+Our current GPU backend requires the full traversal stream to fit in device memory, which prevents processing the largest graphs (300+\,GB) on current hardware. In future work, we plan to introduce memory-aware scheduling for both CPU and GPU pipelines by partitioning traversals into streaming tiles that can be compressed and decompressed independently within a fixed memory budget to eliminate out-of-memory failures regardless of input size.

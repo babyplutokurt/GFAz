@@ -1,0 +1,394 @@
+\section{Methodology}\label{sec:methodology}
+
+\begin{table}[t]
+  \caption{Mapping from GFA record types to \gfaz internal integer-based representation.}
+  \label{tab:data-mapping}
+  \small
+  \begin{tabular}{lll}
+    \hline
+    \textbf{GFA Record} & \textbf{Graph Role} & \textbf{Internal Representation}    \\
+    \hline
+    S-line              & Node Definition     & \texttt{uint32\_t} (1-based ID)     \\
+    L, J, C-lines       & Graph Topology      & \texttt{vector<int32\_t>{}}         \\
+    P, W-lines          & Graph Traversal     & \texttt{vector<vector<int32\_t>{}>} \\
+    \hline
+  \end{tabular}
+\end{table}
+
+This section presents \gfaz as a modularly designed compression pipeline with two interchangeable backends: CPU (OpenMP) and GPU (CUDA/Thrust/nvComp)~\cite{nvcomp_github}. The final entropy-encoding layer is also modular, so it can be changed or tuned easily to trade compression ratio against throughput.
+
+
+\subsection{Graph View of GFA}\label{subsec:graph-view}
+
+A GFA file is a tab-delimited graph format with a small set of record types. \gfaz converts these heterogeneous text records into a compact Structure-of-Arrays layout of typed columns. Segments (S-lines) receive compact 1-based integer IDs, with sequences stored separately. Links, jumps, and containments (L/J/C-lines) become integer endpoint columns plus bit-packed orientation columns, with auxiliary strings stored as concatenated byte streams and offsets. Most importantly, both paths and walks (P/W-lines) are normalized to the same signed \texttt{int32\_t} traversal representation, where the sign encodes orientation; for example, \texttt{>s1<s2>s3} becomes \texttt{[1, -2, 3]}. This conversion turns verbose GFA text into compressible integer and byte streams, with traversals forming the dominant input to the grammar-compression pipeline.
+
+Table~\ref{tab:data-mapping} summarizes how the text-to-integer mapping prepares each component for the compression pipeline.
+
+
+
+\subsection{Architecture Overview}\label{subsec:architecture}
+
+Figure~\ref{fig:compression_workflow} and \ref{fig:decompression_workflow} show the end-to-end workflow. A GFA file is first parsed into an in-memory graph representation: on the CPU this is a \texttt{GfaGraph} with nested vectors; for the GPU backend the traversals are flattened into a single contiguous array paired with a lengths vector, with offsets computed on-demand via parallel prefix sum. The parsed graph is then compressed into a \texttt{CompressedData} object containing byte blocks for every field, and can be serialized to a binary \texttt{.gfaz} file for persistent storage. Decompression is intentionally asymmetric: fixed-width graph fields are restored from their encoded columns, but traversal records are expanded and emitted as GFA text in a streaming fashion rather than rebuilding a full in-memory \texttt{GfaGraph}.
+
+Both compression and decompression are fully parallel at every step. As introduced above, the pipeline supports CPU and GPU execution; the GPU backend keeps traversal data device-resident throughout the compression loop, transferring only the final compressed blocks back to the host.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{Compression_workflow.png}
+  \caption{\thiswork compression workflow. The grammar compression loop repeats for $N$ rounds (default 8); each round replaces repeated 2-mers, reducing the traversal stream by up to half.}
+  \label{fig:compression_workflow}
+\end{figure}
+
+
+
+
+\subsection{Compression Pipeline}\label{subsec:pipeline}
+The central challenge in GFA compression is traversal data (P and W records), which often exceeds 90\% of file size. Traversals are highly redundant: many haplotypes share long node-ID substrings across P-lines and W-lines.
+
+\gfaz exploits this structure with iterative grammar compression. In each round, we find frequent adjacent 2-mers (initially node IDs), assign each 2-mer a new integer ID, and replace all occurrences. Later rounds can combine original nodes with rule IDs, or combine rule IDs with each other. This hierarchy collapses long repeated patterns into single symbols and sharply reduces traversal length.
+
+\noindent \textbf{Rule Definition.}
+We formally define a \emph{rule} as a new unique integer identifier assigned to a repeated 2-mer. Like segment IDs, rule IDs are signed 32-bit integers where the sign encodes orientation. If a rule $r$ ($r > 0$) represents the 2-mer $(u, v)$, then its negation $-r$ represents the reverse complement 2-mer $(-v, -u)$. This symmetry stems from the fact that traversing a subgraph in reverse flips the order and orientation of all constituents.
+\begin{equation}
+  r \Rightarrow (u, v) \quad \iff \quad -r \Rightarrow (-v, -u)
+\end{equation}
+By treating rules as oriented symbols identical in format to node IDs, the compression engine can recursively combine nodes and rules without special cases.
+
+\begin{algorithm}[t]
+  \caption{\thiswork Compression Pipeline}
+  \label{alg:compression}
+  \begin{algorithmic}[1]
+    \REQUIRE GFA file $F$, rounds $R$, delta\_rounds $D$
+    \ENSURE Compressed data $C$
+    \STATE $G \gets \text{Parse}(F)$
+    \FOR{$i = 1$ to $D$}
+    \STATE $\text{DeltaTransform}(G.\text{paths})$
+    \STATE $\text{DeltaTransform}(G.\text{walks})$
+    \ENDFOR
+    \STATE $\text{next\_id} \gets \max(\text{MaxAbs}(G.\text{paths}), |G.\text{segments}|) + 1$
+    \FOR{$r = 1$ to $R$}
+    \STATE $\text{rules} \gets \text{GenerateRules}(G.\text{paths}, G.\text{walks})$
+    \STATE $\text{EncodePaths}(G.\text{paths}, G.\text{walks}, \text{rules})$
+    \STATE $\text{CompactSortRemap}(\text{rules}, G.\text{paths}, G.\text{walks})$
+    \ENDFOR
+    \STATE $C \gets \text{CompressAllFields}(G, \text{rules})$
+    \RETURN $C$
+  \end{algorithmic}
+\end{algorithm}
+
+\subsubsection{Phase 1: Delta Encoding and Rule Namespace Allocation}
+
+We begin traversal compression with a single delta-encoding pass. For a sequence $[n_1, n_2, \ldots, n_k]$, we produce $[n_1, n_2 - n_1, n_3 - n_2, \ldots, n_k - n_{k-1}]$ and then run grammar compression on this transformed stream.
+This step is effective because pangenome graph builders often assign segment IDs in approximate reference order. Many haplotypes therefore contain long runs of locally consecutive IDs, and one delta pass collapses these runs into short repeated differences. For \gfaz, the main benefit is not merely smaller values, but a much smaller adjacent-pair space for rule mining: many distinct 2-mers in the original traversal stream become the same few repeated 2-mers after delta encoding. Table~\ref{tab:delta-rounds} shows this effect on a chromosome-scale graph: one delta pass reduces the first-round rule search space by over $25\times$ and gives the best final size.
+
+\begin{table}[t]
+  \caption{Effect of delta encoding rounds on rule search space and final traversal size for \texttt{chr6.pan.gfa} (human chromosome~6 pangenome GFA). All results use 8 grammar-compression rounds.}
+  \label{tab:delta-rounds}
+  \small
+  \begin{tabular}{lrrr}
+    \hline
+    \textbf{Delta rounds} & \textbf{Rules (round 1)} & \textbf{Total rules} & \textbf{Final size} \\
+    \hline
+    0                     & 5{,}455{,}923            & 29{,}391{,}077       & 3.60\%              \\
+    1                     & 201{,}503                & 6{,}124{,}767        & 2.88\%              \\
+    2                     & 264{,}485                & 6{,}281{,}692        & 2.99\%              \\
+    3                     & 372{,}451                & 7{,}053{,}633        & 3.11\%              \\
+    \hline
+  \end{tabular}
+\end{table}
+
+We therefore use exactly one delta pass throughout the system. Additional delta rounds do not improve compression ratio, because later rule IDs no longer preserve the sequential locality of original segment IDs.
+
+To separate literals from grammar rules, we reserve the rule namespace above all literal values. We set the starting ID to:
+\begin{equation}
+  I_{start} = \max\left(\max_{p \in \mathcal{P}} \max_{v \in p} |v|, \, |S|\right) + 1
+\end{equation}
+where the first term covers all values in the delta-encoded streams and $|S|$ covers valid segment IDs. This guarantees that a single check ($|x| \ge I_{start}$) uniquely identifies a rule.
+
+\subsubsection{Phase 2: Hierarchical 2-Mer Grammar Compression}
+
+The engine of our pipeline is a multi-round algorithm that recursively replaces frequent 2-mers with the rule IDs defined in the previous section. A \emph{2-mer} in this context is simply an ordered pair of signed integers $(u, v)$, representing adjacent elements in a traversal.
+
+Since GFA paths represent double-stranded DNA, a traversal $(u, v)$ and its reverse complement $(-v, -u)$ should map to the same rule. We therefore normalize every observed 2-mer to a \emph{canonical form} by selecting the lexicographically smaller of its forward and reverse representations.
+\begin{equation}
+  \text{pack}(u, v) = ((int64)u \ll 32) \mid (v \ \& \ \texttt{0xFFFFFFFF})
+\end{equation}
+\begin{equation}
+  \text{canonical}(u, v) = \min\left(\text{pack}(u, v), \text{pack}(-v, -u)\right)
+\end{equation}
+By hashing and counting only these canonical values, occurrences on either strand contribute to the same rule. Each rule therefore corresponds to exactly one canonical 2-mer, while the sign of the emitted rule ID records whether the observed occurrence matches the canonical orientation or its reverse.
+
+\noindent \textbf{Rule Generation.} To identify 2-mers that appear at least twice, we use a parallel ``two-set'' strategy that avoids building a full frequency table. Each thread scans adjacent pairs, inserts first occurrences into a local \emph{seen} set, and promotes second occurrences to a local \emph{repeated} set. The thread-local sets are then reduced into global \emph{seen} and \emph{repeated} sets, so a 2-mer observed once in multiple threads is still promoted to \emph{repeated}. Paths and walks are processed together in this pass, ensuring that a 2-mer appearing once in a path and once in a walk is still detected as repeated. Finally, we assign sequential rule IDs to the unique canonical 2-mers in the global \emph{repeated} set.
+
+Suppose $n$ unique repeated 2-mers are found. Each is assigned a rule ID sequentially: the first receives $\text{start\_id}$, the second $\text{start\_id} + 1$, and so on up to $\text{start\_id} + n - 1$. Two structures are built: a hash map from canonical 2-mer to rule ID for $O(1)$ lookup during encoding, and a vector of length $n$ indexed by $(\text{rule\_id} - \text{start\_id})$ for $O(1)$ reverse lookup during later expansion.
+
+\noindent \textbf{Traversal Encoding and Rule Tracking.}
+We encode each traversal by scanning left-to-right, checking every consecutive 2-mer against the rule hash map. For each 2-mer $(u, v)$, we first check if its canonical form corresponds to a known rule ID $r$. If so, we check orientation: if $(u, v)$ matches the canonical order, we replace the 2-mer with $+r$; if it matches the reverse complement order $(-v, -u)$, we replace it with $-r$.
+
+Because rules are generated from the pre-encoding stream, newly emitted rule IDs cannot participate in additional same-round matches, so encoding remains a simple left-to-right scan.
+
+During this process, we maintain a usage bitmap, \texttt{rules\_used}, to track which generated rules are actually applied. This is necessary because greedy substitution may leave some generated rules unused; whenever a rule $r$ is emitted, we set $\texttt{rules\_used}[|r| - \text{start\_id}] = 1$.
+
+
+\begin{table}[t]
+  \centering
+  \caption{Internal columnar data structures for each GFA record type before final ZSTD compression.}
+  \label{tab:columnar-structures}
+  \resizebox{\columnwidth}{!}{%
+    \begin{tabular}{lll}
+      \toprule
+      \textbf{GFA Record}                        & \textbf{Component Fields} & \textbf{Internal Data Structure}                                    \\
+      \midrule
+      \multirow{2}{*}{\textbf{Rules}}            & Dictionary (First/Second) & Two parallel \texttt{vector<int32\_t>}                              \\
+                                                 & Layer Ranges              & \texttt{vector<LayerRuleRange>}                                     \\ \cline{2-3}
+
+      \multirow{2}{*}{\textbf{Segments (S)}}     & Sequences                 & Concatenated \texttt{string} + Lengths (\texttt{vector<uint32\_t>}) \\
+                                                 & Optional Fields           & Type-specific columns (varint, float, string)                       \\ \midrule
+
+      \multirow{4}{*}{\textbf{Links (L)}}        & From/To Node IDs          & Parallel \texttt{vector<uint32\_t>}                                 \\
+                                                 & Orientations              & Bit-packed \texttt{vector<uint8\_t>} (1 bit/edge)                   \\
+                                                 & Overlaps                  & Parallel \texttt{vector<uint32\_t>} / \texttt{vector<char>}         \\
+                                                 & Optional Fields           & Type-specific columns                                               \\ \midrule
+
+      \multirow{4}{*}{\textbf{Jumps (J)}}        & From/To Node IDs          & Parallel \texttt{vector<uint32\_t>} (delta+varint)                  \\
+                                                 & Orientations              & Bit-packed \texttt{vector<uint8\_t>}                                \\
+                                                 & Distance                  & Concatenated \texttt{string} + Lengths                              \\
+                                                 & Rest Fields               & Concatenated \texttt{string} + Lengths                              \\ \midrule
+
+      \multirow{5}{*}{\textbf{Containments (C)}} & Container/Contained IDs   & Parallel \texttt{vector<uint32\_t>} (delta+varint)                  \\
+                                                 & Orientations              & Bit-packed \texttt{vector<uint8\_t>}                                \\
+                                                 & Position                  & \texttt{vector<uint32\_t>} (ZSTD)                                   \\
+                                                 & Overlap (CIGAR)           & Concatenated \texttt{string} + Lengths                              \\
+                                                 & Rest Fields               & Concatenated \texttt{string} + Lengths                              \\ \midrule
+
+      \multirow{3}{*}{\textbf{Paths (P)}}        & Encoded Sequence          & Flattened \texttt{vector<int32\_t>} (Rules/IDs)                     \\
+                                                 & Path Names, Overlaps      & Concatenated \texttt{string} + Lengths                              \\
+                                                 & Path Lengths              & \texttt{vector<uint32\_t>} (Original \& Compressed)                 \\ \midrule
+
+      \multirow{4}{*}{\textbf{Walks (W)}}        & Encoded Sequence          & Flattened \texttt{vector<int32\_t>} (Rules/IDs)                     \\
+                                                 & Sample/Seq IDs            & Concatenated \texttt{string} + Lengths                              \\
+                                                 & Haplotype/Start/End       & \texttt{vector<uint32\_t>} + \texttt{vector<int64\_t>} (varint)     \\
+                                                 & Walk Lengths              & \texttt{vector<uint32\_t>}                                          \\
+      \bottomrule
+    \end{tabular}%
+  }
+\end{table}
+
+
+\noindent \textbf{Compact, Sort, and Remap.}
+After encoding, we optimize the rule set for storage and the next grammar round via three fused operations:
+\begin{enumerate}[noitemsep, topsep=2pt, leftmargin=*]
+  \item \textbf{Compact (Prune Unused):} As noted, greedy encoding leaves gaps in the rule index space. To remove them, we perform an \emph{exclusive prefix sum} on the \texttt{rules\_used} bitmap. The result at index $i$ gives the exact destination index for the rule at $(\text{start\_id} + i)$ in the new particular array. For example, if \texttt{rules\_used} is $[1, 0, 1, 1]$, the prefix sum is $[0, 1, 1, 2]$. This tells us: rule $0$ moves to pos $0$, rule $1$ is skipped, rule $2$ moves to pos $1$, and rule $3$ moves to pos $2$. We then gather only the active rules into a value-contiguous array using these computed offsets, completely eliminating gaps in parallel.
+
+  \item \textbf{Sort (Optimize Layout):} We sort all the active rules by their packed 2-mer content. This step is crucial for the compression of the rulebook itself. By ordering rules lexicographically (primarily by their first element $u$, secondarily by $v$), we cluster rules that share the same starting node. For storage, each packed 64-bit rule key is split into its upper 32 bits and lower 32 bits. After sorting, the upper-32-bit stream becomes highly repetitive (e.g., $[\ldots, u, u, u, w, w, \ldots]$), so delta encoding produces long zero runs and sharply reduces rulebook size.
+
+
+  \item \textbf{Remap (Update Streams):} Finally, we assign permanent, sequential IDs to the rules in their new sorted order, starting from the current global \texttt{next\_id}. We verify the permutation by building a lookup table, $T[\text{old\_id} - \text{range\_start}] = \text{new\_id}$. A parallel function then sweeps over all paths: any element $e$ falling in the current round's range is updated to $T[|e| - \text{range\_start}]$ (preserving the original sign). Upon completion, we update \texttt{start\_id} to be the last assigned rule ID $+ 1$, ensuring that rules in the next grammar round begin exactly where the current set ends, which results in sequential rule IDs across all rounds, ranging from the first round's start ID to the last end ID.
+\end{enumerate}
+
+The Generation-Encoding-Compact, Sort and Remap phases constitute a single round. We repeat this process iteratively (typically 8 times). As described earlier, subsequent rounds can pair the rules created in previous steps, allowing the algorithm to capture exponentially longer patterns (length 4, 8, 16, and beyond) and recursively collapse long repetitive haplotype blocks into single rule IDs.
+After these rounds, the traversal data consists of encoded traversal streams, a global rulebook stored as parallel \texttt{rules\_first} and \texttt{rules\_second} vectors, and the boundary value \texttt{start\_id} that separates literals from rule IDs during decoding. This representation exposes both traversals and rules as integer streams for the final field-specific encoding phase.
+
+\subsubsection{Phase 3: Field-Specific Encoding}
+
+After Phases 1--2, \gfaz stores the graph as typed streams. Phase 3 converts all records to a columnar Structure-of-Arrays (SoA) layout: one contiguous column per field. Each column then uses a type-specific encoder:
+
+\begin{itemize}[noitemsep, topsep=2pt, leftmargin=*]
+  \item \textbf{Integers (IDs, lengths, positions)}: Near-monotonic ID columns (e.g., link/jump/containment endpoints) use delta + varint. Other fixed-width integer columns use dense arrays + ZSTD. Rule columns use delta + ZSTD.
+  \item \textbf{Booleans (orientations)}: Bit-packed (8 values/byte), up to $8\times$ smaller than byte-per-flag storage.
+  \item \textbf{Strings (names, DNA, CIGARs, auxiliary fields)}: Concatenated byte streams with offset arrays, then ZSTD.
+\end{itemize}
+
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{Decompression_workflow.png}
+  \caption{\thiswork decompression workflow. Traversal expansion runs in linear time and is dependency-free across records, enabling batched parallel decode and direct streaming output without rebuilding the full graph in memory.}
+  \label{fig:decompression_workflow}
+\end{figure}
+
+
+
+
+
+\noindent \textbf{Optional Fields.}
+(\texttt{TAG:TYPE:VALUE}) are encoded by \texttt{TYPE}:
+\begin{itemize}[noitemsep, topsep=2pt, leftmargin=*]
+  \item \texttt{i} (integer): varint-encoded vector.
+  \item \texttt{f} (float): float vector.
+  \item \texttt{A} (character): contiguous byte array.
+  \item \texttt{Z} (string), \texttt{J} (JSON), \texttt{H} (hex): concatenated stream with offsets.
+  \item \texttt{B} (numeric array): flattened value stream (subtype-dependent, e.g., \texttt{c,s,i,f}) + per-row length vector.
+\end{itemize}
+
+
+
+
+Sparse optional fields are handled by sentinel padding: if the $N$-th record lacks a tag, we insert a sentinel value into that column. This preserves $O(1)$ indexing, and the resulting runs of identical sentinels compress effectively under ZSTD.
+
+Table~\ref{tab:columnar-structures} lists the specific columnar structures used for each GFA component.
+
+
+
+
+\subsubsection{Phase 4: ZSTD Compression}
+
+All encoded fields are finally compressed with ZSTD~\cite{collet2021rfc}. By this stage, the dominant data (traversals) has already been aggressively reduced by grammar compression and type-specific encoding, so ZSTD operates mostly on compact, low-entropy streams. We use ZSTD at level 9 (configurable via environment variable) to balance throughput and compression ratio.
+
+
+
+
+
+\subsection{Decompression Pipeline}\label{subsec:decompression}
+
+Decompression is partly symmetric to compression. For segments, links, jumps, containments, and optional fields, the decoder simply applies the inverse of the field-specific encodings used in Phase~3 and Phase~4: ZSTD decompression, inverse delta, varint decoding, and orientation bit-unpacking. These field restorations are independent and run in parallel sections.
+
+Traversal decoding is intentionally asymmetric. Rather than rebuilding a full in-memory \texttt{GfaGraph}, \gfaz expands P/W records with a streaming pipeline. The decoder directly uses \texttt{rules\_first}, \texttt{rules\_second}, and \texttt{start\_id}; no extra rulebook reconstruction step is required. Traversals are partitioned into batches, multiple threads expand and decode one batch at a time, and each batch is written directly as GFA lines to the output file. This design keeps peak memory bounded by the working batch rather than by the total size of all paths and walks.
+
+For each encoded traversal element $e$:
+
+\begin{enumerate}[noitemsep, topsep=2pt, leftmargin=*]
+  \item \textbf{Check}: If $|e| < \text{start\_id}$, it is a literal node ID; we append it directly to the output.
+  \item \textbf{Expand}: If $|e| \ge \text{start\_id}$, it is a rule. We resolve its children via direct array lookup at index $(|e| - \text{start\_id})$.
+  \item \textbf{Recurse}: This lookup mimics a depth-first traversal of the grammar tree. We recursively expand the children until we reach literals. Crucially, if the rule ID $e$ is negative, we expand the children in \emph{reverse order} and flip their signs.
+\end{enumerate}
+
+
+\noindent After expansion, inverse delta is applied $D$ times to recover the original node IDs. The recovered oriented IDs are then converted immediately back into the textual P-line or W-line syntax and appended to the output stream. Because traversals are independent, this batched decode-and-write procedure parallelizes naturally across CPU threads. After traversal expansion, the rule table is freed to reclaim memory.
+This design ensures high throughput. Rule resolution is strictly $O(1)$ (an array read), involving no hash table lookups or complex pointer chasing.
+
+
+
+Although the CPU and GPU backends may produce different rule sets and encoded traversal streams, both serialize into the same format (\texttt{rulebook + start\_id + encoded traversals}), so either backend can correctly decompress files produced by the other.
+
+\subsection{Incremental Haplotype Extension and Random Access}\label{subsec:random-access}
+
+\gfaz supports random access to individual haplotypes and incremental extension by appending new haplotypes. Both operations decode only the lightweight traversal vectors, metadata columns, and stored grammar rules, without reprocessing the full graph.
+
+\noindent \textbf{Random Access.}
+The \texttt{extract-traversal} operation reconstructs only the requested haplotype. \gfaz locates the target path or walk from its metadata columns, slices the corresponding encoded subsequence from the flattened traversal vector, expands the grammar rules, applies inverse delta decoding, and emits only that record.
+
+\noindent \textbf{Incremental Extension.}
+The \texttt{add-haplotypes} operation appends new paths or walks using the rulebook already stored in the input \texttt{.gfaz} file. \gfaz validates the new haplotypes, applies the delta transform, encodes only the appended paths or walks, and writes back the updated columns.
+To preserve decodability, the appended traversal values must remain outside the rule-ID range. Let \texttt{start\_id} denote the first rule ID stored in the existing file. \gfaz verifies that the maximum delta value in the appended traversals is smaller than \texttt{start\_id}, ensuring that these literals cannot be misinterpreted as grammar rules during later decoding.
+
+\subsection{GPU Backend}\label{subsec:gpu}
+
+\gfaz implements a high-performance GPU backend designed to keep the \emph{traversal compression loop} device-resident. After transferring the traversal stream to GPU memory, all per-round operations---2-mer mining, rule table construction, parallel rule application, and stream compaction---execute on the GPU, avoiding the CPU-side dependency chain that constrains the serial greedy algorithm.
+
+\noindent \textbf{Parallel 2-mer Mining via Sorting.}
+The most computationally intensive step is identifying repeated 2-mers. Traditional hash-counting is unsuitable for the GPU due to atomic contention. Instead, we implement a dependency-free, sort-based pipeline given a vector of node IDs $D$ of length $N$:
+\begin{enumerate}[noitemsep, topsep=2pt, leftmargin=*]
+  \item \textbf{\textsc{GenerateKeys} (Canonical 2-mer Keys)}: Since the input size $N$ is known, we allocate a device vector of size $M=N-1$. A massively parallel kernel launches one thread per index $i \in [0, M)$ and writes a canonical packed 2-mer:
+        \[
+          K_i = \min(\text{pack}(D_i, D_{i+1}), \text{pack}(-D_{i+1}, -D_i)).
+        \]
+        This step is embarrassingly parallel and requires no synchronization.
+  \item \textbf{\textsc{SortKeys} (Group Identicals)}: We sort $K$ on the GPU (radix sort) so that identical 2-mers form contiguous runs.
+  \item \textbf{\textsc{MarkDuplicates} (Run Membership)}: In parallel, we compute a boolean flag $F_i$ that marks whether $K_i$ belongs to a run, using only neighbor comparisons:
+        \[
+          F_i =
+          \begin{cases}
+            (K_0 = K_1),                             & i=0,     \\
+            (K_i = K_{i-1}) \ \vee\ (K_i = K_{i+1}), & 0<i<M-1, \\
+            (K_{M-1} = K_{M-2}),                     & i=M-1.
+          \end{cases}
+        \]
+  \item \textbf{\textsc{CompactUnique} (Extract Repeats)}: We apply stream compaction (\texttt{copy\_if}) to extract all keys with $F_i=1$, then apply \texttt{unique} to produce the final set of repeated 2-mers (frequency $\ge 2$) used as candidate rules for this round.
+\end{enumerate}
+
+
+
+
+\begin{algorithm}[t]
+  \caption{GPU Parallel 2-mer Mining}
+  \label{alg:gpu-mining}
+  \begin{algorithmic}[1]
+    \STATE \textbf{Input:} Device vector $D$ (int32 nodes), integer $N$
+    \STATE \textbf{Output:} Device vector $Repeats$ (unique int64 2-mers)
+
+    \STATE $M \gets N-1$
+    \STATE $Keys \gets$ \textbf{ALLOCATE\_DEVICE\_VECTOR}($M$)
+
+    \STATE \COMMENT{1. \textsc{GenerateKeys}: canonical packed 2-mers}
+    \STATE \textbf{PARALLEL\_FOR} $i \in \{0 \dots M-1\}$
+    \STATE \hspace{0.6cm} $K_f \gets \textsc{Pack}(D_i, D_{i+1})$
+    \STATE \hspace{0.6cm} $K_r \gets \textsc{Pack}(-D_{i+1}, -D_i)$
+    \STATE \hspace{0.6cm} $Keys_i \gets \min(K_f, K_r)$ \COMMENT{canonicalization}
+    \STATE \textbf{END\_PARALLEL}
+
+    \STATE \COMMENT{2. \textsc{SortKeys}: group identical 2-mers}
+    \STATE \textsc{SortKeys}($Keys$) \COMMENT{radix sort}
+
+    \STATE \COMMENT{3. \textsc{MarkDuplicates}: flag run membership}
+    \STATE $Flags \gets$ \textbf{ALLOCATE\_DEVICE\_VECTOR}($M$) \COMMENT{uint8}
+    \STATE \textbf{PARALLEL\_FOR} $i \in \{0 \dots M-1\}$
+    \STATE \hspace{0.6cm} $left  \gets (i>0) \wedge (Keys_i = Keys_{i-1})$
+    \STATE \hspace{0.6cm} $right \gets (i+1<M) \wedge (Keys_i = Keys_{i+1})$
+    \STATE \hspace{0.6cm} $Flags_i \gets (left \vee right)$
+    \STATE \textbf{END\_PARALLEL}
+
+    \STATE \COMMENT{4. \textsc{CompactUnique}: extract repeats and uniquify}
+    \STATE $RawRepeats \gets$ \textbf{COMPACT}($Keys$, $Flags==1$) \COMMENT{copy\_if}
+    \STATE $Repeats \gets$ \textbf{UNIQUE}($RawRepeats$)
+
+    \RETURN $Repeats$
+  \end{algorithmic}
+\end{algorithm}
+
+
+\begin{algorithm}[t]
+  \caption{GPU Parallel Checkerboard Encoding}
+  \label{alg:gpu-encoding}
+  \begin{algorithmic}[1]
+    \STATE \textbf{Input:} Device vector $D$ (int32), device hash table $T$
+    \STATE \textbf{Output:} New device vector $D'$, per-round \texttt{rules\_used}
+
+    \STATE Allocate arrays $F$ (uint8, size $N$) and $V$ (int32, size $N$)
+    \STATE \COMMENT{$F_i$: 0 literal, 1 selected start, 2 consumed}
+
+    \STATE \COMMENT{1. Candidate marking (no dependencies)}
+    \STATE \textsc{MarkCandidates}$(D,T)\rightarrow(F,V)$
+    \STATE \COMMENT{$F_i \in \{0,1\}$ after this step}
+
+    \STATE \COMMENT{2. Checkerboard selection (two kernel-wide phases)}
+    \STATE \textsc{SelectEvens}$(F)$ \COMMENT{for even $i$ with $F_i{=}1$: set $F_{i+1}{=}2$}
+    \STATE \textsc{ResolveOdds}$(F)$ \COMMENT{for odd $i$ with $F_i{=}1$: cancel if $F_{i+1}{=}1$, else set $F_{i+1}{=}2$}
+
+    \STATE \COMMENT{3. Emit + compact}
+    \STATE $D' \gets$ \textsc{ScatterCompact}$(D,V,F)$ \COMMENT{emit $V_i$ if $F_i{=}1$, else $D_i$; skip $F_i{=}2$}
+    \STATE \textsc{MarkUsedRules}$(F,V)\rightarrow\texttt{rules\_used}$
+  \end{algorithmic}
+\end{algorithm}
+
+
+
+\noindent \textbf{Parallel Checkerboard Encoding.}
+In the CPU backend, rule substitution is a serial, greedy scan: a replacement at index $i$ consumes $(i,i+1)$ and therefore blocks a replacement starting at $i+1$. This induces a strict left-to-right dependency chain. On the GPU, we remove this dependency with a two-phase ``checkerboard'' schedule that selects a non-overlapping set of rule starts using only local neighbor state and two global phases (even pass, then odd pass):
+\begin{enumerate}[noitemsep, topsep=2pt, leftmargin=*]
+  \item \textbf{\textsc{MarkCandidates} (Lookup + Orientation)}: For each $i\in[0,N-2]$, one thread forms the canonical key $K_i$ and performs a hash-table lookup in $T$. If found, let $r_i = T[K_i]$ be the rule ID assigned to this 2-mer key; we mark $i$ as a candidate start and store the signed replacement value: $+r_i$ if $\text{pack}(D_i,D_{i+1})=K_i$, else $-r_i$.
+  \item \textbf{\textsc{SelectEvens}}: All even candidates $i\in\{0,2,4,\dots\}$ are selected simultaneously. Because intervals $[2k,2k+1]$ do not overlap, we can safely mark each right neighbor $i{+}1$ as \emph{consumed}.
+  \item \textbf{\textsc{ResolveOdds}}: Odd candidate starts $i\in\{1,3,5,\dots\}$ are selected only if their right neighbor $i{+}1$ is \emph{not} an even start. If $i{+}1$ is an even start, the odd candidate is canceled; otherwise it is selected and consumes $i{+}1$.
+  \item \textbf{\textsc{ScatterCompact}}: After selection, $F_i$ encodes three states: literal (0), selected start (1), or consumed (2). We keep indices not marked consumed, emitting the signed rule ID at selected starts and the original literal otherwise. A \texttt{rules\_used} bitmap is built in the same pass.
+\end{enumerate}
+
+
+
+\noindent \textbf{Compact, Sort, and Remap.}
+Following encoding, we perform the same optimization steps as the CPU backend but strictly using GPU primitives. We use a parallel prefix sum (scan) to calculate the destination indices for active rules (compaction). The rules are then sorted by their 2-mer keys using GPU Radix Sort to ensure optimal delta encoding. Finally, a parallel kernel remaps all rule occurrences in the traversal vector to their new sorted IDs. The final output matches the CPU pipeline exactly: a single flattened \texttt{int32} traversal vector, two parallel rule definition vectors, and \texttt{start\_id}, allowing for identical downstream processing.
+
+\noindent \textbf{Field Encoding.}
+Once traversals and rule tables are produced as contiguous device vectors, we compress them directly on the GPU using \texttt{nvComp} ZSTD. For boolean columns (e.g., orientations), we first bit-pack flags (1 bit/value) and then apply ZSTD; for integer and byte streams we apply ZSTD directly, leveraging the structure created by sorting, delta encoding, and compaction.
+
+
+
+
+\noindent \textbf{GPU Decompression (Traversals).}
+A direct GPU port of CPU-style recursive expansion (depth-first rule chasing) performs poorly: varying grammar depth introduces divergence, and repeated rule lookups lead to irregular memory access. We therefore use a \emph{rule pre-expansion} strategy that converts recursive decoding into a small number of dense, regular memory passes:
+\begin{enumerate}[noitemsep, topsep=2pt, leftmargin=*]
+  \item \textbf{\textsc{PreExpandRules} (Once per Rulebook)}: We pre-expand every rule into a contiguous buffer. Concretely, we compute each rule's final expansion length (number of literals after full expansion), exclusive-scan these lengths to obtain per-rule offsets, then materialize a dense array that stores each rule's fully expanded literal sequence. Negative rule references are handled by reversing child order and flipping signs during expansion.
+  \item \textbf{\textsc{ComputeOffsets} (Per Traversal)}: For each element of the encoded traversal, we compute its output length (1 for raw node IDs; $\texttt{rule\_sizes}[|r|-\texttt{min\_rule\_id}]$ for rules) and perform an exclusive scan to obtain the exact output write position for every element.
+  \item \textbf{\textsc{ExpandTraversalSinglePass} (Scatter/Copy)}: A single kernel writes the decoded traversal into the output buffer: literals are copied directly; rules are expanded by bulk-copying their pre-expanded segments from the dense rule buffer. If a rule ID is negative, we copy the segment sequence in reverse order and negate each element.
+\end{enumerate}
+
+Compared to an alternative reverse-\(n\)-round decoder that undoes grammar layers one level at a time (which requires repeated full-vector \emph{scan $\rightarrow$ expand $\rightarrow$ re-scan} passes and global synchronization), this pre-expansion strategy removes the bottleneck of multiple kernel launches. Variable-depth recursion is paid once per rulebook, and traversal decoding becomes a small constant number of regular passes. This increases throughput from about 30 GB/s (using our deprecated iterative expander) to over 300 GB/s. In practice, the decode phase is bandwidth-dominated, followed by GPU-resident inverse delta (prefix sum) to recover original node IDs. Other fields are decoded and copied back to host memory.

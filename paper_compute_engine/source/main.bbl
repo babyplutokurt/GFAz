@@ -1,0 +1,385 @@
+%%% -*-BibTeX-*-
+%%% Do NOT edit. File created by BibTeX with style
+%%% ACM-Reference-Format-Journals [18-Jan-2012].
+
+\begin{thebibliography}{27}
+
+%%% ====================================================================
+%%% NOTE TO THE USER: you can override these defaults by providing
+%%% customized versions of any of these macros before the \bibliography
+%%% command.  Each of them MUST provide its own final punctuation,
+%%% except for \shownote{} and \showURL{}.  The latter two
+%%% do not use final punctuation, in order to avoid confusing it with
+%%% the Web address.
+%%%
+%%% To suppress output of a particular field, define its macro to expand
+%%% to an empty string, or better, \unskip, like this:
+%%%
+%%% \newcommand{\showURL}[1]{\unskip}   % LaTeX syntax
+%%%
+%%% \def \showURL #1{\unskip}           % plain TeX syntax
+%%%
+%%% ====================================================================
+
+\ifx \showCODEN    \undefined \def \showCODEN     #1{\unskip}     \fi
+\ifx \showISBNx    \undefined \def \showISBNx     #1{\unskip}     \fi
+\ifx \showISBNxiii \undefined \def \showISBNxiii  #1{\unskip}     \fi
+\ifx \showISSN     \undefined \def \showISSN      #1{\unskip}     \fi
+\ifx \showLCCN     \undefined \def \showLCCN      #1{\unskip}     \fi
+\ifx \shownote     \undefined \def \shownote      #1{#1}          \fi
+\ifx \showarticletitle \undefined \def \showarticletitle #1{#1}   \fi
+\ifx \showURL      \undefined \def \showURL       {\relax}        \fi
+% The following commands are used for tagged output and should be
+% invisible to TeX
+\providecommand\bibfield[2]{#2}
+\providecommand\bibinfo[2]{#2}
+\providecommand\natexlab[1]{#1}
+\providecommand\showeprint[2][]{arXiv:#2}
+
+\bibitem[Bonfield(2022)]%
+        {bonfield2022cram}
+\bibfield{author}{\bibinfo{person}{James~K Bonfield}.}
+  \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{CRAM 3.1: advances in the CRAM file format}.
+\newblock \bibinfo{journal}{\emph{Bioinformatics}} \bibinfo{volume}{38},
+  \bibinfo{number}{6} (\bibinfo{year}{2022}), \bibinfo{pages}{1497--1503}.
+\newblock
+
+
+\bibitem[Collet(2021)]%
+        {collet2021rfc}
+\bibfield{author}{\bibinfo{person}{Yann Collet}.}
+  \bibinfo{year}{2021}\natexlab{}.
+\newblock \bibinfo{title}{RFC 8878: Zstandard Compression and
+  the'application/zstd'Media Type}.
+\newblock
+
+
+\bibitem[Eizenga et~al\mbox{.}(2020)]%
+        {eizenga2020pangenome}
+\bibfield{author}{\bibinfo{person}{Jordan~M Eizenga}, \bibinfo{person}{Adam~M
+  Novak}, \bibinfo{person}{Jonas~A Sibbesen}, \bibinfo{person}{Simon Heumos},
+  \bibinfo{person}{Ali Ghaffaari}, \bibinfo{person}{Glenn Hickey},
+  \bibinfo{person}{Xian Chang}, \bibinfo{person}{Josiah~D Seaman},
+  \bibinfo{person}{Robin Rounthwaite}, \bibinfo{person}{Jana Ebler},
+  {et~al\mbox{.}}} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Pangenome graphs}.
+\newblock \bibinfo{journal}{\emph{Annual review of genomics and human
+  genetics}} \bibinfo{volume}{21}, \bibinfo{number}{1} (\bibinfo{year}{2020}),
+  \bibinfo{pages}{139--162}.
+\newblock
+
+
+\bibitem[Garrison et~al\mbox{.}(2024)]%
+        {garrison2024building}
+\bibfield{author}{\bibinfo{person}{Erik Garrison}, \bibinfo{person}{Andrea
+  Guarracino}, \bibinfo{person}{Simon Heumos}, \bibinfo{person}{Flavia
+  Villani}, \bibinfo{person}{Zhigui Bao}, \bibinfo{person}{Lorenzo Tattini},
+  \bibinfo{person}{J{\"o}rg Hagmann}, \bibinfo{person}{Sebastian Vorbrugg},
+  \bibinfo{person}{Santiago Marco-Sola}, \bibinfo{person}{Christian Kubica},
+  {et~al\mbox{.}}} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Building pangenome graphs}.
+\newblock \bibinfo{journal}{\emph{Nature Methods}} \bibinfo{volume}{21},
+  \bibinfo{number}{11} (\bibinfo{year}{2024}), \bibinfo{pages}{2008--2012}.
+\newblock
+
+
+\bibitem[Garrison et~al\mbox{.}(2018)]%
+        {garrison2018variation}
+\bibfield{author}{\bibinfo{person}{Erik Garrison}, \bibinfo{person}{Jouni
+  Sir{\'e}n}, \bibinfo{person}{Adam~M Novak}, \bibinfo{person}{Glenn Hickey},
+  \bibinfo{person}{Jordan~M Eizenga}, \bibinfo{person}{Eric~T Dawson},
+  \bibinfo{person}{William Jones}, \bibinfo{person}{Shilpa Garg},
+  \bibinfo{person}{Charles Markello}, \bibinfo{person}{Michael~F Lin},
+  {et~al\mbox{.}}} \bibinfo{year}{2018}\natexlab{}.
+\newblock \showarticletitle{Variation graph toolkit improves read mapping by
+  representing genetic variation in the reference}.
+\newblock \bibinfo{journal}{\emph{Nature biotechnology}} \bibinfo{volume}{36},
+  \bibinfo{number}{9} (\bibinfo{year}{2018}), \bibinfo{pages}{875--879}.
+\newblock
+
+
+\bibitem[{GFA Specification Working Group}(2023)]%
+        {gfaspec}
+\bibfield{author}{\bibinfo{person}{{GFA Specification Working Group}}.}
+  \bibinfo{year}{2023}\natexlab{}.
+\newblock \bibinfo{title}{GFA1: Graphical Fragment Assembly Format
+  Specification}.
+\newblock
+  \bibinfo{howpublished}{\url{https://gfa-spec.github.io/GFA-spec/GFA1.html}}.
+\newblock
+\newblock
+\shownote{Accessed: 2026-02-08}.
+
+
+\bibitem[Guarracino et~al\mbox{.}(2022)]%
+        {guarracino2022odgi}
+\bibfield{author}{\bibinfo{person}{Andrea Guarracino}, \bibinfo{person}{Simon
+  Heumos}, \bibinfo{person}{Sven Nahnsen}, \bibinfo{person}{Pjotr Prins}, {and}
+  \bibinfo{person}{Erik Garrison}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{ODGI: understanding pangenome graphs}.
+\newblock \bibinfo{journal}{\emph{Bioinformatics}} \bibinfo{volume}{38},
+  \bibinfo{number}{13} (\bibinfo{year}{2022}), \bibinfo{pages}{3319--3326}.
+\newblock
+
+
+\bibitem[Heringer and Doerr(2025)]%
+        {heringer2025human}
+\bibfield{author}{\bibinfo{person}{Peter Heringer} {and}
+  \bibinfo{person}{Daniel Doerr}.} \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Human readable compression of GFA paths using
+  grammar-based code}.
+\newblock \bibinfo{journal}{\emph{bioRxiv}} (\bibinfo{year}{2025}),
+  \bibinfo{pages}{2025--05}.
+\newblock
+
+
+\bibitem[Hickey et~al\mbox{.}(2020)]%
+        {hickey2020genotyping}
+\bibfield{author}{\bibinfo{person}{Glenn Hickey}, \bibinfo{person}{David
+  Heller}, \bibinfo{person}{Jean Monlong}, \bibinfo{person}{Jonas~A. Sibbesen},
+  \bibinfo{person}{Jouni Sir{\'e}n}, \bibinfo{person}{Jordan Eizenga},
+  \bibinfo{person}{Eric~T. Dawson}, \bibinfo{person}{Erik Garrison},
+  \bibinfo{person}{Adam~M. Novak}, {and} \bibinfo{person}{Benedict Paten}.}
+  \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Genotyping structural variants in pangenome graphs
+  using the vg toolkit}.
+\newblock \bibinfo{journal}{\emph{Genome Biology}} \bibinfo{volume}{21},
+  \bibinfo{number}{1} (\bibinfo{year}{2020}), \bibinfo{pages}{35}.
+\newblock
+\href{https://doi.org/10.1186/s13059-020-1941-7}{doi:\nolinkurl{10.1186/s13059-020-1941-7}}
+
+
+\bibitem[Hickey et~al\mbox{.}(2024)]%
+        {hickey2024pangenome}
+\bibfield{author}{\bibinfo{person}{Glenn Hickey}, \bibinfo{person}{Jean
+  Monlong}, \bibinfo{person}{Jana Ebler}, \bibinfo{person}{Adam~M Novak},
+  \bibinfo{person}{Jordan~M Eizenga}, \bibinfo{person}{Yan Gao},
+  \bibinfo{person}{Tobias Marschall}, \bibinfo{person}{Heng Li}, {and}
+  \bibinfo{person}{Benedict Paten}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Pangenome graph construction from genome alignments
+  with Minigraph-Cactus}.
+\newblock \bibinfo{journal}{\emph{Nature biotechnology}} \bibinfo{volume}{42},
+  \bibinfo{number}{4} (\bibinfo{year}{2024}), \bibinfo{pages}{663--673}.
+\newblock
+
+
+\bibitem[{Human Pangenome Reference Consortium}(2025a)]%
+        {hpp_data_portal}
+\bibfield{author}{\bibinfo{person}{{Human Pangenome Reference Consortium}}.}
+  \bibinfo{year}{2025}\natexlab{a}.
+\newblock \bibinfo{title}{Human Pangenome Project Data Portal}.
+\newblock
+  \bibinfo{howpublished}{\url{https://42basepairs.com/browse/s3/human-pangenomics/pangenomes}}.
+\newblock
+\newblock
+\shownote{Public HPRC pangenome graph datasets hosted via the 42basepairs
+  platform; accessed February 8, 2026}.
+
+
+\bibitem[{Human Pangenome Reference Consortium}(2025b)]%
+        {hprc_timeline}
+\bibfield{author}{\bibinfo{person}{{Human Pangenome Reference Consortium}}.}
+  \bibinfo{year}{2025}\natexlab{b}.
+\newblock \bibinfo{title}{Human Pangenome Reference Consortium: Release
+  Timeline}.
+\newblock
+  \bibinfo{howpublished}{\url{https://humanpangenome.org/release-timeline/}}.
+\newblock
+\newblock
+\shownote{Accessed: February 8, 2026}.
+
+
+\bibitem[Li et~al\mbox{.}(2009)]%
+        {li2009sequence}
+\bibfield{author}{\bibinfo{person}{Heng Li}, \bibinfo{person}{Bob Handsaker},
+  \bibinfo{person}{Alec Wysoker}, \bibinfo{person}{Tim Fennell},
+  \bibinfo{person}{Jue Ruan}, \bibinfo{person}{Nils Homer},
+  \bibinfo{person}{Gabor Marth}, \bibinfo{person}{Goncalo Abecasis},
+  \bibinfo{person}{Richard Durbin}, {and} \bibinfo{person}{1000 Genome Project
+  Data~Processing Subgroup}.} \bibinfo{year}{2009}\natexlab{}.
+\newblock \showarticletitle{The sequence alignment/map format and SAMtools}.
+\newblock \bibinfo{journal}{\emph{bioinformatics}} \bibinfo{volume}{25},
+  \bibinfo{number}{16} (\bibinfo{year}{2009}), \bibinfo{pages}{2078--2079}.
+\newblock
+
+
+\bibitem[Liao et~al\mbox{.}(2023)]%
+        {liao2023draft}
+\bibfield{author}{\bibinfo{person}{Wen-Wei Liao}, \bibinfo{person}{Mobin Asri},
+  \bibinfo{person}{Jana Ebler}, \bibinfo{person}{Daniel Doerr},
+  \bibinfo{person}{Marina Haukness}, \bibinfo{person}{Glenn Hickey},
+  \bibinfo{person}{Shuangjia Lu}, \bibinfo{person}{Julian~K Lucas},
+  \bibinfo{person}{Jean Monlong}, \bibinfo{person}{Haley~J Abel},
+  {et~al\mbox{.}}} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{A draft human pangenome reference}.
+\newblock \bibinfo{journal}{\emph{Nature}} \bibinfo{volume}{617},
+  \bibinfo{number}{7960} (\bibinfo{year}{2023}), \bibinfo{pages}{312--324}.
+\newblock
+
+
+\bibitem[Lin et~al\mbox{.}(2024)]%
+        {lin2024measuring}
+\bibfield{author}{\bibinfo{person}{Mao-Jan Lin}, \bibinfo{person}{Sheila Iyer},
+  \bibinfo{person}{Nae-Chyun Chen}, {and} \bibinfo{person}{Ben Langmead}.}
+  \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Measuring, visualizing, and diagnosing reference
+  bias with biastools}.
+\newblock \bibinfo{journal}{\emph{Genome Biology}} \bibinfo{volume}{25},
+  \bibinfo{number}{1} (\bibinfo{year}{2024}), \bibinfo{pages}{101}.
+\newblock
+
+
+\bibitem[Marthe and Sabot(2025)]%
+        {DO1RTF_2025}
+\bibfield{author}{\bibinfo{person}{Nina Marthe} {and} \bibinfo{person}{Francois
+  Sabot}.} \bibinfo{year}{2025}\natexlab{}.
+\newblock \bibinfo{title}{{Data used for the analysis described in GrAnnoT
+  paper}}.
+\newblock
+\href{https://doi.org/10.23708/DO1RTF}{doi:\nolinkurl{10.23708/DO1RTF}}
+
+
+\bibitem[{NVIDIA Corporation}(2026)]%
+        {nvcomp_github}
+\bibfield{author}{\bibinfo{person}{{NVIDIA Corporation}}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \bibinfo{title}{{NVIDIA/nvcomp: Repository for nvCOMP docs and
+  examples}}.
+\newblock \bibinfo{howpublished}{\url{https://github.com/NVIDIA/nvcomp}}.
+\newblock
+\newblock
+\shownote{GitHub repository, accessed February 9, 2026}.
+
+
+\bibitem[Parmigiani et~al\mbox{.}(2024)]%
+        {parmigiani2024panacus}
+\bibfield{author}{\bibinfo{person}{Luca Parmigiani}, \bibinfo{person}{Lars
+  Wienbrandt}, {and} \bibinfo{person}{Tobias Marschall}.}
+  \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Panacus: fast and exact pangenome growth and core
+  size estimation}.
+\newblock \bibinfo{journal}{\emph{Bioinformatics}} \bibinfo{volume}{40},
+  \bibinfo{number}{12} (\bibinfo{year}{2024}), \bibinfo{pages}{btae720}.
+\newblock
+\href{https://doi.org/10.1093/bioinformatics/btae720}{doi:\nolinkurl{10.1093/bioinformatics/btae720}}
+
+
+\bibitem[Paten et~al\mbox{.}(2018)]%
+        {paten2018superbubbles}
+\bibfield{author}{\bibinfo{person}{Benedict Paten}, \bibinfo{person}{Jordan~M.
+  Eizenga}, \bibinfo{person}{Yohei~M. Rosen}, \bibinfo{person}{Adam~M. Novak},
+  \bibinfo{person}{Erik Garrison}, {and} \bibinfo{person}{Glenn Hickey}.}
+  \bibinfo{year}{2018}\natexlab{}.
+\newblock \showarticletitle{Superbubbles, Ultrabubbles, and Cacti}.
+\newblock \bibinfo{journal}{\emph{Journal of Computational Biology}}
+  \bibinfo{volume}{25}, \bibinfo{number}{7} (\bibinfo{year}{2018}),
+  \bibinfo{pages}{649--663}.
+\newblock
+\href{https://doi.org/10.1089/cmb.2017.0251}{doi:\nolinkurl{10.1089/cmb.2017.0251}}
+
+
+\bibitem[Secomandi et~al\mbox{.}(2025)]%
+        {secomandi2025pangenome}
+\bibfield{author}{\bibinfo{person}{Simona Secomandi},
+  \bibinfo{person}{Guido~Roberto Gallo}, \bibinfo{person}{Riccardo Rossi},
+  \bibinfo{person}{Carlos Rodr{\'\i}guez~Fernandes}, \bibinfo{person}{Erich~D
+  Jarvis}, \bibinfo{person}{Andrea Bonisoli-Alquati}, \bibinfo{person}{Luca
+  Gianfranceschi}, {and} \bibinfo{person}{Giulio Formenti}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Pangenome graphs and their applications in
+  biodiversity genomics}.
+\newblock \bibinfo{journal}{\emph{Nature Genetics}} \bibinfo{volume}{57},
+  \bibinfo{number}{1} (\bibinfo{year}{2025}), \bibinfo{pages}{13--26}.
+\newblock
+
+
+\bibitem[Sir{\'e}n et~al\mbox{.}(2020)]%
+        {siren2020haplotype}
+\bibfield{author}{\bibinfo{person}{Jouni Sir{\'e}n}, \bibinfo{person}{Erik
+  Garrison}, \bibinfo{person}{Adam~M Novak}, \bibinfo{person}{Benedict Paten},
+  {and} \bibinfo{person}{Richard Durbin}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Haplotype-aware graph indexes}.
+\newblock \bibinfo{journal}{\emph{Bioinformatics}} \bibinfo{volume}{36},
+  \bibinfo{number}{2} (\bibinfo{year}{2020}), \bibinfo{pages}{400--407}.
+\newblock
+
+
+\bibitem[Sir{\'e}n et~al\mbox{.}(2021)]%
+        {siren2021pangenomics}
+\bibfield{author}{\bibinfo{person}{Jouni Sir{\'e}n}, \bibinfo{person}{Jean
+  Monlong}, \bibinfo{person}{Xian Chang}, \bibinfo{person}{Adam~M Novak},
+  \bibinfo{person}{Jordan~M Eizenga}, \bibinfo{person}{Charles Markello},
+  \bibinfo{person}{Jonas~A Sibbesen}, \bibinfo{person}{Glenn Hickey},
+  \bibinfo{person}{Pi-Chuan Chang}, \bibinfo{person}{Andrew Carroll},
+  {et~al\mbox{.}}} \bibinfo{year}{2021}\natexlab{}.
+\newblock \showarticletitle{Pangenomics enables genotyping of known structural
+  variants in 5202 diverse genomes}.
+\newblock \bibinfo{journal}{\emph{Science}} \bibinfo{volume}{374},
+  \bibinfo{number}{6574} (\bibinfo{year}{2021}), \bibinfo{pages}{abg8871}.
+\newblock
+
+
+\bibitem[Sir{\'e}n and Paten(2022)]%
+        {siren2022gbz}
+\bibfield{author}{\bibinfo{person}{Jouni Sir{\'e}n} {and}
+  \bibinfo{person}{Benedict Paten}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{GBZ file format for pangenome graphs}.
+\newblock \bibinfo{journal}{\emph{Bioinformatics}} \bibinfo{volume}{38},
+  \bibinfo{number}{22} (\bibinfo{year}{2022}), \bibinfo{pages}{5012--5018}.
+\newblock
+
+
+\bibitem[Wang et~al\mbox{.}(2022)]%
+        {wang2022human}
+\bibfield{author}{\bibinfo{person}{Ting Wang}, \bibinfo{person}{Lucinda
+  Antonacci-Fulton}, \bibinfo{person}{Kerstin Howe}, \bibinfo{person}{Heather~A
+  Lawson}, \bibinfo{person}{Julian~K Lucas}, \bibinfo{person}{Adam~M
+  Phillippy}, \bibinfo{person}{Alice~B Popejoy}, \bibinfo{person}{Mobin Asri},
+  \bibinfo{person}{Caryn Carson}, \bibinfo{person}{Mark~JP Chaisson},
+  {et~al\mbox{.}}} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{The Human Pangenome Project: a global resource to
+  map genomic diversity}.
+\newblock \bibinfo{journal}{\emph{Nature}} \bibinfo{volume}{604},
+  \bibinfo{number}{7906} (\bibinfo{year}{2022}), \bibinfo{pages}{437--446}.
+\newblock
+
+
+\bibitem[Wick et~al\mbox{.}(2015)]%
+        {Wick2015Bandage}
+\bibfield{author}{\bibinfo{person}{Ryan~R. Wick}, \bibinfo{person}{Mark~B.
+  Schultz}, \bibinfo{person}{Justin Zobel}, {and} \bibinfo{person}{Kathryn~E.
+  Holt}.} \bibinfo{year}{2015}\natexlab{}.
+\newblock \showarticletitle{Bandage: Interactive visualization of de novo
+  genome assemblies}.
+\newblock \bibinfo{journal}{\emph{Bioinformatics}} \bibinfo{volume}{31},
+  \bibinfo{number}{20} (\bibinfo{year}{2015}), \bibinfo{pages}{3350--3352}.
+\newblock
+\href{https://doi.org/10.1093/bioinformatics/btv383}{doi:\nolinkurl{10.1093/bioinformatics/btv383}}
+
+
+\bibitem[Yang et~al\mbox{.}(2024)]%
+        {yang2024gpufastqlz}
+\bibfield{author}{\bibinfo{person}{Taolue Yang}, \bibinfo{person}{Youyuan Liu},
+  \bibinfo{person}{Bo Jiang}, {and} \bibinfo{person}{Sian Jin}.}
+  \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{GPUFASTQLZ: An Ultra Fast Compression Methodology
+  for Fastq Sequence Data on GPUs}. In \bibinfo{booktitle}{\emph{SC24-W:
+  Workshops of the International Conference for High Performance Computing,
+  Networking, Storage and Analysis}}. IEEE, \bibinfo{pages}{317--325}.
+\newblock
+
+
+\bibitem[Zouhar et~al\mbox{.}(2023)]%
+        {zouhar2023formal}
+\bibfield{author}{\bibinfo{person}{Vil{\'e}m Zouhar}, \bibinfo{person}{Clara
+  Meister}, \bibinfo{person}{Juan Gastaldi}, \bibinfo{person}{Li Du},
+  \bibinfo{person}{Tim Vieira}, \bibinfo{person}{Mrinmaya Sachan}, {and}
+  \bibinfo{person}{Ryan Cotterell}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{A formal perspective on byte-pair encoding}. In
+  \bibinfo{booktitle}{\emph{Findings of the Association for Computational
+  Linguistics: ACL 2023}}. \bibinfo{pages}{598--614}.
+\newblock
+
+
+\end{thebibliography}
