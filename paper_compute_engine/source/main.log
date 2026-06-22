@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  22 JUN 2026 01:46
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  22 JUN 2026 13:33
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1621,7 +1621,13 @@ Package hyperref Warning: Token not allowed in a PDF string (Unicode):
 (hyperref)                \kern 1.50032pt
 (hyperref)                removed on input line 40.
 
-) (./5_conclusion.tex) [16.16] Processing 'acks' comment.
+LaTeX Font Info:    Font shape `T1/zi4/m/n' will be
+(Font)              scaled to size 7.0pt on input line 156.
+
+Underfull \vbox (badness 1895) has occurred while \output is active []
+
+ [16.16])
+(./5_conclusion.tex) Processing 'acks' comment.
 \openout3 = `comment.cut'.
 
 
@@ -1632,13 +1638,13 @@ Underfull \hbox (badness 10000) in paragraph at lines 51--56
 d Com-pres-sion and
  []
 
-
+[17.17]
 Underfull \hbox (badness 2753) in paragraph at lines 169--178
 []\T1/LinuxLibertineT-TLF/m/n/7 (+20) Human Pangenome Ref-er-ence Con-sor-tium.
  2025.  Hu-man Pangenome
  []
 
-[17.17])
+)
 
 Class acmart Warning: Some images may lack descriptions.
 (acmart)              ACM is committed to complying with the upcoming US ADA ht
@@ -1655,7 +1661,7 @@ rtant steps when creating your papers will ensure that the widest possible audi
 ence can ingest your work..
 
 
-Overfull \vbox (1.16599pt too high) has occurred while \output is active []
+Overfull \vbox (1.1135pt too high) has occurred while \output is active []
 
 
 (/usr/share/texlive/texmf-dist/tex/generic/stringenc/se-pdfdoc.def
@@ -1670,14 +1676,14 @@ LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
  ***********
 Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: 6529EDC4AEF08105D5F9258A74C7CE0D;7119.
+(rerunfilecheck)             Checksum: 96C728E0A2B44819C4A87FD62123BE4C;7119.
  ) 
 Here is how much of TeX's memory you used:
- 34955 strings out of 474222
- 630354 string characters out of 5748733
+ 34968 strings out of 474222
+ 630599 string characters out of 5748733
  1980975 words of memory out of 5000000
- 55361 multiletter control sequences out of 15000+600000
- 840390 words of font info for 646 fonts, out of 8000000 for 9000
+ 55364 multiletter control sequences out of 15000+600000
+ 841832 words of font info for 653 fonts, out of 8000000 for 9000
  1302 hyphenation exceptions out of 8191
  90i,15n,131p,1025b,945s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/inconsolata/Inconsolata-zi4
@@ -1693,13 +1699,14 @@ r/share/texlive/texmf-dist/fonts/type1/public/libertine/LinLibertineT.pfb></usr
 /share/texlive/texmf-dist/fonts/type1/public/libertine/LinLibertineTB.pfb></usr
 /share/texlive/texmf-dist/fonts/type1/public/libertine/LinLibertineTI.pfb></usr
 /share/texlive/texmf-dist/fonts/type1/public/newtx/NewTXMI.pfb></usr/share/texl
-ive/texmf-dist/fonts/type1/public/newtx/txexs.pfb></usr/share/texlive/texmf-dis
-t/fonts/type1/public/newtx/txmiaX.pfb></usr/share/texlive/texmf-dist/fonts/type
-1/public/newtx/txsys.pfb>
-Output written on main.pdf (18 pages, 1700772 bytes).
+ive/texmf-dist/fonts/type1/public/newtx/NewTXMI7.pfb></usr/share/texlive/texmf-
+dist/fonts/type1/public/newtx/txexs.pfb></usr/share/texlive/texmf-dist/fonts/ty
+pe1/public/newtx/txmiaX.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/n
+ewtx/txsys.pfb>
+Output written on main.pdf (18 pages, 1705421 bytes).
 PDF statistics:
- 809 PDF objects out of 1000 (max. 8388607)
- 640 compressed objects within 7 object streams
- 253 named destinations out of 1000 (max. 500000)
- 148323 words of extra memory for PDF output out of 154059 (max. 10000000)
+ 817 PDF objects out of 1000 (max. 8388607)
+ 646 compressed objects within 7 object streams
+ 254 named destinations out of 1000 (max. 500000)
+ 148835 words of extra memory for PDF output out of 154059 (max. 10000000)
 

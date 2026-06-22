@@ -118,4 +118,41 @@ Graph & Tool & Time & RSS & Time & RSS \\
 
 \subsection{Presence/Absence Variation}\label{subsec:eval-pav}
 
-\emph{Results pending benchmark completion.}
+Table~\ref{tab:eval-pav} compares \texttt{pav} against \texttt{odgi pav} on the
+chr1 and chr6 graphs, computing the whole-path PAV matrix
+($2{,}262$ and $1{,}410$ reference windows $\times$ $46$ sample groups). Both
+tools emit a matrix with identical structure; \gfaz's PAV ratios reproduce
+\texttt{odgi}'s reference semantics (Section~\ref{subsec:ce-instances}). The
+performance gap is the largest of the three analyses: at 16 threads \gfaz is
+$299\times$ (chr1) and $613\times$ (chr6) faster than \texttt{odgi pav} while
+using $3.1$--$3.3\times$ less peak memory, and it operates directly on the
+\texttt{.gfaz}, avoiding the \texttt{odgi build} step (a further $61$\,s / $31$\,s)
+that \texttt{odgi pav} requires. Single-threaded \texttt{odgi pav} did not finish
+within a day and is omitted; even at 16 (and, in prior runs, 32) threads it
+remains three orders of magnitude slower than \gfaz, whose single-threaded run
+already completes in under two minutes.
+
+\begin{table}[t]
+\centering
+\caption{\texttt{pav} vs.\ \texttt{odgi pav}: wall-clock time and peak RSS.
+\texttt{odgi} additionally requires an \texttt{odgi build} step (chr1 $61$\,s,
+chr6 $31$\,s at 16 threads); single-threaded \texttt{odgi pav} did not complete
+($>$1 day).}
+\label{tab:eval-pav}
+\small
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{llrrrr}
+\hline
+ & & \multicolumn{2}{c}{1 thread} & \multicolumn{2}{c}{16 threads} \\
+\cline{3-4}\cline{5-6}
+Graph & Tool & Time & RSS & Time & RSS \\
+\hline
+\multirow{2}{*}{chr1} & \texttt{odgi} & ---$^\dagger$ & --- & 3499\,s & 31.9\,GB \\
+                      & \thiswork     & 106\,s        & 8.7\,GB & 11.7\,s & 9.5\,GB \\
+\hline
+\multirow{2}{*}{chr6} & \texttt{odgi} & ---$^\dagger$ & --- & 4759\,s & 19.4\,GB \\
+                      & \thiswork     & 72\,s         & 5.8\,GB & 7.8\,s & 6.4\,GB \\
+\hline
+\multicolumn{6}{l}{\footnotesize $^\dagger$ single-threaded \texttt{odgi pav} did not complete ($>$1 day).}\\
+\end{tabular}
+\end{table}
