@@ -1,13 +1,13 @@
 # Fdb version 4
-["bibtex main"] 1782106801.78029 "main.aux" "main.bbl" "main" 1782106803.37672 0
+["bibtex main"] 1782107213.13165 "main.aux" "main.bbl" "main" 1782107214.67939 0
   "./ACM-Reference-Format.bst" 1782085185.12699 93560 12e0ced1522ea2bfa9b2fb12855c7e9e ""
   "./ref.bib" 1782085185.1377 11695 381d025b8e65e9b048bd2fbc2befef86 ""
-  "main.aux" 1782106803.14349 25991 c093aefaf9b57f3ff15c72ddd5894c27 "pdflatex"
+  "main.aux" 1782107214.46441 26416 38a7998c4348d711ad5582a812c1ac88 "pdflatex"
   (generated)
   "main.bbl"
   "main.blg"
   (rewritten before read)
-["pdflatex"] 1782106801.83898 "main.tex" "main.pdf" "main" 1782106803.37686 0
+["pdflatex"] 1782107213.18794 "main.tex" "main.pdf" "main" 1782107214.67954 0
   "/etc/texmf/web2c/texmf.cnf" 1769636575.11839 475 c0e671620eb5563b2130f56340a5fde8 ""
   "/usr/share/texlive/texmf-dist/fonts/enc/dvips/inconsolata/i4-t1-4.enc" 1558214095 7693 0f2dce6d313c82989ec3a67fc24df2a0 ""
   "/usr/share/texlive/texmf-dist/fonts/enc/dvips/libertine/lbtn_25tcsq.enc" 1490131464 2921 8ca0eb0831f9bc5da080d3697cfe67bf ""
@@ -313,22 +313,22 @@
   "4_evaluation.tex" 1782085185.12645 21970 381a06017570e7e0b32dad4b1ccf7646 ""
   "5_conclusion.tex" 1782085185.12645 1059 ddc45969bec79e447be33f6d8316e523 ""
   "6_compute_engine.tex" 1782100518.85654 36072 a65e7333242d41738de61b03bcd74bff ""
-  "7_evaluation_results.tex" 1782106785.50754 3878 5d9ce117c832cdb520f5b2239ba201fc ""
+  "7_evaluation_results.tex" 1782107183.48849 5672 630d2f83994ef3a9c72bcbc8730fe318 ""
   "Compression_workflow.png" 1782085185.12794 329099 8e1c6b4f94d3f5e6b27c127aa02ea7e3 ""
   "Decompression_workflow.png" 1782085185.1287 275663 8c157d3b497be6ea9cb9b4dad046f678 ""
   "GFA_visualization.png" 1782085185.13179 1050818 647c9f14818388da4f9ec08bce15ff02 ""
   "acmart-taps.sty" 1782085185.13179 578 70e1471e4ead83728e0c0c771a7ad627 ""
   "acmart.cls" 1782085185.13209 122400 54cc4edcc7b9cb1bf0a23c528626957c ""
-  "comment.cut" 1782106803.09949 278 5020bb1824a602f2ab4ee5139c15ecdc "pdflatex"
+  "comment.cut" 1782107214.42282 278 5020bb1824a602f2ab4ee5139c15ecdc "pdflatex"
   "compact_sort_ablation.tex" 1782085185.13209 2074 c73acd29a32a25340b1a79689fbcbe2b ""
   "compressors_evaluation.tex" 1782085185.13209 4585 4a806f93d26e2855d6f0847f871a1f22 ""
   "cpu_breakdown.tex" 1782085185.13209 1745 0572cab33db6b085e78873dda8f43eef ""
   "fig_eval_norm_combined.pdf" 1782085185.13236 21333 bc5bc3c185caeeaa4fb2733b1b7371ec ""
   "fig_pareto_combined.pdf" 1782085185.13245 29825 277fd26a0e3558f968dc74ee5ab90966 ""
   "gpu_breakdown.tex" 1782085185.13245 2157 93726a6eb6bd7fd64b237794ff1b026a ""
-  "main.aux" 1782106803.14349 25991 c093aefaf9b57f3ff15c72ddd5894c27 "pdflatex"
-  "main.bbl" 1782106801.8335 17095 35b460bd9e82cda5bc13b764e6d4bd21 "bibtex main"
-  "main.out" 1782106803.14449 7119 5d11664019cc77e766068c8ccf04402c "pdflatex"
+  "main.aux" 1782107214.46441 26416 38a7998c4348d711ad5582a812c1ac88 "pdflatex"
+  "main.bbl" 1782107213.18242 17095 35b460bd9e82cda5bc13b764e6d4bd21 "bibtex main"
+  "main.out" 1782107214.46541 7119 6529edc4aef08105d5f9258a74c7ce0d "pdflatex"
   "main.tex" 1782103321.39294 4812 6ecc5a4ce9216b64ecc5a4b422e5a42b ""
   (generated)
   "comment.cut"
