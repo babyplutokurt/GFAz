@@ -1,39 +1,47 @@
 \section{\gfaz as a Compute Engine}\label{sec:compute}
 
-The previous sections present \gfaz as a compressor. The same representation also
-supports a broader systems role: \gfaz can act as a compute substrate for
-path-centric pangenome analyses. Many downstream tasks do not require arbitrary
-mutation of the graph. Instead, they repeatedly scan haplotype traversals and
-fold node visits into a compact accumulator: a coverage histogram, a
-window-by-sample matrix, or an allele table relative to a reference path. Because
-\texttt{.gfaz} already stores P/W traversals as grammar-compressed integer
-streams, these analyses can consume the compressed traversal store directly and
-avoid reconstructing the full GFA text or a whole-graph object.
+The previous sections present \gfaz as a compressor. We now show that the same
+container is also a \emph{compute substrate}: path-centric pangenome analyses run
+directly on the grammar-compressed traversal store, without ever reconstructing the
+GFA text or building a whole-graph object. Two observations make this possible. The
+dominant component of a pangenome graph---the haplotype traversals, over $90\%$ of
+the file---is already stored in a streamable, grammar-compressed form. And most
+downstream analyses do not mutate the graph: they scan traversals and fold node
+visits into a compact accumulator, such as a coverage histogram, a window-by-sample
+matrix, or an allele table relative to a reference path.
 
-This section describes the compute-engine design. Rather than a fixed set of
-commands, \gfaz exposes a small, stable substrate---a shared traversal-query
-layer---on which analyses are written as short folds over decoded traversals. The
-central abstraction is a streaming traversal primitive that expands grammar rules
-on demand and emits orientation-signed node IDs to an analysis-specific visitor
-(Section~\ref{subsec:ce-model}). A bounded rule-leaf cache exposes a
-memory/recompute trade-off for workloads that repeatedly touch large rules
-(Section~\ref{subsec:ce-cache}). The resulting memory footprint is the compressed
-traversal store plus the workload accumulator, rather than the decompressed
-traversal graph (Section~\ref{subsec:ce-memory}).
+\subsection{Overview and Design Contributions}\label{subsec:ce-overview}
 
-Built on this substrate, \gfaz implements six analysis commands. They divide into
-two regimes (Section~\ref{subsec:ce-instances}): \emph{path-iterative} folds that
-stream each haplotype once into a compact accumulator whose size is independent of
-the number of haplotypes (\texttt{deconstruct}, \texttt{growth}, \texttt{depth},
-and the metadata-only \texttt{stats}), and \emph{node-join} workloads that build a
-node-major index of which groups cover each node and join along shared nodes to
-emit a matrix (\texttt{pav} over reference windows, \texttt{similarity} over all
-group pairs). We first motivate why such derived products are needed at all
-(Section~\ref{subsec:ce-downstream}), then develop the most consequential of
-them---\texttt{deconstruct}, the GFA$\rightarrow$VCF projection---before turning to
-the remaining commands.
+The compute engine contributes along two axes.
 
-\subsection{From Pangenome Graphs to Downstream Formats}\label{subsec:ce-downstream}
+\begin{itemize}[noitemsep, topsep=2pt, leftmargin=*]
+  \item \textbf{Computing over compression.} A streaming execution model evaluates
+        every analysis directly on the compressed traversal store. The traversal
+        columns are never expanded into a materialized list of path and walk steps;
+        a query pays only for the grammar-compressed columns it must touch plus a
+        small accumulator. The consequence is order-of-magnitude speedups over
+        graph- or text-resident tools and a peak memory footprint that stays
+        \emph{below the original uncompressed GFA}, even on whole-genome human
+        pangenomes.
+  \item \textbf{\texttt{deconstruct}: a new algorithm for GFA$\rightarrow$VCF
+        projection.} The flagship analysis derives a reference-relative VCF---the
+        entry point of the downstream genomics toolchain---directly from compressed
+        traversals. It is a new two-phase algorithm that separates a one-time,
+        topology-only site-discovery pass from a path-centric allele-observation
+        fold, so it never materializes the graph or a general snarl index that
+        graph-resident deconstruction relies on.
+\end{itemize}
+
+We first explain why deriving downstream products from a pangenome is a recurring
+cost and why current tools pay it through materialization
+(Section~\ref{subsec:ce-downstream}). We then develop the shared substrate---the
+streaming primitive (Section~\ref{subsec:ce-model}), the memory model and rule-leaf
+cache (Section~\ref{subsec:ce-memory}), and the parallel execution strategy
+(Section~\ref{subsec:ce-parallel}). On that substrate we develop \texttt{deconstruct}
+in depth (Section~\ref{subsec:ce-deconstruct}), then five further analyses built the
+same way (Section~\ref{subsec:ce-instances}).
+
+\subsection{Why Analyze on the Compressed Container}\label{subsec:ce-downstream}
 
 GFA is the format in which pangenome graphs are \emph{built} and exchanged, but it
 is rarely the format in which they are \emph{analyzed}. The established genomics
@@ -46,38 +54,27 @@ only \emph{implicitly}, as the alternative traversals that haplotypes take throu
 its bubbles---a representation those tools cannot read. Other routine
 questions---how graph coverage is distributed, how the pangenome grows as
 haplotypes are added, how similar two assemblies are---are likewise answered today
-by exporting the graph into a separate, single-purpose tool for each product.
+by exporting the graph into a separate, single-purpose tool for each product. Using
+a pangenome in practice therefore means repeatedly deriving these downstream
+artifacts from it.
 
-Using a pangenome in practice therefore means repeatedly deriving these downstream
-artifacts from it. \gfaz makes the compressed container itself the engine that
-produces them: we develop \texttt{deconstruct}, the GFA$\rightarrow$VCF projection
-that is the most consequential artifact, and then a family of lighter summaries
-(growth, coverage, similarity, and graph statistics) built on the same machinery.
-The remainder of this section describes how a single streaming substrate computes
-all of them directly on compressed traversals, beginning with why this avoids the
-materialization that the conventional tools rely on.
-
-\subsection{Motivation: Avoiding Materialization}\label{subsec:ce-motivation}
-
-Pangenome analysis tools often begin by materializing a representation larger
+Current tools pay for each derivation by first materializing a representation larger
 than the statistic they ultimately compute. Panacus~\cite{parmigiani2024panacus}
 parses GFA path and walk records into item tables before deriving growth and core
-curves. odgi~\cite{guarracino2022odgi} builds a succinct whole-graph object
-before running operations such as \texttt{odgi pav}. \texttt{vg deconstruct}
-loads a graph and snarl decomposition before emitting a reference-relative VCF
-from traversals~\cite{garrison2018variation,hickey2020genotyping}. These
-representations are appropriate for general graph operations, but for
-path-centric folds the resident object can dominate both memory and time.
+curves. odgi~\cite{guarracino2022odgi} builds a succinct whole-graph object before
+running operations such as \texttt{odgi pav}. \texttt{vg deconstruct} loads a graph
+and a snarl decomposition before emitting a reference-relative VCF from
+traversals~\cite{garrison2018variation,hickey2020genotyping}. These representations
+are appropriate for general graph operations, but for path-centric folds the
+resident object dominates both memory and time. \gfaz instead targets a narrower but
+ubiquitous execution pattern---compressed traversal stream $\rightarrow$ small
+accumulator $\rightarrow$ biological statistic---and pays only for the compressed
+traversal columns, the rulebook needed to expand them, and the state required by the
+specific query. It deliberately does not try to replace topology-heavy graph
+libraries; it exploits the fact that the dominant GFA component is already encoded
+in a streamable form.
 
-\gfaz targets a narrower but common execution pattern: compressed traversal
-stream $\rightarrow$ small accumulator $\rightarrow$ biological statistic. The
-design deliberately does not try to replace topology-heavy graph libraries.
-Instead, it exploits the fact that the dominant GFA component---haplotype
-traversals---is already encoded in a streamable form. The analysis pays only for
-the compressed traversal columns, the rulebook needed to expand them, and the
-state required by the specific query.
-
-\subsection{Execution Model: Streaming Leaf Expansion}\label{subsec:ce-model}
+\subsection{The Compute Substrate}\label{subsec:ce-model}
 
 \paragraph{Compressed traversal store.}
 The \texttt{.gfaz} container stores P traversals and W traversals as two flat
@@ -169,48 +166,26 @@ command reuses, so the engine is an extensible substrate rather than a fixed set
 of tools. The layer provides: rulebook and traversal loading that decompress the
 P/W blocks and expose them as zero-copy \texttt{HapSlice} views; the templated
 \textsc{StreamDecodedNodes} decoder above; the optional rule-leaf cache
-(Section~\ref{subsec:ce-cache}); and a single PanSN grouping facility---one
+(Section~\ref{subsec:ce-memory}); and a single PanSN grouping facility---one
 \emph{grouping mode} (per record, sample, sample-haplotype, or
 sample-haplotype-sequence) with shared key functions for P- and W-lines---so every
 analysis aggregates haplotypes identically. A new analysis is then a short fold
 following one skeleton: deserialize the container, assign each P/W slice a group
 key, stream-decode slices into an analysis-specific visitor under a parallel loop,
-merge per-thread accumulators, and emit the statistic. The six commands below are
-written this way and differ only in their accumulator and emission, not in how
+merge per-thread accumulators, and emit the statistic. Every command below is
+written this way and differs only in its accumulator and emission, not in how
 traversals are decoded.
 
-\subsection{Rule-Leaf Cache}\label{subsec:ce-cache}
+\subsection{Memory Model and the Rule-Leaf Cache}\label{subsec:ce-memory}
 
-On-demand recursion avoids materializing all expanded traversals, but a large
-rule may be referenced many times. For workloads where repeated rule expansion is
-noticeable, \gfaz provides a bounded \texttt{RuleLeafCache}. The cache stores the
-fully expanded forward leaf sequence for any rule whose expansion fits within a
-user-specified byte budget. Reverse expansion is derived by scanning the cached
-leaf sequence backward and negating signs, so no reverse copy is stored.
-
-Cache construction is bottom-up over rule IDs. A rule is admitted only if its
-children have already been expanded or can be represented lazily and if the
-projected leaf sequence fits within the remaining budget. Rules that do not fit
-fall back to recursive expansion, preserving correctness for every budget. The
-cache is built once, then shared read-only by all decoding threads. A budget of
-zero recovers fully lazy expansion; larger budgets trade memory for less repeated
-recursion. Each command sets a default budget tuned to its access pattern and
-exposes it through an environment variable. \texttt{pav} enables a non-trivial
-budget by default because its multi-pass structure can revisit reference rules;
-the commands that stream every slice roughly once---\texttt{growth},
-\texttt{similarity}, \texttt{depth}, and \texttt{deconstruct}---default the budget
-to zero (pure lazy expansion) and let the user raise it when profiling warrants.
-
-\subsection{Memory Model}\label{subsec:ce-memory}
-
-The compute engine replaces decompressed traversal materialization with four
-resident components:
+The compute engine replaces decompressed traversal materialization with at most
+four resident components:
 \begin{enumerate}[noitemsep, topsep=2pt, leftmargin=*]
   \item \textbf{Grammar-compressed traversal store}: ZSTD-decompressed but still
         grammar-encoded P/W integer streams, encoded-length columns, and the
         rule arrays.
   \item \textbf{Optional rule-leaf cache}: bounded by a configurable byte
-        budget.
+        budget (below).
   \item \textbf{Analysis accumulator}: the state required by the specific query.
         Its shape follows the workload regime. A \emph{path-iterative} fold keeps a
         compact accumulator independent of haplotype count---a per-node coverage or
@@ -225,14 +200,32 @@ resident components:
         \texttt{stats} touches it only for an optional base-content tally.
 \end{enumerate}
 
-The key distinction is that the traversal store remains grammar-compressed.
-Memory still scales with the size of the compressed traversal columns and with
-the query accumulator, but not with a fully expanded list of all path and walk
-steps. This property is most useful for workloads that scan many haplotypes but
-retain only aggregate state---the regime both command families above are
-designed to stay within.
+The key distinction is that the traversal store remains grammar-compressed. Memory
+scales with the size of the compressed traversal columns and with the query
+accumulator, but not with a fully expanded list of all path and walk steps. Because
+the grammar-compressed columns are a fraction of the original GFA and the
+accumulators above are sublinear in the haplotype count, the peak footprint of every
+command stays below the size of the uncompressed input---the property that lets the
+engine analyze whole-genome pangenomes on commodity memory.
 
-\subsection{Parallelization}\label{subsec:ce-parallel}
+\paragraph{Rule-leaf cache.}\label{subsec:ce-cache}
+On-demand recursion avoids materializing all expanded traversals, but a large rule
+may be referenced many times. For workloads where repeated rule expansion is
+noticeable, \gfaz provides a bounded \texttt{RuleLeafCache}: it stores the fully
+expanded forward leaf sequence for any rule whose expansion fits within a
+user-specified byte budget, and derives reverse expansion by scanning the cached
+leaves backward and negating signs, so no reverse copy is stored. Construction is
+bottom-up over rule IDs---a rule is admitted only if its children are already
+expanded or representable lazily and its projected leaf sequence fits the remaining
+budget---and rules that do not fit fall back to recursive expansion, preserving
+correctness for every budget. The cache is built once and shared read-only by all
+decoding threads. A budget of zero recovers fully lazy expansion; larger budgets
+trade memory for less repeated recursion. \texttt{pav} enables a non-trivial budget
+by default because its multi-pass structure revisits reference rules; the commands
+that stream every slice roughly once default the budget to zero and expose it
+through an environment variable for profiling.
+
+\subsection{Parallel Execution}\label{subsec:ce-parallel}
 
 Traversal decoding is parallel over \texttt{HapSlice} objects. The flat traversal
 arrays, rulebook, segment sequence payload, and rule-leaf cache are read-only
@@ -246,82 +239,62 @@ decode itself, and the merge strategy follows the command's regime: a shared
 accumulator updated with fine-grained atomics, private per-thread state
 concatenated after the parallel region, or a parallel join over the node-major
 index. Because these policies are inseparable from each command's accumulator, we
-describe each one alongside its command in Section~\ref{subsec:ce-instances}
-rather than in the abstract here. The compute engine is CPU-parallel throughout
-(OpenMP); the GPU backend (Section~\ref{subsec:gpu}) accelerates compression and
-decompression, and a GPU port of the decode-and-fold loop is left to future work.
+describe each one alongside its command in
+Sections~\ref{subsec:ce-deconstruct}--\ref{subsec:ce-instances} rather than in the
+abstract here. The compute engine is CPU-parallel throughout (OpenMP); the GPU
+backend (Section~\ref{subsec:gpu}) accelerates compression and decompression, and a
+GPU port of the decode-and-fold loop is left to future work.
 
-\subsection{A Taxonomy of Compute Workloads}\label{subsec:ce-instances}
+\subsection{\texttt{deconstruct}: GFA$\rightarrow$VCF as a Two-Phase Compressed-Traversal Algorithm}\label{subsec:ce-deconstruct}
 
-Every implemented command shares the same setup. It deserializes
-\texttt{CompressedData}, ZSTD-decompresses the rulebook and P/W traversal blocks,
-delta-decodes the rule arrays, builds \texttt{HapSlice} views, and reconstructs
-only the metadata columns needed for grouping or reference lookup. The commands
-then split into the two regimes of Section~\ref{subsec:ce-memory}.
-\emph{Path-iterative} folds stream each haplotype once into a compact accumulator:
-\texttt{deconstruct}, \texttt{growth}, \texttt{depth}, and the degenerate
-metadata-only \texttt{stats}. \emph{Node-join} workloads build a node-major index
-of group coverage and join along shared nodes to emit a matrix: \texttt{pav} over
-reference windows and \texttt{similarity} over all group pairs. We present
-\texttt{deconstruct} first, then the node-join pair, then the remaining lighter
-folds; Table~\ref{tab:ce-commands} summarizes all six. Each command
-reproduces the semantics of an established tool (Panacus, \texttt{odgi}, or
-\texttt{vg deconstruct}) while computing directly on the compressed container.
-
-\noindent\textbf{Deconstruct.}
-Deriving a reference-relative VCF is the GFA$\rightarrow$VCF projection motivated
-in Section~\ref{subsec:ce-downstream}: given a chosen reference path, it reports,
-for each site where haplotypes diverge from the reference, the distinct allelic
-spellings as a VCF record. The standard tool for this projection is
-\texttt{vg deconstruct}~\cite{garrison2018variation}: it loads the whole graph,
-computes a snarl (superbubble) decomposition~\cite{paten2018superbubbles}, and
-then, for each snarl, enumerates the traversals its embedded paths take and emits
-those differing from the reference as alleles. Both the materialized graph and the
-snarl index stay resident throughout, which makes the projection costly in time
+Deriving a reference-relative VCF is the most consequential downstream projection,
+and the most topology-sensitive analysis the engine supports: given a chosen
+reference path, \texttt{deconstruct} reports, for each site where haplotypes diverge
+from the reference, the distinct allelic spellings as a VCF record. The standard
+tool is \texttt{vg deconstruct}~\cite{garrison2018variation}, which loads the whole
+graph, computes a snarl (superbubble) decomposition~\cite{paten2018superbubbles},
+and then, for each snarl, enumerates the traversals its embedded paths take and
+emits those differing from the reference as alleles. Both the materialized graph and
+the snarl index stay resident throughout, which makes the projection costly in time
 and memory at pangenome scale.
 
-\gfaz reproduces this projection but computes it directly on the compressed
-container, deriving the reference-relative VCF without materializing all haplotype
-paths or constructing a general-purpose whole-graph index---the source of its
-large speed and memory advantage over graph-resident pipelines, quantified in the
-evaluation. It is also the most topology-sensitive instance of the compute engine.
-Each reference contig is decoded once to an orientation-signed
+\paragraph{The two-phase idea.}
+Our design departs from this in a single idea: \emph{separate site discovery from
+allele observation}. Site discovery touches only the graph topology stored in the
+container and runs once in $O(V+E)$, decoding no haplotype. Allele observation is
+then the same compressed-traversal fold as every other engine command---each
+haplotype is streamed exactly once through compact site-boundary state. Neither
+phase materializes the graph or a general-purpose whole-graph snarl index, which is
+the source of the large speed and memory advantage over graph-resident pipelines.
+Before either phase, each reference contig is decoded once to an orientation-signed
 node stream \texttt{ref\_nodes}; a prefix sum over segment lengths maps reference
 node positions to genomic offsets and gives the contig length used in the VCF
-header. Site discovery and allele observation are separated. By default, \gfaz
-defines sites from top-level snarls---matching the record granularity of
-\texttt{vg deconstruct}---using a global biconnected-components (BCC) algorithm
-over the topology stored in the compressed container. Allele observation then
-remains the same path-centric fold as the other compute-engine commands: each
-compressed haplotype is streamed once through compact site-boundary state.
+header.
 
-Existing deconstruction pipelines typically combine graph loading, snarl
-decomposition, and path inspection inside a materialized graph representation. In
-\gfaz, the BCC algorithm keeps site discovery off the haplotype hot path. It
-builds an orientation-aware node-end graph from the stored L-line topology: each
-segment $s$ contributes two vertices, $s.5'$ and $s.3'$, joined by a \emph{black}
-edge, and each GFA link contributes one \emph{grey} edge between the source
-departure end and target arrival end. This is the bidirected ``interval'' graph
-used by snarl theory, where snarls in a bidirected genome graph correspond to
-biconnected blocks in a doubled/node-end representation~\cite{paten2018superbubbles}.
-The black segment edges are essential for inversions: a single-node inversion
-closes through the segment's two ends and is recovered as one biconnected block,
-whereas a collapsed segment graph can expose the inverted segment as an
-articulation point and split the site.
-
-\gfaz\ runs an iterative Hopcroft--Tarjan decomposition over this node-end graph
-(Algorithm~\ref{alg:ce-bcc}). The traversal maintains discovery times, low-link
-values, and an edge stack; when returning from child $w$ to parent $u$, the
-condition $\textit{low}(w)\ge\textit{disc}(u)$ pops one maximal biconnected block.
-The pass is iterative rather than recursive to avoid call-stack limits on
-chromosome-scale graphs, and runs in $O(V+E)$ time with linear auxiliary space.
-Each non-trivial block is projected onto \texttt{ref\_nodes}: if the first and
-last reference positions touched by the block define a clean span whose positions
-all belong to the block and contain no repeated segment, the span is emitted as a
-candidate top-level snarl. This filter rejects cyclic or ambiguous reference
-traversals, while nested child bubbles and chains of leaf bubbles collapse into
-their enclosing top-level snarl, matching the default record granularity of
-\texttt{vg deconstruct}.
+\paragraph{Phase 1: topology-only site discovery.}
+By default \gfaz defines sites from top-level snarls, matching the record
+granularity of \texttt{vg deconstruct}, using a global biconnected-components (BCC)
+decomposition over the stored L-line topology. It builds an orientation-aware
+node-end graph: each segment $s$ contributes two vertices, $s.5'$ and $s.3'$, joined
+by a \emph{black} edge, and each GFA link contributes one \emph{grey} edge between
+the source departure end and target arrival end. This is the bidirected
+``interval'' graph of snarl theory, in which snarls correspond to biconnected blocks
+of the node-end representation~\cite{paten2018superbubbles}. The black segment edges
+are essential for inversions: a single-node inversion closes through the segment's
+two ends and is recovered as one biconnected block, whereas a collapsed segment
+graph would expose the inverted segment as an articulation point and split the site.
+\gfaz runs an iterative Hopcroft--Tarjan decomposition over this graph
+(Algorithm~\ref{alg:ce-bcc}), maintaining discovery times, low-link values, and an
+edge stack; when returning from child $w$ to parent $u$, the condition
+$\textit{low}(w)\ge\textit{disc}(u)$ pops one maximal biconnected block. The pass is
+iterative rather than recursive to avoid call-stack limits on chromosome-scale
+graphs, and runs in $O(V+E)$ time with linear auxiliary space. Each non-trivial
+block is projected onto \texttt{ref\_nodes}: if the first and last reference
+positions touched by the block define a clean span whose positions all belong to the
+block and contain no repeated segment, the span is emitted as a candidate top-level
+snarl. This filter rejects cyclic or ambiguous reference traversals, while nested
+child bubbles and chains of leaf bubbles collapse into their enclosing top-level
+snarl.
 
 \begin{algorithm}[t]
   \caption{Top-level snarl extraction via biconnected decomposition}
@@ -356,24 +329,24 @@ their enclosing top-level snarl, matching the default record granularity of
   \end{algorithmic}
 \end{algorithm}
 
-Once BCC sites are fixed, \gfaz\ returns to the compressed traversal substrate.
-For every top-level snarl, it stores forward and reverse entrance maps. The
-forward entrance maps the reference source boundary to the snarl and expects the
-reference sink as its exit; the reverse entrance maps the reverse-complement sink
-to the same snarl and expects the reverse-complement source, allowing inverted
-haplotype traversals to be normalized back into the reference frame. During
-streaming, a small state machine is either closed or associated with one open
-snarl (Algorithm~\ref{alg:ce-snarl}). A boundary opens a site, ordinary decoded
-nodes are appended to a small interior buffer, and the matching exit emits that
-interior tagged by the haplotype slice. If traversal was reversed through the
-site, the buffer is scanned backward and signs are negated before emission; a
-boundary may close one site and immediately open the next, which handles adjacent
-snarls without retaining the surrounding path. This observation runs in parallel
-over haplotypes, each thread appending its tagged interiors to a private buffer;
-the buffers are concatenated once the region ends, and the inherently serial
-per-site assembly and VCF formatting then run as a single pass, with each snarl's
-observations sorted by source slice so the emitted VCF is invariant to thread
-count.
+\paragraph{Phase 2: streaming allele observation.}
+Once the sites are fixed, \gfaz returns to the compressed traversal substrate. For
+every top-level snarl it stores forward and reverse entrance maps: the forward
+entrance maps the reference source boundary to the snarl and expects the reference
+sink as its exit; the reverse entrance maps the reverse-complement sink to the same
+snarl and expects the reverse-complement source, allowing inverted haplotype
+traversals to be normalized back into the reference frame. During streaming, a small
+state machine is either closed or associated with one open snarl
+(Algorithm~\ref{alg:ce-snarl}). A boundary opens a site, ordinary decoded nodes are
+appended to a small interior buffer, and the matching exit emits that interior
+tagged by the haplotype slice. If traversal was reversed through the site, the
+buffer is scanned backward and signs are negated before emission; a boundary may
+close one site and immediately open the next, which handles adjacent snarls without
+retaining the surrounding path. This observation runs in parallel over haplotypes,
+each thread appending its tagged interiors to a private buffer; the buffers are
+concatenated once the region ends, and the inherently serial per-site assembly and
+VCF formatting then run as a single pass, with each snarl's observations sorted by
+source slice so the emitted VCF is invariant to thread count.
 
 \begin{algorithm}[t]
   \caption{Streaming allele observation for one haplotype (snarl mode)}
@@ -397,84 +370,83 @@ count.
   \end{algorithmic}
 \end{algorithm}
 
-Per site, the reference interior spells allele $0$; each observed interior is
-spelled by concatenating segment DNA (reverse-oriented nodes contributing reverse
-complements) and deduplicated to an allele index. A site with no alternate allele
-is dropped. Equal-length alleles are emitted as substitutions; otherwise the
-record is left-anchored with the last base of the source anchor, following the
-standard VCF indel convention. \texttt{INFO} carries \texttt{AC}/\texttt{AN}/
-\texttt{AF} and the number of samples with data, and an optional
-\texttt{--max-site-length} guard collapses very large spans to a symbolic
-\texttt{<CPX>} record. Haplotypes collapse into VCF sample columns by the chosen
-grouping mode, with one genotype slot per haplotype index so reference-tiling
-contigs resolve to the sample's true ploidy rather than inflating it. Records are
-emitted in sorted genomic order per contig, yielding a GFAz-native
-reference-relative deconstruction workflow computed directly on compressed
-traversals.
+\paragraph{Assembly and VCF conventions.}
+Per site, the reference interior spells allele $0$; each observed interior is spelled
+by concatenating segment DNA (reverse-oriented nodes contributing reverse
+complements) and deduplicated to an allele index. A site with no alternate allele is
+dropped. Equal-length alleles are emitted as substitutions; otherwise the record is
+left-anchored with the last base of the source anchor, following the standard VCF
+indel convention. \texttt{INFO} carries \texttt{AC}/\texttt{AN}/\texttt{AF} and the
+number of samples with data, and an optional \texttt{--max-site-length} guard
+collapses very large spans to a symbolic \texttt{<CPX>} record. Haplotypes collapse
+into VCF sample columns by the chosen grouping mode, with one genotype slot per
+haplotype index so reference-tiling contigs resolve to the sample's true ploidy
+rather than inflating it. Records are emitted in sorted genomic order per contig.
 
-\smallskip
-\noindent\emph{Node-join workloads.}
-The next two commands share a second pattern: rather than reduce each haplotype to
-a scalar fold, they record \emph{which groups cover each node} and then join along
-shared nodes to emit a matrix. The shared mechanism is a node-major
-compressed-sparse-row (CSR) index, chosen over a per-node container map to remove
-the per-node header overhead that is significant when the node count reaches
-hundreds of millions.
+\paragraph{Validation.}
+The two-phase algorithm is a new method, but its output is designed to be
+interchangeable with the established tool: on the HPRC chromosome graphs, \gfaz's
+default mode agrees with \texttt{vg deconstruct} at about $99.99\%$ of reference
+positions, producing the same sites and alternate-allele sets save for a handful of
+records in tangled pericentromeric regions. It does so without a materialized graph,
+which is the source of its time and memory advantage; we quantify both in the
+evaluation.
 
-\noindent\textbf{PAV.}
-This command computes a window-by-group matrix over BED intervals on reference
-paths or walks, in three passes over a shared read-only decode state. \emph{Pass~1}
-decodes every traversal once, parallel over slices and lock-free, into a private
-sorted-unique node set; reference
-traversals (those a BED \texttt{chrom} resolves to) additionally retain their
-ordered node stream, captured as a side effect of the same decode so no reference
-is decoded twice. \emph{Pass~2} unions the per-slice node sets of each group,
-parallel over groups, and flattens the result into the node$\rightarrow$groups CSR
-in a single serial stitch: a counting pass tallies
-the groups per node, an exclusive prefix sum forms the row offsets, and a cursor
-scatter fills the group-ID column. The rule-leaf cache is released after Pass~1,
-since Passes~2--3 perform no further grammar expansion. \emph{Pass~3} sweeps each
-reference contig in parallel, maintaining a running genomic offset from the segment-length
-column so that each visited node maps to a half-open base interval; the BED ranges
-for that contig, pre-sorted by start, are intersected against the node interval
-with an advancing range cursor, and the resulting $(\text{window},\text{node})$
-pairs are deduplicated. For each unique pair, the node length is added to the
-window denominator and to the numerator of every group in that node's CSR row,
-with atomics that are contention-free in the common case since distinct contigs
-map to disjoint window-index ranges. A
-node counts at most once per group, matching \texttt{odgi pav} semantics; the
-result is node-length-weighted PAV ratios computed without a whole-graph object.
+\subsection{Further Analyses on the Same Substrate}\label{subsec:ce-instances}
 
-\noindent\textbf{Similarity.}
-This command generalizes the same node-major join from reference windows to
-\emph{all group pairs}, reproducing the \texttt{odgi similarity} matrix. A first
-pass, parallel over slices, tallies the multiplicity with which each node is
-visited; a second pass, parallel over groups, folds these into per-group coverage
-(node length times visit count) and
-flattens them into the node$\rightarrow$groups CSR. The join then runs in parallel
-over nodes: for each node, every pair of covering groups contributes the minimum of
-their two coverages, via an atomic update, to a shared dense upper-triangular
-intersection accumulator whose diagonal holds each group's total length. From the pairwise
-intersections and group lengths, \gfaz reports Jaccard, cosine, Dice, and
-estimated-identity columns identical to \texttt{odgi}. Because the matrix is
-$O(\text{groups}^2)$, the engine guards against pathologically fine groupings and
-performs the intersection arithmetic in double precision to avoid the integer
-overflow that \texttt{odgi} can incur at genome-scale group lengths.
+Beyond \texttt{deconstruct}, \gfaz implements five more analyses, each reproducing
+the output of an established tool while computing directly on the compressed
+container. They share the setup of Section~\ref{subsec:ce-model}---deserialize
+\texttt{CompressedData}, ZSTD-decompress the rulebook and P/W blocks, delta-decode
+the rule arrays, build \texttt{HapSlice} views, and reconstruct only the metadata
+columns needed for grouping or reference lookup---and split into two regimes.
+\emph{Path-iterative} folds stream each haplotype once into a compact accumulator
+(\texttt{growth}, \texttt{depth}, and the metadata-only \texttt{stats});
+\emph{node-join} workloads build a node-major index of group coverage and join along
+shared nodes to emit a matrix (\texttt{pav} over reference windows,
+\texttt{similarity} over all group pairs). Of these, \texttt{pav} and \texttt{growth}
+carry design novelty of their own---a node-major join layout and a closed-form growth
+estimator---while \texttt{similarity}, \texttt{depth}, and \texttt{stats} demonstrate
+that the same substrate reproduces additional odgi outputs at a fraction of the cost.
+Table~\ref{tab:ce-commands} summarizes all six.
 
-\smallskip
-\noindent\emph{Lightweight folds.}
-Three further commands round out the engine at the cheap end of the cost spectrum.
+\noindent\textbf{PAV (node-join).}
+This command computes a window-by-group matrix over BED intervals on reference paths
+or walks. Rather than reduce each haplotype to a scalar, it records \emph{which
+groups cover each node} and joins along shared nodes---the shared node-join pattern,
+realized as a node-major compressed-sparse-row (CSR) index, chosen over a per-node
+container map to remove the per-node header overhead that is significant when the
+node count reaches hundreds of millions. It runs in three passes over a shared
+read-only decode state. \emph{Pass~1} decodes every traversal once, parallel over
+slices and lock-free, into a private sorted-unique node set; reference traversals
+(those a BED \texttt{chrom} resolves to) additionally retain their ordered node
+stream, captured as a side effect of the same decode so no reference is decoded
+twice. \emph{Pass~2} unions the per-slice node sets of each group, parallel over
+groups, and flattens the result into the node$\rightarrow$groups CSR in a single
+serial stitch: a counting pass tallies the groups per node, an exclusive prefix sum
+forms the row offsets, and a cursor scatter fills the group-ID column; the rule-leaf
+cache is released afterward, since Passes~2--3 perform no further grammar expansion.
+\emph{Pass~3} sweeps each reference contig in parallel, maintaining a running genomic
+offset from the segment-length column so each visited node maps to a half-open base
+interval; the BED ranges for that contig, pre-sorted by start, are intersected
+against the node interval with an advancing range cursor, and the resulting
+$(\text{window},\text{node})$ pairs are deduplicated. For each unique pair, the node
+length is added to the window denominator and to the numerator of every group in
+that node's CSR row, with atomics that are contention-free in the common case since
+distinct contigs map to disjoint window-index ranges. A node counts at most once per
+group, matching \texttt{odgi pav} semantics; the result is node-length-weighted PAV
+ratios computed without a whole-graph object.
 
-\noindent\textbf{Growth.}
-This command computes Panacus-style union growth for nodes. Threads loop over
-groups under dynamic scheduling and reduce into a single shared coverage array
+\noindent\textbf{Growth (path-iterative).}
+This command computes Panacus-style union growth for nodes. Threads loop over groups
+under dynamic scheduling and reduce into a single shared coverage array
 $\texttt{cov}[v]$, where each node is counted at most once per group: a per-thread
-last-seen stamp---a rolling byte reset on wrap, which avoids a per-group clear of
-the stamp array---suppresses duplicate counts within a group, so a thread issues
-an atomic increment only on a node's first visit. The coverage vector is then
-reduced to a histogram $\texttt{hist}[c]=|\{v:\texttt{cov}[v]=c\}|$ by merging
-per-thread partials in a short critical section. For a pangenome with $N$ groups, the
-expected number of nodes observed in a random subset of size $k$ is
+last-seen stamp---a rolling byte reset on wrap, which avoids a per-group clear of the
+stamp array---suppresses duplicate counts within a group, so a thread issues an
+atomic increment only on a node's first visit. The coverage vector is then reduced to
+a histogram $\texttt{hist}[c]=|\{v:\texttt{cov}[v]=c\}|$ by merging per-thread
+partials in a short critical section. For a pangenome with $N$ groups, the expected
+number of nodes observed in a random subset of size $k$ is
 \[
   \texttt{growth}[k]
     =
@@ -483,27 +455,31 @@ expected number of nodes observed in a random subset of size $k$ is
 \]
 where the ratio $\binom{N-c}{k}/\binom{N}{k}$ is evaluated as the stable product
 $\prod_{i=0}^{c-1}(N-k-i)/(N-i)$ rather than by forming the binomial coefficients,
-which would overflow at pangenome $N$; the curve is evaluated in parallel over
-cohort sizes $k$. The accumulator is linear in the number of
-nodes, and the fold matches Panacus union-growth semantics (count $=$ node,
-coverage $\ge 1$, quorum $\ge 0$).
+which would overflow at pangenome $N$; the curve is evaluated in parallel over cohort
+sizes $k$. The accumulator is linear in the number of nodes, and the fold matches
+Panacus union-growth semantics (count $=$ node, coverage $\ge 1$, quorum $\ge 0$).
 
-\noindent\textbf{Depth.}
-This command reproduces \texttt{odgi depth} in a single streaming pass parallel
-over slices. A shared
-per-node counter accumulates total visits with atomic increments, while a
-per-thread last-seen stamp lets it also report, for the per-node table, the number
-of \emph{distinct} paths and walks touching each node without a per-thread copy of
-the node array. Summing the per-node totals, weighted by segment length, yields the
-graph-level depth summary. Memory is $O(\text{nodes})$ regardless of haplotype
-count.
-
-\noindent\textbf{Stats.}
-This command is the degenerate case of the engine: it reports the graph
-dimensions---node, edge, path, and step counts and total length, matching
-\texttt{odgi stats}---directly from the container's metadata columns, decoding
-\emph{no} traversals. Its only optional traversal of payload is an A/C/G/T tally
-that scans the segment sequences for base-content reporting.
+\noindent\textbf{Similarity, depth, and stats.}
+The remaining three reuse the substrate without new accumulator structure.
+\texttt{similarity} generalizes \texttt{pav}'s node-join from reference windows to
+\emph{all group pairs}, reproducing the \texttt{odgi similarity} matrix: a first pass
+(parallel over slices) tallies per-node visit multiplicity, a second (parallel over
+groups) folds these into per-group coverage and flattens them into the
+node$\rightarrow$groups CSR, and a join parallel over nodes accumulates, for each
+node, the minimum of every covering pair's coverages---via atomic updates---into a
+dense upper-triangular intersection matrix whose diagonal holds each group's total
+length; \gfaz reports Jaccard, cosine, Dice, and estimated-identity columns identical
+to \texttt{odgi}, performing the arithmetic in double precision to avoid the integer
+overflow \texttt{odgi} can incur at genome-scale group lengths. \texttt{depth}
+reproduces \texttt{odgi depth} in a single streaming pass parallel over slices: a
+shared per-node counter accumulates total visits with atomic increments, while a
+per-thread last-seen stamp also reports the number of distinct paths and walks
+touching each node without a per-thread copy of the node array, all in
+$O(\text{nodes})$ regardless of haplotype count. \texttt{stats} is the degenerate
+case---it reports graph dimensions (node, edge, path, and step counts and total
+length, matching \texttt{odgi stats}) directly from the container's metadata columns,
+decoding \emph{no} traversals, with an optional A/C/G/T tally over the segment
+sequences.
 
 \begin{table*}[t]
   \centering
@@ -515,7 +491,7 @@ that scans the segment sequences for base-content reporting.
   \small
   \begin{tabular}{@{}llllll@{}}
     \toprule
-    Command & Reproduces & Accumulator & Traversal passes & Resident state & Regime \\
+    Command & Reference tool & Accumulator & Traversal passes & Resident state & Regime \\
     \midrule
     \texttt{deconstruct} & \texttt{vg deconstruct} & per-site allele table (+ segment DNA) & 1 (+ topology pass) & $O(\text{sites})$ + DNA & path-iterative \\
     \texttt{growth}      & Panacus               & coverage vector $\to$ histogram      & 1                   & $O(\text{nodes})$         & path-iterative \\
@@ -527,9 +503,10 @@ that scans the segment sequences for base-content reporting.
   \end{tabular}
 \end{table*}
 
-These six commands delimit the intended scope of the compute engine: analytics
-whose hot path is traversal streaming plus a compact fold, spanning a zero-pass
-metadata read (\texttt{stats}) to a topology-aware variant caller
-(\texttt{deconstruct}). Operations that require arbitrary node-to-step queries,
-graph editing, or full topology transformation remain better served by
-materialized graph toolkits.
+\subsection{Scope}\label{subsec:ce-scope}
+
+These six commands delimit the intended scope of the compute engine: analytics whose
+hot path is traversal streaming plus a compact fold, spanning a zero-pass metadata
+read (\texttt{stats}) to a topology-aware variant caller (\texttt{deconstruct}).
+Operations that require arbitrary node-to-step queries, graph editing, or full
+topology transformation remain better served by materialized graph toolkits.

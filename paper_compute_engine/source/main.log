@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  21 JUN 2026 21:21
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  21 JUN 2026 21:43
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1036,7 +1036,7 @@ File: mt-msa.cfg 2006/02/04 v1.1 microtype config. file: AMS symbols (a) (RS)
 (/usr/share/texlive/texmf-dist/tex/latex/microtype/mt-msb.cfg
 File: mt-msb.cfg 2005/06/01 v1.0 microtype config. file: AMS symbols (b) (RS)
 )
-<doclicense-CC-by-88x31.pdf, id=137, 90.3375pt x 31.61812pt>
+<doclicense-CC-by-88x31.pdf, id=141, 90.3375pt x 31.61812pt>
 File: doclicense-CC-by-88x31.pdf Graphic file (type pdf)
 <use doclicense-CC-by-88x31.pdf>
 Package pdftex.def Info: doclicense-CC-by-88x31.pdf  used on input line 134.
@@ -1106,7 +1106,7 @@ Package microtype Info: Loading generic protrusion settings for font family
 (microtype)             `zi4' (encoding: T1).
 (microtype)             For optimal results, create family-specific settings.
 (microtype)             See the microtype manual for details.
-<GFA_visualization.png, id=183, 1981.6434pt x 1981.6434pt>
+<GFA_visualization.png, id=187, 1981.6434pt x 1981.6434pt>
 File: GFA_visualization.png Graphic file (type png)
 <use GFA_visualization.png>
 Package pdftex.def Info: GFA_visualization.png  used on input line 15.
@@ -1129,7 +1129,7 @@ rans-form (GBWT) [[],
 ) (./3_design.tex
 LaTeX Font Info:    Font shape `T1/zi4/m/n' will be
 (Font)              scaled to size 8.0pt on input line 11.
-<Compression_workflow.png, id=212, 2501.345pt x 2417.03pt>
+<Compression_workflow.png, id=216, 2501.345pt x 2417.03pt>
 File: Compression_workflow.png Graphic file (type png)
 <use Compression_workflow.png>
 Package pdftex.def Info: Compression_workflow.png  used on input line 37.
@@ -1156,7 +1156,7 @@ Overfull \hbox (4.70557pt too wide) in paragraph at lines 128--129
  ad-di-tional same-round matches,
  []
 
-<Decompression_workflow.png, id=262, 2447.1425pt x 2067.725pt>
+<Decompression_workflow.png, id=266, 2447.1425pt x 2067.725pt>
 File: Decompression_workflow.png Graphic file (type png)
 <use Decompression_workflow.png>
 Package pdftex.def Info: Decompression_workflow.png  used on input line 205.
@@ -1188,7 +1188,7 @@ LaTeX Font Info:    Font shape `OT1/LinuxLibertineT-TLF/m/n' will be
 LaTeX Font Info:    Font shape `T1/LinuxLibertineT-TLF/b/n' will be
 (Font)              scaled to size 6.0pt on input line 2.
 )
-<fig_eval_norm_combined.pdf, id=344, 503.45102pt x 285.10085pt>
+<fig_eval_norm_combined.pdf, id=348, 503.45102pt x 285.10085pt>
 File: fig_eval_norm_combined.pdf Graphic file (type pdf)
 <use fig_eval_norm_combined.pdf>
 Package pdftex.def Info: fig_eval_norm_combined.pdf  used on input line 114.
@@ -1197,7 +1197,7 @@ Package pdftex.def Info: fig_eval_norm_combined.pdf  used on input line 114.
 
 Class acmart Warning: A possible image without description on input line 117.
 
-<fig_pareto_combined.pdf, id=345, 701.47084pt x 199.46056pt>
+<fig_pareto_combined.pdf, id=349, 701.47084pt x 199.46056pt>
 File: fig_pareto_combined.pdf Graphic file (type pdf)
 <use fig_pareto_combined.pdf>
 Package pdftex.def Info: fig_pareto_combined.pdf  used on input line 122.
@@ -1228,37 +1228,42 @@ LaTeX Font Info:    Font shape `T1/LinuxLibertineT-TLF/m/it' will be
 Underfull \vbox (badness 1874) has occurred while \output is active []
 
  [10.10])
-(./6_compute_engine.tex [11.11]
-Underfull \vbox (badness 6396) has occurred while \output is active []
-
- [12.12]
-Overfull \hbox (18.04485pt too wide) in paragraph at lines 214--223
+(./6_compute_engine.tex [11.11] [12.12]
+Overfull \hbox (18.04485pt too wide) in paragraph at lines 189--198
 []\LMS/ntxsy/m/n/9 ∫$ \T1/LinuxLibertineT-TLF/m/n/9 (-20) for \T1/zi4/m/n/9 pav
  \T1/LinuxLibertineT-TLF/m/n/9 (-20) and an upper-triangular $\OML/nxlmi/m/it/9
  O\LMS/ntxsy/m/n/9 π[][]∫$ \T1/LinuxLibertineT-TLF/m/n/9 (-20) for \T1/zi4/m/n/
 9 similarity\T1/LinuxLibertineT-TLF/m/n/9 (-20) . 
  []
 
+LaTeX Font Info:    Font shape `T1/zi4/b/n' will be
+(Font)              scaled to size 10.95pt on input line 248.
+LaTeX Font Info:    Font shape `OT1/LinuxLibertineT-TLF/m/n' will be
+(Font)              scaled to size 10.95pt on input line 248.
+LaTeX Font Info:    Font shape `OT1/LinuxLibertineT-TLF/m/n' will be
+(Font)              scaled to size 6.1pt on input line 248.
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 248.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `\rightarrow' on input line 248.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 248.
+
 [13.13] [14.14]
-
-Class acmart Warning: \vspace should only be used to provide space above/below 
-surrounding objects on input line 415.
-
-
-Class acmart Warning: \vspace should only be used to provide space above/below 
-surrounding objects on input line 464.
-
-
-Overfull \hbox (9.96666pt too wide) in paragraph at lines 483--490
+Overfull \hbox (9.96666pt too wide) in paragraph at lines 455--461
 \T1/LinuxLibertineT-TLF/m/n/9 (-20) where the ra-tio $[]\LMS/ntxsy/m/n/9 ù[]$ \
 T1/LinuxLibertineT-TLF/m/n/9 (-20) is eval-u-ated as the sta-ble prod-uct $[][]
 \LMS/ntxsy/m/n/9 π\OML/nxlmi/m/it/9 N \LMS/ntxsy/m/n/9 ^^@
  []
 
-[15.15]
 LaTeX Font Info:    Font shape `T1/LinuxLibertineT-TLF/m/n' will be
-(Font)              scaled to size 6.2pt on input line 520.
-) (./5_conclusion.tex) Processing 'acks' comment.
+(Font)              scaled to size 6.2pt on input line 496.
+) (./5_conclusion.tex [15.15]) Processing 'acks' comment.
 \openout3 = `comment.cut'.
 
 
@@ -1270,15 +1275,15 @@ d Com-pres-sion and
  []
 
 
-Underfull \vbox (badness 2698) has occurred while \output is active []
-
-
 Underfull \hbox (badness 2753) in paragraph at lines 169--178
 []\T1/LinuxLibertineT-TLF/m/n/7 (+20) Human Pangenome Ref-er-ence Con-sor-tium.
  2025.  Hu-man Pangenome
  []
 
-)
+
+Underfull \vbox (badness 10000) has occurred while \output is active []
+
+ [16.16])
 
 Class acmart Warning: Some images may lack descriptions.
 (acmart)              ACM is committed to complying with the upcoming US ADA ht
@@ -1295,10 +1300,10 @@ rtant steps when creating your papers will ensure that the widest possible audi
 ence can ingest your work..
 
 
-Package balance Warning: You have called \balance in second column
-(balance)                Columns might not be balanced.
+Overfull \vbox (1.16599pt too high) has occurred while \output is active []
 
-[16.16] (/usr/share/texlive/texmf-dist/tex/generic/stringenc/se-pdfdoc.def
+
+(/usr/share/texlive/texmf-dist/tex/generic/stringenc/se-pdfdoc.def
 File: se-pdfdoc.def 2019/11/29 v1.12 stringenc: PDFDocEncoding
 )
 (/usr/share/texlive/texmf-dist/tex/generic/stringenc/se-utf8.def
@@ -1310,16 +1315,16 @@ LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
  ***********
 Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: E3C432F18780B5402188A01CE8B66557;5980.
+(rerunfilecheck)             Checksum: 4B5CEA829C6BFA4059C2079AEA62B8C9;6401.
  ) 
 Here is how much of TeX's memory you used:
- 24210 strings out of 474222
- 392319 string characters out of 5748733
+ 24280 strings out of 474222
+ 393777 string characters out of 5748733
  1979975 words of memory out of 5000000
- 44913 multiletter control sequences out of 15000+600000
- 817184 words of font info for 589 fonts, out of 8000000 for 9000
+ 44958 multiletter control sequences out of 15000+600000
+ 828976 words of font info for 618 fonts, out of 8000000 for 9000
  1302 hyphenation exceptions out of 8191
- 90i,15n,131p,1025b,704s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 90i,15n,131p,1025b,750s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/inconsolata/Inconsolata-zi4
 b.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/inconsolata/Inconsolata
 -zi4r.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/newtx/LibertineMath
@@ -1335,10 +1340,10 @@ sr/share/texlive/texmf-dist/fonts/type1/public/newtx/NewTXMI.pfb></usr/share/te
 xlive/texmf-dist/fonts/type1/public/newtx/txexs.pfb></usr/share/texlive/texmf-d
 ist/fonts/type1/public/newtx/txmiaX.pfb></usr/share/texlive/texmf-dist/fonts/ty
 pe1/public/newtx/txsys.pfb>
-Output written on main.pdf (17 pages, 1683213 bytes).
+Output written on main.pdf (17 pages, 1683644 bytes).
 PDF statistics:
- 749 PDF objects out of 1000 (max. 8388607)
- 584 compressed objects within 6 object streams
- 235 named destinations out of 1000 (max. 500000)
- 137007 words of extra memory for PDF output out of 154059 (max. 10000000)
+ 761 PDF objects out of 1000 (max. 8388607)
+ 596 compressed objects within 6 object streams
+ 242 named destinations out of 1000 (max. 500000)
+ 141623 words of extra memory for PDF output out of 154059 (max. 10000000)
 
