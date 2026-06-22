@@ -98,18 +98,26 @@ SegmentGraph build_segment_graph_from_links(const CompressedData &data,
 //
 // vg emits exactly one VCF record per *top-level* snarl (it does not recurse into
 // children without -a) and drops a snarl whose reference traversal is ambiguous
-// (cyclic). The top-level snarls are the non-trivial biconnected components the
-// reference threads through: each maximal 2-edge-connected block bounded by the
-// articulation nodes where the reference enters and leaves it. This collapses the
-// leaf-bubble chains and nested bubbles that `find_reference_snarls` reports
-// separately, and -- by returning only blocks the reference crosses once
-// (acyclic, every interior reference index inside the block) -- suppresses the
-// tangled palindrome/satellite regions vg also skips.
+// (cyclic). We approximate this in two stages. First, the biconnected
+// decomposition of the node-end graph identifies the clean *chain regions* the
+// reference threads through: each maximal block the reference crosses exactly
+// once (acyclic, every interior reference index inside the block), which drops the
+// tangled palindrome/satellite regions vg also skips. Second -- and crucially for
+// cyclic graphs -- each block is decomposed into its internal per-entrance
+// superbubble chain rather than being emitted whole: a biconnected block is a
+// chain region, not a single snarl. For a linear chromosome a block has no
+// internal cut vertex and is already one bubble, so this is a no-op; for a
+// circular genome the entire backbone is a single block (the wrap-around link
+// leaves no cut vertices), and the superbubble decomposition is what recovers the
+// individual bubbles instead of collapsing them into one chromosome-spanning
+// record. A block with no clean superbubble inside it is still emitted whole.
 //
-// Returns clean top-level snarls only (the cyclic-reference blocks are dropped),
-// reduced to a non-overlapping chain ordered by reference position.
+// Needs both the doubled node-side graph `g` (for superbubble detection) and the
+// undirected node-end segment graph `sg` (for the biconnected decomposition).
+// Returns clean snarls only, reduced to a non-overlapping chain ordered by
+// reference position.
 std::vector<ReferenceSnarl>
-find_reference_snarls_top_level(const SegmentGraph &sg,
+find_reference_snarls_top_level(const DoubledGraph &g, const SegmentGraph &sg,
                                 const std::vector<NodeId> &ref_nodes);
 
 } // namespace gfaz

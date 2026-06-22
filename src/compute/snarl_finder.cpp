@@ -268,6 +268,86 @@ uint32_t detect_inversion_snarl(
   return DG::kInvalid;
 }
 
+// Reduce overlapping reference snarls to a non-overlapping top-level chain: sort
+// by start ascending then end descending (outermost first) and greedily keep
+// snarls whose span does not overlap the previously kept one. Shared boundaries
+// (chained bubbles) are allowed. Shared by both reference-snarl finders.
+std::vector<ReferenceSnarl>
+reduce_to_top_level_chain(std::vector<ReferenceSnarl> candidates) {
+  std::sort(candidates.begin(), candidates.end(),
+            [](const ReferenceSnarl &a, const ReferenceSnarl &b) {
+              if (a.start_ref_index != b.start_ref_index)
+                return a.start_ref_index < b.start_ref_index;
+              return a.end_ref_index > b.end_ref_index;
+            });
+  std::vector<ReferenceSnarl> out;
+  int64_t last_end = -1;
+  for (const ReferenceSnarl &s : candidates) {
+    if (static_cast<int64_t>(s.start_ref_index) >= last_end) {
+      out.push_back(s);
+      last_end = static_cast<int64_t>(s.end_ref_index);
+    }
+  }
+  return out;
+}
+
+// Per-entrance superbubble detection along the reference: for every reference
+// node-side that is a branch point, find the minimal superbubble it opens
+// (falling back to the bidirected inversion test for non-DAG snarls). Returns the
+// raw candidate snarls (unreduced and possibly overlapping). Because detection is
+// seeded locally at each reference branch point, it is immune to the global cycle
+// of a circular genome -- where the whole backbone is one biconnected block, this
+// still recovers every local bubble in the chain.
+std::vector<ReferenceSnarl>
+collect_superbubble_candidates(const DoubledGraph &g,
+                               const std::vector<NodeId> &ref_nodes) {
+  std::vector<ReferenceSnarl> candidates;
+  const size_t L = ref_nodes.size();
+  if (L < 2 || g.num_nodes == 0)
+    return candidates;
+
+  // vertex -> ascending list of reference indices where the reference leaves
+  // through that node-side.
+  std::unordered_map<uint32_t, std::vector<uint32_t>> ref_index_of;
+  ref_index_of.reserve(L * 2 + 1);
+  for (uint32_t i = 0; i < L; ++i) {
+    if (ref_nodes[i] == 0)
+      continue;
+    ref_index_of[DoubledGraph::vid(ref_nodes[i])].push_back(i);
+  }
+
+  for (uint32_t i = 0; i < L; ++i) {
+    if (ref_nodes[i] == 0)
+      continue;
+    const uint32_t v = DoubledGraph::vid(ref_nodes[i]);
+    if (v >= g.num_vertices() || g.outdeg(v) < 2)
+      continue; // not a branch point -> no bubble starts here
+    uint32_t t = detect_superbubble(g, v);
+    if (t == DoubledGraph::kInvalid) {
+      // Fall back to the general bidirected test, which recovers inversions and
+      // other non-DAG snarls the superbubble algorithm rejects. Bounded so it
+      // never scans far past a local site.
+      static constexpr size_t kInversionNodeBudget = 4096;
+      t = detect_inversion_snarl(g, v, i, ref_index_of, kInversionNodeBudget);
+    }
+    if (t == DoubledGraph::kInvalid)
+      continue;
+    auto it = ref_index_of.find(t);
+    if (it == ref_index_of.end())
+      continue; // exit is not on the reference (shouldn't happen for a ref bubble)
+    // first reference index strictly greater than i
+    const std::vector<uint32_t> &idxs = it->second;
+    auto jt = std::upper_bound(idxs.begin(), idxs.end(), i);
+    if (jt == idxs.end())
+      continue;
+    const uint32_t j = *jt;
+    if (j <= i)
+      continue;
+    candidates.push_back(ReferenceSnarl{i, j, ref_nodes[i], ref_nodes[j]});
+  }
+  return candidates;
+}
+
 } // namespace
 
 DoubledGraph build_doubled_graph_from_links(const CompressedData &data,
@@ -415,7 +495,7 @@ SegmentGraph build_segment_graph_from_links(const CompressedData &data,
 }
 
 std::vector<ReferenceSnarl>
-find_reference_snarls_top_level(const SegmentGraph &sg,
+find_reference_snarls_top_level(const DoubledGraph &g, const SegmentGraph &sg,
                                 const std::vector<NodeId> &ref_nodes) {
   std::vector<ReferenceSnarl> out;
   const size_t L = ref_nodes.size();
@@ -451,10 +531,13 @@ find_reference_snarls_top_level(const SegmentGraph &sg,
   std::vector<uint32_t> edge_to_seg;
   edge_to_seg.reserve(64);
 
-  std::vector<ReferenceSnarl> candidates;
+  // Clean (vg-emittable) biconnected blocks as reference spans [a,b]. A block is
+  // a *chain region*, not necessarily a single snarl, so we record its span here
+  // and decompose it into superbubbles below rather than emitting it whole.
+  std::vector<std::pair<uint32_t, uint32_t>> blocks;
 
   // Finish one biconnected block: `segs` is its segment set (including the
-  // bounding articulation node). Build a clean top-level snarl from it, if any.
+  // bounding articulation node). Record its clean reference span, if any.
   auto emit_block = [&](const std::unordered_set<uint32_t> &segs) {
     std::vector<uint32_t> ridx;
     for (uint32_t s : segs) {
@@ -490,8 +573,7 @@ find_reference_snarls_top_level(const SegmentGraph &sg,
     }
     if (!clean)
       return;
-    candidates.push_back(
-        ReferenceSnarl{a, b, ref_nodes[a], ref_nodes[b]});
+    blocks.emplace_back(a, b);
   };
 
   // DFS roots: both ends of every reference segment (same component via their
@@ -560,95 +642,59 @@ find_reference_snarls_top_level(const SegmentGraph &sg,
     }
   }
 
-  // Reduce to a non-overlapping top-level chain along the reference (outermost
-  // wins on ties). BCC spans are edge-disjoint but their reference projections
-  // can still nest/overlap when the reference is locally repetitive; the greedy
-  // keeps the earliest-starting, widest block and drops anything it covers.
-  std::sort(candidates.begin(), candidates.end(),
-            [](const ReferenceSnarl &x, const ReferenceSnarl &y) {
-              if (x.start_ref_index != y.start_ref_index)
-                return x.start_ref_index < y.start_ref_index;
-              return x.end_ref_index > y.end_ref_index;
-            });
-  int64_t last_end = -1;
-  for (const ReferenceSnarl &s : candidates) {
-    if (static_cast<int64_t>(s.start_ref_index) >= last_end) {
-      out.push_back(s);
-      last_end = static_cast<int64_t>(s.end_ref_index);
-    }
+  if (blocks.empty())
+    return out;
+
+  // --- Within-block superbubble decomposition ---
+  // A clean biconnected block is a chain region, not one snarl. For a linear
+  // graph each block has no internal cut vertex and is a single bubble, so its
+  // superbubble decomposition reproduces the whole block -- output is unchanged.
+  // A circular genome, however, has no cut vertices along its backbone (the
+  // wrap-around link closes one big cycle), so the entire chromosome and all its
+  // bubbles fuse into a single biconnected block; emitting that block whole would
+  // yield one giant chromosome-spanning record. Decomposing each block into the
+  // per-entrance superbubble chain recovers the individual bubbles in both cases,
+  // matching `vg deconstruct` (which decomposes cyclic components via its
+  // Cactus-based snarl tree) instead of collapsing them.
+  //
+  // The block mask is what keeps this from regressing to the raw superbubble
+  // superset on linear graphs: superbubbles in cyclic/repetitive reference
+  // regions (satellites, palindromes) fall outside every clean block and are
+  // dropped, exactly as the whole-block filter did before.
+  std::vector<int32_t> block_id(L, -1);
+  for (uint32_t bi = 0; bi < blocks.size(); ++bi)
+    for (uint32_t i = blocks[bi].first; i <= blocks[bi].second; ++i)
+      block_id[i] = static_cast<int32_t>(bi);
+
+  std::vector<ReferenceSnarl> candidates;
+  std::vector<uint8_t> block_has_snarl(blocks.size(), 0);
+  for (const ReferenceSnarl &c : collect_superbubble_candidates(g, ref_nodes)) {
+    // Keep only superbubbles whose boundaries lie inside a clean block (a
+    // superbubble is graph-local, so both ends share one biconnected block).
+    if (block_id[c.start_ref_index] < 0 || block_id[c.end_ref_index] < 0)
+      continue;
+    candidates.push_back(c);
+    block_has_snarl[block_id[c.start_ref_index]] = 1;
   }
-  return out;
+  // Fallback: a clean block with no clean superbubble inside it (a tangle the
+  // superbubble/inversion tests reject) is still emitted whole, so coverage never
+  // regresses below the previous block-granular behavior.
+  for (uint32_t bi = 0; bi < blocks.size(); ++bi)
+    if (!block_has_snarl[bi])
+      candidates.push_back(ReferenceSnarl{blocks[bi].first, blocks[bi].second,
+                                          ref_nodes[blocks[bi].first],
+                                          ref_nodes[blocks[bi].second]});
+
+  return reduce_to_top_level_chain(std::move(candidates));
 }
 
 std::vector<ReferenceSnarl>
 find_reference_snarls(const DoubledGraph &g,
                       const std::vector<NodeId> &ref_nodes) {
-  std::vector<ReferenceSnarl> out;
-  const size_t L = ref_nodes.size();
-  if (L < 2 || g.num_nodes == 0)
-    return out;
-
-  // vertex -> ascending list of reference indices where the reference leaves
-  // through that node-side.
-  std::unordered_map<uint32_t, std::vector<uint32_t>> ref_index_of;
-  ref_index_of.reserve(L * 2 + 1);
-  for (uint32_t i = 0; i < L; ++i) {
-    if (ref_nodes[i] == 0)
-      continue;
-    ref_index_of[DoubledGraph::vid(ref_nodes[i])].push_back(i);
-  }
-
-  std::vector<ReferenceSnarl> candidates;
-  for (uint32_t i = 0; i < L; ++i) {
-    if (ref_nodes[i] == 0)
-      continue;
-    const uint32_t v = DoubledGraph::vid(ref_nodes[i]);
-    if (v >= g.num_vertices() || g.outdeg(v) < 2)
-      continue; // not a branch point -> no bubble starts here
-    uint32_t t = detect_superbubble(g, v);
-    if (t == DoubledGraph::kInvalid) {
-      // Fall back to the general bidirected test, which recovers inversions and
-      // other non-DAG snarls the superbubble algorithm rejects. Bounded so it
-      // never scans far past a local site.
-      static constexpr size_t kInversionNodeBudget = 4096;
-      t = detect_inversion_snarl(g, v, i, ref_index_of, kInversionNodeBudget);
-    }
-    if (t == DoubledGraph::kInvalid)
-      continue;
-    auto it = ref_index_of.find(t);
-    if (it == ref_index_of.end())
-      continue; // exit is not on the reference (shouldn't happen for a ref bubble)
-    // first reference index strictly greater than i
-    const std::vector<uint32_t> &idxs = it->second;
-    auto jt = std::upper_bound(idxs.begin(), idxs.end(), i);
-    if (jt == idxs.end())
-      continue;
-    const uint32_t j = *jt;
-    if (j <= i)
-      continue;
-    candidates.push_back(
-        ReferenceSnarl{i, j, ref_nodes[i], ref_nodes[j]});
-  }
-
-  // Reduce to a non-overlapping top-level chain along the reference: sort by
-  // start ascending then end descending (outermost first), greedily keep
-  // snarls whose span does not overlap the previously kept one. Shared
-  // boundaries (chained bubbles) are allowed.
-  std::sort(candidates.begin(), candidates.end(),
-            [](const ReferenceSnarl &a, const ReferenceSnarl &b) {
-              if (a.start_ref_index != b.start_ref_index)
-                return a.start_ref_index < b.start_ref_index;
-              return a.end_ref_index > b.end_ref_index;
-            });
-
-  int64_t last_end = -1;
-  for (const ReferenceSnarl &s : candidates) {
-    if (static_cast<int64_t>(s.start_ref_index) >= last_end) {
-      out.push_back(s);
-      last_end = static_cast<int64_t>(s.end_ref_index);
-    }
-  }
-  return out;
+  // Per-entrance superbubble chain over the whole reference, reduced to a
+  // non-overlapping top-level chain. The leaf-superbubble superset (legacy
+  // --snarl): no clean-block mask, so cyclic/repetitive regions are not dropped.
+  return reduce_to_top_level_chain(collect_superbubble_candidates(g, ref_nodes));
 }
 
 } // namespace gfaz
