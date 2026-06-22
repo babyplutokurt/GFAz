@@ -104,9 +104,6 @@
 \newlabel{subsec:breakdown}{{4.6}{10}{Performance Breakdown}{subsection.4.6}{}}
 \citation{garrison2018variation}
 \citation{guarracino2022odgi}
-\citation{parmigiani2024panacus}
-\citation{guarracino2022odgi}
-\citation{garrison2018variation,hickey2020genotyping}
 \@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces CPU stage-level profiling for compression and decompression. Share is computed as \texttt  {time / stage total}.}}{11}{table.caption.18}\protected@file@percent }
 \newlabel{tab:cpu-breakdown}{{9}{11}{CPU stage-level profiling for compression and decompression. Share is computed as \texttt {time / stage total}}{table.caption.18}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {10}{\ignorespaces GPU stage-level profiling for compression and decompression. Share is computed as \texttt  {time / stage total}.}}{11}{table.caption.19}\protected@file@percent }
@@ -117,27 +114,35 @@
 \newlabel{subsec:cpu-memory}{{4.7}{11}{CPU Memory Profiling}{subsection.4.7}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {5}GFAz\xspace  as a Compute Engine}{11}{section.5}\protected@file@percent }
 \newlabel{sec:compute}{{5}{11}{\gfaz as a Compute Engine}{section.5}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Motivation: Avoiding Materialization}{12}{subsection.5.1}\protected@file@percent }
-\newlabel{subsec:ce-motivation}{{5.1}{12}{Motivation: Avoiding Materialization}{subsection.5.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Execution Model: Streaming Leaf Expansion}{12}{subsection.5.2}\protected@file@percent }
-\newlabel{subsec:ce-model}{{5.2}{12}{Execution Model: Streaming Leaf Expansion}{subsection.5.2}{}}
+\citation{parmigiani2024panacus}
+\citation{guarracino2022odgi}
+\citation{garrison2018variation,hickey2020genotyping}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}From Pangenome Graphs to Downstream Formats}{12}{subsection.5.1}\protected@file@percent }
+\newlabel{subsec:ce-downstream}{{5.1}{12}{From Pangenome Graphs to Downstream Formats}{subsection.5.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Motivation: Avoiding Materialization}{12}{subsection.5.2}\protected@file@percent }
+\newlabel{subsec:ce-motivation}{{5.2}{12}{Motivation: Avoiding Materialization}{subsection.5.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Execution Model: Streaming Leaf Expansion}{12}{subsection.5.3}\protected@file@percent }
+\newlabel{subsec:ce-model}{{5.3}{12}{Execution Model: Streaming Leaf Expansion}{subsection.5.3}{}}
 \@writefile{toc}{\contentsline {paragraph}{Compressed traversal store.}{12}{section*.21}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Streaming primitive.}{12}{section*.22}\protected@file@percent }
-\@writefile{loa}{\contentsline {algorithm}{\numberline {4}{\ignorespaces Streaming traversal expansion for \texttt  {delta\_round} 0 or 1}}{12}{algorithm.4}\protected@file@percent }
-\newlabel{alg:ce-stream}{{4}{12}{Streaming traversal expansion for \texttt {delta\_round} 0 or 1}{algorithm.4}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Rule-Leaf Cache}{12}{subsection.5.3}\protected@file@percent }
-\newlabel{subsec:ce-cache}{{5.3}{12}{Rule-Leaf Cache}{subsection.5.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Memory Model}{13}{subsection.5.4}\protected@file@percent }
-\newlabel{subsec:ce-memory}{{5.4}{13}{Memory Model}{subsection.5.4}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Parallelization}{13}{subsection.5.5}\protected@file@percent }
-\newlabel{subsec:ce-parallel}{{5.5}{13}{Parallelization}{subsection.5.5}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}Three Instantiations}{13}{subsection.5.6}\protected@file@percent }
-\newlabel{subsec:ce-instances}{{5.6}{13}{Three Instantiations}{subsection.5.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{A shared extension surface.}{12}{section*.23}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {4}{\ignorespaces Streaming traversal expansion for \texttt  {delta\_round} 0 or 1}}{13}{algorithm.4}\protected@file@percent }
+\newlabel{alg:ce-stream}{{4}{13}{Streaming traversal expansion for \texttt {delta\_round} 0 or 1}{algorithm.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Rule-Leaf Cache}{13}{subsection.5.4}\protected@file@percent }
+\newlabel{subsec:ce-cache}{{5.4}{13}{Rule-Leaf Cache}{subsection.5.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Memory Model}{13}{subsection.5.5}\protected@file@percent }
+\newlabel{subsec:ce-memory}{{5.5}{13}{Memory Model}{subsection.5.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}Parallelization}{13}{subsection.5.6}\protected@file@percent }
+\newlabel{subsec:ce-parallel}{{5.6}{13}{Parallelization}{subsection.5.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.7}A Taxonomy of Compute Workloads}{13}{subsection.5.7}\protected@file@percent }
+\newlabel{subsec:ce-instances}{{5.7}{13}{A Taxonomy of Compute Workloads}{subsection.5.7}{}}
+\citation{garrison2018variation}
+\citation{paten2018superbubbles}
 \citation{paten2018superbubbles}
 \@writefile{loa}{\contentsline {algorithm}{\numberline {5}{\ignorespaces Top-level snarl extraction via biconnected decomposition}}{14}{algorithm.5}\protected@file@percent }
 \newlabel{alg:ce-bcc}{{5}{14}{Top-level snarl extraction via biconnected decomposition}{algorithm.5}{}}
-\@writefile{loa}{\contentsline {algorithm}{\numberline {6}{\ignorespaces Streaming allele observation for one haplotype (snarl mode)}}{14}{algorithm.6}\protected@file@percent }
-\newlabel{alg:ce-snarl}{{6}{14}{Streaming allele observation for one haplotype (snarl mode)}{algorithm.6}{}}
+\@writefile{loa}{\contentsline {algorithm}{\numberline {6}{\ignorespaces Streaming allele observation for one haplotype (snarl mode)}}{15}{algorithm.6}\protected@file@percent }
+\newlabel{alg:ce-snarl}{{6}{15}{Streaming allele observation for one haplotype (snarl mode)}{algorithm.6}{}}
 \bibstyle{ACM-Reference-Format}
 \bibdata{ref}
 \bibcite{bonfield2022cram}{{1}{2022}{{Bonfield}}{{}}}
@@ -174,9 +179,11 @@
 \newlabel{tocindent3}{18.198pt}
 \newlabel{tocindent4}{0pt}
 \newlabel{tocindent5}{0pt}
-\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion and Future Work}{15}{section.6}\protected@file@percent }
-\newlabel{sec:conclusion}{{6}{15}{Conclusion and Future Work}{section.6}{}}
-\@writefile{toc}{\contentsline {section}{Acknowledgments}{15}{section*.24}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{References}{15}{section*.26}\protected@file@percent }
-\newlabel{TotPages}{{15}{15}{}{page.15}{}}
-\gdef \@abspage@last{15}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion and Future Work}{16}{section.6}\protected@file@percent }
+\newlabel{sec:conclusion}{{6}{16}{Conclusion and Future Work}{section.6}{}}
+\@writefile{toc}{\contentsline {section}{Acknowledgments}{16}{section*.26}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{References}{16}{section*.28}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {12}{\ignorespaces The six compute-engine commands, all built on one streaming decode substrate. ``Resident state'' excludes the grammar-compressed traversal store common to every command; node counts dominate group and window counts at pangenome scale.}}{17}{table.caption.24}\protected@file@percent }
+\newlabel{tab:ce-commands}{{12}{17}{The six compute-engine commands, all built on one streaming decode substrate. ``Resident state'' excludes the grammar-compressed traversal store common to every command; node counts dominate group and window counts at pangenome scale}{table.caption.24}{}}
+\newlabel{TotPages}{{17}{17}{}{page.17}{}}
+\gdef \@abspage@last{17}
