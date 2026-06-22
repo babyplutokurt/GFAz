@@ -123,35 +123,37 @@
 \newlabel{subsec:ce-downstream}{{5.2}{12}{Why Analyze on the Compressed Container}{subsection.5.2}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.3}The Compute Substrate}{12}{subsection.5.3}\protected@file@percent }
 \newlabel{subsec:ce-model}{{5.3}{12}{The Compute Substrate}{subsection.5.3}{}}
-\@writefile{toc}{\contentsline {paragraph}{Compressed traversal store.}{12}{section*.21}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Streaming primitive.}{12}{section*.22}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{A shared extension surface.}{12}{section*.23}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Orientation.}{12}{section*.21}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Compressed traversal store.}{12}{section*.22}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Streaming primitive.}{12}{section*.23}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{A shared extension surface.}{12}{section*.24}\protected@file@percent }
 \citation{garrison2018variation}
 \citation{paten2018superbubbles}
 \@writefile{loa}{\contentsline {algorithm}{\numberline {4}{\ignorespaces Streaming traversal expansion for \texttt  {delta\_round} 0 or 1}}{13}{algorithm.4}\protected@file@percent }
 \newlabel{alg:ce-stream}{{4}{13}{Streaming traversal expansion for \texttt {delta\_round} 0 or 1}{algorithm.4}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Memory Model and the Rule-Leaf Cache}{13}{subsection.5.4}\protected@file@percent }
 \newlabel{subsec:ce-memory}{{5.4}{13}{Memory Model and the Rule-Leaf Cache}{subsection.5.4}{}}
-\newlabel{subsec:ce-cache}{{5.4}{13}{Rule-leaf cache}{section*.24}{}}
-\@writefile{toc}{\contentsline {paragraph}{Rule-leaf cache.}{13}{section*.24}\protected@file@percent }
+\newlabel{subsec:ce-cache}{{5.4}{13}{Rule-leaf cache}{section*.25}{}}
+\@writefile{toc}{\contentsline {paragraph}{Rule-leaf cache.}{13}{section*.25}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Parallel Execution}{13}{subsection.5.5}\protected@file@percent }
 \newlabel{subsec:ce-parallel}{{5.5}{13}{Parallel Execution}{subsection.5.5}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}\texttt  {deconstruct}: GFA$\rightarrow $VCF as a Two-Phase Compressed-Traversal Algorithm}{13}{subsection.5.6}\protected@file@percent }
-\newlabel{subsec:ce-deconstruct}{{5.6}{13}{\texttt {deconstruct}: GFA$\rightarrow $VCF as a Two-Phase Compressed-Traversal Algorithm}{subsection.5.6}{}}
 \citation{paten2018superbubbles}
-\@writefile{toc}{\contentsline {paragraph}{The two-phase idea.}{14}{section*.25}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Phase 1: topology-only site discovery.}{14}{section*.26}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Phase 2: streaming allele observation.}{14}{section*.27}\protected@file@percent }
+\@writefile{loe}{\contentsline {workedexample}{\numberline {1}{\ignorespaces \texttt  {deconstruct} on two chained sites. Phase\nonbreakingspace 1 recovers the snarls $[A,D]$ and $[D,G]$ from topology alone, decoding no haplotype; Phase\nonbreakingspace 2 streams each haplotype once and reads each interior, taking the reference spelling as allele\nonbreakingspace 0. The sites project to two VCF records---a substitution (\texttt  {C}$\to $\texttt  {T}) and a left-anchored deletion (\texttt  {ACC}$\to $\texttt  {A}).}}{14}{workedexample.1}\protected@file@percent }
+\newlabel{fig:ce-deconstruct-example}{{1}{14}{\texttt {deconstruct} on two chained sites. Phase~1 recovers the snarls $[A,D]$ and $[D,G]$ from topology alone, decoding no haplotype; Phase~2 streams each haplotype once and reads each interior, taking the reference spelling as allele~0. The sites project to two VCF records---a substitution (\texttt {C}$\to $\texttt {T}) and a left-anchored deletion (\texttt {ACC}$\to $\texttt {A})}{workedexample.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}\texttt  {deconstruct}: GFA$\rightarrow $VCF as a Two-Phase Compressed-Traversal Algorithm}{14}{subsection.5.6}\protected@file@percent }
+\newlabel{subsec:ce-deconstruct}{{5.6}{14}{\texttt {deconstruct}: GFA$\rightarrow $VCF as a Two-Phase Compressed-Traversal Algorithm}{subsection.5.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{The two-phase idea.}{14}{section*.26}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Phase 1: topology-only site discovery.}{14}{section*.27}\protected@file@percent }
 \@writefile{loa}{\contentsline {algorithm}{\numberline {5}{\ignorespaces Top-level snarl extraction via biconnected decomposition}}{14}{algorithm.5}\protected@file@percent }
 \newlabel{alg:ce-bcc}{{5}{14}{Top-level snarl extraction via biconnected decomposition}{algorithm.5}{}}
-\@writefile{loa}{\contentsline {algorithm}{\numberline {6}{\ignorespaces Streaming allele observation for one haplotype (snarl mode)}}{14}{algorithm.6}\protected@file@percent }
-\newlabel{alg:ce-snarl}{{6}{14}{Streaming allele observation for one haplotype (snarl mode)}{algorithm.6}{}}
-\@writefile{toc}{\contentsline {paragraph}{Assembly and VCF conventions.}{14}{section*.28}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Validation.}{15}{section*.29}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Phase 2: streaming allele observation.}{14}{section*.28}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {6}{\ignorespaces Streaming allele observation for one haplotype (snarl mode)}}{15}{algorithm.6}\protected@file@percent }
+\newlabel{alg:ce-snarl}{{6}{15}{Streaming allele observation for one haplotype (snarl mode)}{algorithm.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{Handling inversions.}{15}{section*.29}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Assembly and VCF conventions.}{15}{section*.30}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Validation.}{15}{section*.31}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.7}Further Analyses on the Same Substrate}{15}{subsection.5.7}\protected@file@percent }
 \newlabel{subsec:ce-instances}{{5.7}{15}{Further Analyses on the Same Substrate}{subsection.5.7}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.8}Scope}{15}{subsection.5.8}\protected@file@percent }
-\newlabel{subsec:ce-scope}{{5.8}{15}{Scope}{subsection.5.8}{}}
 \bibstyle{ACM-Reference-Format}
 \bibdata{ref}
 \bibcite{bonfield2022cram}{{1}{2022}{{Bonfield}}{{}}}
@@ -169,6 +171,12 @@
 \bibcite{li2009sequence}{{13}{2009}{{Li et~al\mbox  {.}}}{{}}}
 \bibcite{liao2023draft}{{14}{2023}{{Liao et~al\mbox  {.}}}{{}}}
 \bibcite{lin2024measuring}{{15}{2024}{{Lin et~al\mbox  {.}}}{{}}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.8}Scope}{16}{subsection.5.8}\protected@file@percent }
+\newlabel{subsec:ce-scope}{{5.8}{16}{Scope}{subsection.5.8}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion and Future Work}{16}{section.6}\protected@file@percent }
+\newlabel{sec:conclusion}{{6}{16}{Conclusion and Future Work}{section.6}{}}
+\@writefile{toc}{\contentsline {section}{Acknowledgments}{16}{section*.34}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{References}{16}{section*.36}\protected@file@percent }
 \bibcite{DO1RTF_2025}{{16}{2025}{{Marthe and Sabot}}{{}}}
 \bibcite{nvcomp_github}{{17}{2026}{{NVIDIA Corporation}}{{}}}
 \bibcite{parmigiani2024panacus}{{18}{2024}{{Parmigiani et~al\mbox  {.}}}{{}}}
@@ -180,12 +188,6 @@
 \bibcite{wang2022human}{{24}{2022}{{Wang et~al\mbox  {.}}}{{}}}
 \bibcite{Wick2015Bandage}{{25}{2015}{{Wick et~al\mbox  {.}}}{{}}}
 \bibcite{yang2024gpufastqlz}{{26}{2024}{{Yang et~al\mbox  {.}}}{{}}}
-\@writefile{lot}{\contentsline {table}{\numberline {12}{\ignorespaces The six compute-engine commands, all built on one streaming decode substrate. ``Resident state'' excludes the grammar-compressed traversal store common to every command; node counts dominate group and window counts at pangenome scale.}}{16}{table.caption.30}\protected@file@percent }
-\newlabel{tab:ce-commands}{{12}{16}{The six compute-engine commands, all built on one streaming decode substrate. ``Resident state'' excludes the grammar-compressed traversal store common to every command; node counts dominate group and window counts at pangenome scale}{table.caption.30}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion and Future Work}{16}{section.6}\protected@file@percent }
-\newlabel{sec:conclusion}{{6}{16}{Conclusion and Future Work}{section.6}{}}
-\@writefile{toc}{\contentsline {section}{Acknowledgments}{16}{section*.32}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{References}{16}{section*.34}\protected@file@percent }
 \bibcite{zouhar2023formal}{{27}{2023}{{Zouhar et~al\mbox  {.}}}{{}}}
 \newlabel{tocindent-1}{0pt}
 \newlabel{tocindent0}{0pt}
@@ -194,5 +196,7 @@
 \newlabel{tocindent3}{18.198pt}
 \newlabel{tocindent4}{0pt}
 \newlabel{tocindent5}{0pt}
+\@writefile{lot}{\contentsline {table}{\numberline {12}{\ignorespaces The six compute-engine commands, all built on one streaming decode substrate. ``Resident state'' excludes the grammar-compressed traversal store common to every command; node counts dominate group and window counts at pangenome scale.}}{17}{table.caption.32}\protected@file@percent }
+\newlabel{tab:ce-commands}{{12}{17}{The six compute-engine commands, all built on one streaming decode substrate. ``Resident state'' excludes the grammar-compressed traversal store common to every command; node counts dominate group and window counts at pangenome scale}{table.caption.32}{}}
 \newlabel{TotPages}{{17}{17}{}{page.17}{}}
 \gdef \@abspage@last{17}

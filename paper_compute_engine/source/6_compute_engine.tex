@@ -76,6 +76,18 @@ in a streamable form.
 
 \subsection{The Compute Substrate}\label{subsec:ce-model}
 
+\paragraph{Orientation.}
+Each step of a traversal carries an \emph{orientation}. A segment can be read on
+either strand of its double-stranded DNA, and the sign of a node ID records which: a
+positive ID is the \emph{forward} orientation, a negative ID the \emph{reverse}.
+Reversing any contiguous run of a traversal is therefore a \emph{reverse complement}
+---the steps are emitted in reverse order and every sign is flipped---just as the two
+strands of a sequence read in opposite directions. We refer to a segment's two ends
+as its $5'$ and $3'$ ends, and call a haplotype that crosses a site in the reverse
+orientation relative to the reference an \emph{inversion}. These three notions
+---orientation, reverse complement, and inversion---recur throughout the engine and
+are central to \texttt{deconstruct}.
+
 \paragraph{Compressed traversal store.}
 The \texttt{.gfaz} container stores P traversals and W traversals as two flat
 \texttt{int32} arrays. Each record has an encoded-length column, and the original
@@ -107,10 +119,10 @@ It emits the decoded orientation-signed node IDs of one traversal, in order, to 
 caller-supplied visitor. For each encoded element $e$, the decoder performs one
 boundary check. If $|e|$ is outside the rule range, $e$ is a literal. Otherwise
 the decoder indexes the rule arrays at $|e|-\texttt{min\_rule\_id}$ and expands
-the two children recursively. A negative rule reference denotes the
-reverse-complement orientation: the children are visited in reverse order and
-their signs are flipped. Thus the same rulebook serves both strands without
-duplicating rules.
+the two children recursively. A negative rule reference denotes the \emph{reverse
+complement} of the rule: its children are visited in reverse order with their
+orientations flipped. The same rulebook therefore serves both orientations without
+storing a reverse copy.
 
 The inverse-delta transform is fused into streaming. For the common
 \texttt{delta\_round=1} case, the decoder keeps a running prefix sum and calls
@@ -269,7 +281,55 @@ the source of the large speed and memory advantage over graph-resident pipelines
 Before either phase, each reference contig is decoded once to an orientation-signed
 node stream \texttt{ref\_nodes}; a prefix sum over segment lengths maps reference
 node positions to genomic offsets and gives the contig length used in the VCF
-header.
+header. Worked Example~\ref{fig:ce-deconstruct-example} traces one site through both
+phases.
+
+\begin{workedexample}[t]
+  \centering
+  \begin{tikzpicture}[
+      >={Stealth[length=1.6mm]},
+      seg/.style={draw, rounded corners=2pt, minimum width=7mm, minimum height=7mm,
+                  inner sep=1.5pt, align=center, font=\scriptsize\ttfamily},
+      refp/.style={->, thick},
+      altp/.style={->, dashed},
+    ]
+    \node[seg] (A) at (0,0)    {A\\GAT};
+    \node[seg] (B) at (1.5,0.8)  {B\\T};
+    \node[seg] (C) at (1.5,-0.8) {C\\C};
+    \node[seg] (D) at (3,0)    {D\\GA};
+    \node[seg] (E) at (4.5,0.8)  {E\\CC};
+    \node[seg] (G) at (6,0)    {G\\TT};
+    \draw[refp] (A) -- (C);
+    \draw[refp] (C) -- (D);
+    \draw[refp] (D) -- (E);
+    \draw[refp] (E) -- (G);
+    \draw[altp] (A) -- (B);
+    \draw[altp] (B) -- (D);
+    \draw[altp] (D) -- (G);
+    \begin{scope}[on background layer]
+      \node[draw, dotted, rounded corners, fit=(B)(C), inner sep=2mm] (s1) {};
+      \node[draw, dotted, rounded corners, fit=(E), inner sep=2mm] (s2) {};
+    \end{scope}
+    \node[font=\tiny] at (1.5,1.7) {snarl $[A,D]$};
+    \node[font=\tiny] at (4.5,1.7) {snarl $[D,G]$};
+  \end{tikzpicture}
+  \par\vspace{2pt}
+  {\scriptsize Reference path (and $h_1$): solid, allele~0.\quad
+   Haplotype $h_2$: dashed, allele~1.}
+  \par\vspace{4pt}
+  {\scriptsize\ttfamily\setlength{\tabcolsep}{3pt}
+  \begin{tabular}{@{}llllllllll@{}}
+    \#CHROM & POS & REF & ALT & QUAL & FILTER & INFO & FORMAT & h1 & h2\\
+    chr1 & 4 & C   & T & . & . & AC=1;AN=2;AF=0.5 & GT & 0 & 1\\
+    chr1 & 6 & ACC & A & . & . & AC=1;AN=2;AF=0.5 & GT & 0 & 1\\
+  \end{tabular}}
+  \caption{\texttt{deconstruct} on two chained sites. Phase~1 recovers the snarls
+  $[A,D]$ and $[D,G]$ from topology alone, decoding no haplotype; Phase~2 streams
+  each haplotype once and reads each interior, taking the reference spelling as
+  allele~0. The sites project to two VCF records---a substitution (\texttt{C}$\to$\texttt{T})
+  and a left-anchored deletion (\texttt{ACC}$\to$\texttt{A}).}
+  \label{fig:ce-deconstruct-example}
+\end{workedexample}
 
 \paragraph{Phase 1: topology-only site discovery.}
 By default \gfaz defines sites from top-level snarls, matching the record
@@ -330,38 +390,34 @@ snarl.
 \end{algorithm}
 
 \paragraph{Phase 2: streaming allele observation.}
-Once the sites are fixed, \gfaz returns to the compressed traversal substrate. For
-every top-level snarl it stores forward and reverse entrance maps: the forward
-entrance maps the reference source boundary to the snarl and expects the reference
-sink as its exit; the reverse entrance maps the reverse-complement sink to the same
-snarl and expects the reverse-complement source, allowing inverted haplotype
-traversals to be normalized back into the reference frame. During streaming, a small
-state machine is either closed or associated with one open snarl
-(Algorithm~\ref{alg:ce-snarl}). A boundary opens a site, ordinary decoded nodes are
-appended to a small interior buffer, and the matching exit emits that interior
-tagged by the haplotype slice. If traversal was reversed through the site, the
-buffer is scanned backward and signs are negated before emission; a boundary may
-close one site and immediately open the next, which handles adjacent snarls without
-retaining the surrounding path. This observation runs in parallel over haplotypes,
-each thread appending its tagged interiors to a private buffer; the buffers are
-concatenated once the region ends, and the inherently serial per-site assembly and
-VCF formatting then run as a single pass, with each snarl's observations sorted by
-source slice so the emitted VCF is invariant to thread count.
+Once the sites are fixed, \gfaz returns to the compressed traversal substrate. During
+streaming, a small state machine is either closed or associated with one open snarl
+(Algorithm~\ref{alg:ce-snarl}). A boundary node-side opens a site, ordinary decoded
+nodes are appended to a small interior buffer, and the matching exit emits that
+interior tagged by the haplotype slice; a boundary may close one site and immediately
+open the next, which handles adjacent (chained) snarls without retaining the
+surrounding path. The boundary maps come in forward and reverse pairs so that a site
+crossed on either orientation is detected and normalized (see ``Handling
+inversions'' below). This observation runs in parallel over haplotypes, each thread
+appending its tagged interiors to a private buffer; the buffers are concatenated once
+the region ends, and the inherently serial per-site assembly and VCF formatting then
+run as a single pass, with each snarl's observations sorted by source slice so the
+emitted VCF is invariant to thread count.
 
 \begin{algorithm}[t]
   \caption{Streaming allele observation for one haplotype (snarl mode)}
   \label{alg:ce-snarl}
   \begin{algorithmic}[1]
     \REQUIRE slice $E$; per-snarl boundary maps \textsc{Entrance} (node-side
-    $\rightarrow$ snarl, forward or reversed) and exit node-sides
+    $\rightarrow$ snarl, forward or reverse) and exit node-sides
     \STATE $open \gets \bot$; $\textit{interior} \gets [\,]$
     \STATE \textbf{for each} decoded node $u$ of $E$ (Algorithm~\ref{alg:ce-stream}):
     \STATE \quad $v \gets$ node-side vertex of $u$
     \IF{$open = \bot$}
-      \STATE \textsc{TryOpen}($v$): if $v$ is a (forward/reversed) entrance, set
-      $open$, \textit{reversed}, $\textit{exit}$, $\textit{interior}\gets[\,]$
+      \STATE \textsc{TryOpen}($v$): if $v$ is a (forward/reverse) entrance, set
+      $open$, \textit{inverted}, $\textit{exit}$, $\textit{interior}\gets[\,]$
     \ELSIF{$v = \textit{exit}$}
-      \STATE emit interior for snarl $open$ (reverse + negate if \textit{reversed}),
+      \STATE emit interior for snarl $open$ (reverse-complement if \textit{inverted}),
       tagged with this slice
       \STATE $open \gets \bot$; \textsc{TryOpen}($v$) \COMMENT{exit may open a chained snarl}
     \ELSE
@@ -370,10 +426,26 @@ source slice so the emitted VCF is invariant to thread count.
   \end{algorithmic}
 \end{algorithm}
 
+\paragraph{Handling inversions.}
+A haplotype need not cross a site in the reference orientation. When it traverses the
+interior on the opposite strand---an \emph{inversion}---both the boundary node-sides
+and the interior nodes appear reverse-complemented, yet the engine must still
+recognize the site and recover the same allele. \gfaz handles this at both phases.
+Phase~1 already does its part: the black segment edges above keep an inverted
+traversal within a single biconnected block, so the inversion is discovered as one
+site. Phase~2 then gives every snarl a second, reverse boundary pair: besides the forward entrance
+(reference source, exiting at the sink), \gfaz stores a \emph{reverse entrance} at the
+reverse complement of the sink, exiting at the reverse complement of the source. A
+haplotype that enters through the reverse entrance is marked inverted, and at its exit
+the interior is reverse-complemented---scanned backward with every orientation
+flipped---before the allele is spelled, normalizing the observation into the reference
+frame so that a forward and an inverted traversal of the same sequence collapse to one
+allele.
+
 \paragraph{Assembly and VCF conventions.}
 Per site, the reference interior spells allele $0$; each observed interior is spelled
-by concatenating segment DNA (reverse-oriented nodes contributing reverse
-complements) and deduplicated to an allele index. A site with no alternate allele is
+by concatenating segment DNA (a reverse-orientation node contributes the reverse
+complement of its sequence) and deduplicated to an allele index. A site with no alternate allele is
 dropped. Equal-length alleles are emitted as substitutions; otherwise the record is
 left-anchored with the last base of the source anchor, following the standard VCF
 indel convention. \texttt{INFO} carries \texttt{AC}/\texttt{AN}/\texttt{AF} and the
