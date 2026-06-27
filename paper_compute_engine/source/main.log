@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  27 JUN 2026 10:28
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  27 JUN 2026 11:19
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1634,8 +1634,8 @@ Underfull \vbox (badness 6001) has occurred while \output is active []
  [16.16]
 LaTeX Font Info:    Font shape `T1/zi4/m/n' will be
 (Font)              scaled to size 7.0pt on input line 219.
-)
-(./5_conclusion.tex [17.17]) Processing 'acks' comment.
+
+[17.17]) (./5_conclusion.tex) Processing 'acks' comment.
 \openout3 = `comment.cut'.
 
 
@@ -1652,7 +1652,10 @@ Underfull \hbox (badness 2753) in paragraph at lines 169--178
  2025.  Hu-man Pangenome
  []
 
-)
+
+Underfull \vbox (badness 10000) has occurred while \output is active []
+
+ [18.18])
 
 Class acmart Warning: Some images may lack descriptions.
 (acmart)              ACM is committed to complying with the upcoming US ADA ht
@@ -1669,29 +1672,29 @@ rtant steps when creating your papers will ensure that the widest possible audi
 ence can ingest your work..
 
 
-Package balance Warning: You have called \balance in second column
-(balance)                Columns might not be balanced.
+Overfull \vbox (1.16599pt too high) has occurred while \output is active []
+
 
 (/usr/share/texlive/texmf-dist/tex/generic/stringenc/se-pdfdoc.def
 File: se-pdfdoc.def 2019/11/29 v1.12 stringenc: PDFDocEncoding
 )
 (/usr/share/texlive/texmf-dist/tex/generic/stringenc/se-utf8.def
 File: se-utf8.def 2019/11/29 v1.12 stringenc: UTF-8
-) [18.18]
+) [19.19]
 (./main.aux)
  ***********
 LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
  ***********
 Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: 193A251F8760E4AB2EA198633FF671A8;7119.
+(rerunfilecheck)             Checksum: BEC1EDEC0440088D1F20B6940BF8BF50;7119.
  ) 
 Here is how much of TeX's memory you used:
- 34986 strings out of 474222
- 631002 string characters out of 5748733
+ 35001 strings out of 474222
+ 631337 string characters out of 5748733
  1980975 words of memory out of 5000000
  55366 multiletter control sequences out of 15000+600000
- 843022 words of font info for 661 fonts, out of 8000000 for 9000
+ 844212 words of font info for 669 fonts, out of 8000000 for 9000
  1302 hyphenation exceptions out of 8191
  90i,15n,131p,1025b,945s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/inconsolata/Inconsolata-zi4
@@ -1711,10 +1714,10 @@ ive/texmf-dist/fonts/type1/public/newtx/NewTXMI7.pfb></usr/share/texlive/texmf-
 dist/fonts/type1/public/newtx/txexs.pfb></usr/share/texlive/texmf-dist/fonts/ty
 pe1/public/newtx/txmiaX.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/n
 ewtx/txsys.pfb>
-Output written on main.pdf (18 pages, 1708157 bytes).
+Output written on main.pdf (19 pages, 1710672 bytes).
 PDF statistics:
- 823 PDF objects out of 1000 (max. 8388607)
- 652 compressed objects within 7 object streams
- 258 named destinations out of 1000 (max. 500000)
+ 831 PDF objects out of 1000 (max. 8388607)
+ 659 compressed objects within 7 object streams
+ 261 named destinations out of 1000 (max. 500000)
  148835 words of extra memory for PDF output out of 154059 (max. 10000000)
 

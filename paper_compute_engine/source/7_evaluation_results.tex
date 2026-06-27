@@ -219,3 +219,30 @@ Graph & Tool & Time & RSS & Time & RSS \\
 \multicolumn{6}{l}{\footnotesize $^\dagger$ single-threaded \texttt{odgi pav} did not complete ($>$1 day).}\\
 \end{tabular}
 \end{table}
+
+\paragraph{Scaling to whole human pangenomes.}
+On hprc-v1.1, \texttt{pav} over all $30{,}640$ whole-walk windows completes in
+$1.8$\,min at 16 threads ($19.3$\,min at 1 thread, $10.7\times$ scaling) with
+$77$\,GB peak RSS. Unlike \texttt{deconstruct} and \texttt{growth}, \texttt{pav}
+does \emph{not} keep its working set below the GFA: the PAV node-set index and
+per-window accumulators are not grammar-compressed, so memory grows with the
+number of windows and nodes. On the two largest graphs ($94{,}554$ and
+$60{,}807$ windows over $148$--$166$\,M nodes) this working set exceeds the
+$503$\,GB node---both runs were terminated near $470$\,GB before completing.
+This is the one analysis that does not yet meet the sub-GFA memory goal at
+whole-genome scale; compressing the PAV index is the most pressing optimization
+(its working set, not the traversal store, is the bottleneck).
+
+\subsection*{Summary}
+
+Across all three analyses, computing directly on the compressed container makes
+\gfaz one to three orders of magnitude faster than the established tools---$36$--$71\times$
+over \texttt{vg deconstruct}, $15$--$25\times$ over Panacus, and $299$--$613\times$
+over \texttt{odgi pav}---and, for \texttt{deconstruct} and \texttt{growth}, keeps
+peak RSS below the size of the uncompressed GFA. The same property lets \gfaz
+scale to whole human pangenomes that the baselines cannot process at all:
+\texttt{deconstruct} and \texttt{growth} run on the $358$ and $369$\,GB HPRC
+graphs from a $4.5$\,GB container in tens of seconds to tens of minutes on a
+single node. The lone exception is whole-genome \texttt{pav}, whose uncompressed
+working set still exceeds node memory on the two largest graphs---the clearest
+target for the next round of optimization.
