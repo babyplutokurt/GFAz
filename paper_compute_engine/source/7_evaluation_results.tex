@@ -76,6 +76,40 @@ Graph & Tool & Time & RSS & Time & RSS \\
 \end{tabular}
 \end{table}
 
+\paragraph{Scaling to whole human pangenomes.}
+Table~\ref{tab:eval-deconstruct-hprc} reports \texttt{deconstruct} on the three
+whole-genome HPRC graphs, deconstructing every CHM13 chromosome. Here \gfaz runs
+\emph{alone}: \texttt{vg} must load the entire uncompressed graph and does not
+complete on these inputs within practical memory, whereas \gfaz operates on the
+$2.2$--$4.8$\,GB container. On the largest graphs ($358$ and $369$\,GB of GFA)
+\gfaz emits the genome-wide VCF ($\sim$$35$\,M records) in roughly $40$ minutes
+at 16 threads, with peak RSS of $191$--$195$\,GB---about half the size of the GFA
+the input was decompressed from, and well within a single node. On hprc-v1.1,
+the 1- vs.\ 16-thread runs ($79.9$\,min vs.\ $5.1$\,min) show $15.6\times$
+scaling; single-threaded runs on the two largest graphs are omitted as
+impractical ($>$10\,h extrapolated).
+
+\begin{table}[t]
+\centering
+\caption{\texttt{deconstruct} on whole-genome HPRC graphs (\gfaz only;
+\texttt{vg} does not complete in practical memory). Time and peak RSS; ``GFA''
+is the size of the uncompressed input \gfaz never materializes.}
+\label{tab:eval-deconstruct-hprc}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrr}
+\hline
+ & & \multicolumn{2}{c}{1 thread} & \multicolumn{2}{c}{16 threads} \\
+\cline{3-4}\cline{5-6}
+Graph (GFA) & Records & Time & RSS & Time & RSS \\
+\hline
+hprc-v1.1 (48\,GB)  & 23.1\,M & 79.9\,min & 36.8\,GB & 5.1\,min  & 37.4\,GB \\
+hprc-v2.0 (358\,GB) & 35.5\,M & ---       & ---      & 39.8\,min & 191\,GB \\
+hprc-v2.1 (369\,GB) & 34.8\,M & ---       & ---      & 41.4\,min & 195\,GB \\
+\hline
+\end{tabular}
+\end{table}
+
 \subsection{Pangenome Growth}\label{subsec:eval-growth}
 
 Table~\ref{tab:eval-growth} compares \texttt{growth} against Panacus, the

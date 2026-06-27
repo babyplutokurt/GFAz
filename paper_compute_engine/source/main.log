@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  22 JUN 2026 13:33
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  27 JUN 2026 10:25
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1621,13 +1621,21 @@ Package hyperref Warning: Token not allowed in a PDF string (Unicode):
 (hyperref)                \kern 1.50032pt
 (hyperref)                removed on input line 40.
 
+
+Overfull \hbox (8.02213pt too wide) in paragraph at lines 80--91
+ []\T1/LinuxLibertineT-TLF/m/it/9 (-20) Scaling to whole hu-man pangenomes.[] \
+T1/LinuxLibertineT-TLF/m/n/9 (-20) Ta-ble []15[] re-ports \T1/zi4/m/n/9 deconst
+ruct
+ []
+
+
+Underfull \vbox (badness 6001) has occurred while \output is active []
+
+ [16.16]
 LaTeX Font Info:    Font shape `T1/zi4/m/n' will be
-(Font)              scaled to size 7.0pt on input line 156.
-
-Underfull \vbox (badness 1895) has occurred while \output is active []
-
- [16.16])
-(./5_conclusion.tex) Processing 'acks' comment.
+(Font)              scaled to size 7.0pt on input line 190.
+)
+(./5_conclusion.tex) Processing 'acks' comment. [17.17]
 \openout3 = `comment.cut'.
 
 
@@ -1638,7 +1646,7 @@ Underfull \hbox (badness 10000) in paragraph at lines 51--56
 d Com-pres-sion and
  []
 
-[17.17]
+
 Underfull \hbox (badness 2753) in paragraph at lines 169--178
 []\T1/LinuxLibertineT-TLF/m/n/7 (+20) Human Pangenome Ref-er-ence Con-sor-tium.
  2025.  Hu-man Pangenome
@@ -1661,8 +1669,8 @@ rtant steps when creating your papers will ensure that the widest possible audi
 ence can ingest your work..
 
 
-Overfull \vbox (1.1135pt too high) has occurred while \output is active []
-
+Package balance Warning: You have called \balance in second column
+(balance)                Columns might not be balanced.
 
 (/usr/share/texlive/texmf-dist/tex/generic/stringenc/se-pdfdoc.def
 File: se-pdfdoc.def 2019/11/29 v1.12 stringenc: PDFDocEncoding
@@ -1676,14 +1684,14 @@ LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
  ***********
 Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: 96C728E0A2B44819C4A87FD62123BE4C;7119.
+(rerunfilecheck)             Checksum: C0A154E3F1BA9ADE7D57997BEF0D7841;7119.
  ) 
 Here is how much of TeX's memory you used:
- 34968 strings out of 474222
- 630599 string characters out of 5748733
+ 34980 strings out of 474222
+ 630878 string characters out of 5748733
  1980975 words of memory out of 5000000
- 55364 multiletter control sequences out of 15000+600000
- 841832 words of font info for 653 fonts, out of 8000000 for 9000
+ 55365 multiletter control sequences out of 15000+600000
+ 842749 words of font info for 659 fonts, out of 8000000 for 9000
  1302 hyphenation exceptions out of 8191
  90i,15n,131p,1025b,945s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/inconsolata/Inconsolata-zi4
@@ -1703,10 +1711,10 @@ ive/texmf-dist/fonts/type1/public/newtx/NewTXMI7.pfb></usr/share/texlive/texmf-
 dist/fonts/type1/public/newtx/txexs.pfb></usr/share/texlive/texmf-dist/fonts/ty
 pe1/public/newtx/txmiaX.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/n
 ewtx/txsys.pfb>
-Output written on main.pdf (18 pages, 1705421 bytes).
+Output written on main.pdf (18 pages, 1707168 bytes).
 PDF statistics:
- 817 PDF objects out of 1000 (max. 8388607)
- 646 compressed objects within 7 object streams
- 254 named destinations out of 1000 (max. 500000)
+ 820 PDF objects out of 1000 (max. 8388607)
+ 649 compressed objects within 7 object streams
+ 256 named destinations out of 1000 (max. 500000)
  148835 words of extra memory for PDF output out of 154059 (max. 10000000)
 
