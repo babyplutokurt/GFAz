@@ -150,6 +150,35 @@ Graph & Tool & Time & RSS & Time & RSS \\
 \end{tabular}
 \end{table}
 
+\paragraph{Scaling to whole human pangenomes.}
+Table~\ref{tab:eval-growth-hprc} reports \texttt{growth} on the whole-genome
+HPRC graphs, where Panacus---which parses the full GFA---does not complete in
+practical memory. \gfaz computes the exact growth curve on the two largest
+graphs ($358$ and $369$\,GB of GFA) in roughly $40$ seconds at 16 threads, with
+peak RSS of only $13$--$14$\,GB: about $27\times$ smaller than the GFA and close
+to the compressed container itself. On hprc-v1.1 the 1- vs.\ 16-thread runs
+($69.2$\,s vs.\ $6.2$\,s) give $11\times$ scaling.
+
+\begin{table}[t]
+\centering
+\caption{\texttt{growth} on whole-genome HPRC graphs (\gfaz only; Panacus does
+not complete in practical memory). Time and peak RSS.}
+\label{tab:eval-growth-hprc}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrr}
+\hline
+ & \multicolumn{2}{c}{1 thread} & \multicolumn{2}{c}{16 threads} \\
+\cline{2-3}\cline{4-5}
+Graph (GFA) & Time & RSS & Time & RSS \\
+\hline
+hprc-v1.1 (48\,GB)  & 69.2\,s & 4.9\,GB & 6.2\,s  & 6.3\,GB \\
+hprc-v2.0 (358\,GB) & ---     & ---     & 39.8\,s & 12.9\,GB \\
+hprc-v2.1 (369\,GB) & ---     & ---     & 41.2\,s & 13.7\,GB \\
+\hline
+\end{tabular}
+\end{table}
+
 \subsection{Presence/Absence Variation}\label{subsec:eval-pav}
 
 Table~\ref{tab:eval-pav} compares \texttt{pav} against \texttt{odgi pav} on the

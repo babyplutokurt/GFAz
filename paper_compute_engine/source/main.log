@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  27 JUN 2026 10:25
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  27 JUN 2026 10:28
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1633,9 +1633,9 @@ Underfull \vbox (badness 6001) has occurred while \output is active []
 
  [16.16]
 LaTeX Font Info:    Font shape `T1/zi4/m/n' will be
-(Font)              scaled to size 7.0pt on input line 190.
+(Font)              scaled to size 7.0pt on input line 219.
 )
-(./5_conclusion.tex) Processing 'acks' comment. [17.17]
+(./5_conclusion.tex [17.17]) Processing 'acks' comment.
 \openout3 = `comment.cut'.
 
 
@@ -1684,14 +1684,14 @@ LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
  ***********
 Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: C0A154E3F1BA9ADE7D57997BEF0D7841;7119.
+(rerunfilecheck)             Checksum: 193A251F8760E4AB2EA198633FF671A8;7119.
  ) 
 Here is how much of TeX's memory you used:
- 34980 strings out of 474222
- 630878 string characters out of 5748733
+ 34986 strings out of 474222
+ 631002 string characters out of 5748733
  1980975 words of memory out of 5000000
- 55365 multiletter control sequences out of 15000+600000
- 842749 words of font info for 659 fonts, out of 8000000 for 9000
+ 55366 multiletter control sequences out of 15000+600000
+ 843022 words of font info for 661 fonts, out of 8000000 for 9000
  1302 hyphenation exceptions out of 8191
  90i,15n,131p,1025b,945s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/inconsolata/Inconsolata-zi4
@@ -1711,10 +1711,10 @@ ive/texmf-dist/fonts/type1/public/newtx/NewTXMI7.pfb></usr/share/texlive/texmf-
 dist/fonts/type1/public/newtx/txexs.pfb></usr/share/texlive/texmf-dist/fonts/ty
 pe1/public/newtx/txmiaX.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/n
 ewtx/txsys.pfb>
-Output written on main.pdf (18 pages, 1707168 bytes).
+Output written on main.pdf (18 pages, 1708157 bytes).
 PDF statistics:
- 820 PDF objects out of 1000 (max. 8388607)
- 649 compressed objects within 7 object streams
- 256 named destinations out of 1000 (max. 500000)
+ 823 PDF objects out of 1000 (max. 8388607)
+ 652 compressed objects within 7 object streams
+ 258 named destinations out of 1000 (max. 500000)
  148835 words of extra memory for PDF output out of 154059 (max. 10000000)
 
