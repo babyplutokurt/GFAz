@@ -690,9 +690,8 @@ uint64_t deconstruct_contig_snarl(
   // matching vg's default granularity, with cyclic-reference blocks dropped).
   // Default --snarl keeps the leaf-superbubble superset.
   std::vector<ReferenceSnarl> snarls =
-      options.vg_compat
-          ? find_reference_snarls_top_level(g, seg_graph, ref_nodes)
-          : find_reference_snarls(g, ref_nodes);
+      options.vg_compat ? find_reference_snarls_top_level(seg_graph, ref_nodes)
+                        : find_reference_snarls(g, ref_nodes);
 
   const size_t num_snarls = snarls.size();
   if (num_snarls == 0)
