@@ -4,6 +4,7 @@
 \usepackage{booktabs}
 \usepackage{multirow}
 \usepackage{float}
+\usepackage{enumitem}
 \usepackage{amsmath}
 \usepackage{microtype}
 \usepackage{authblk}
@@ -33,51 +34,73 @@
 
 \paragraph{Overview.}
 Pangenome graphs in the Graphical Fragment Assembly (GFA) format now reach hundreds
-of gigabytes, with haplotype traversal records exceeding 90\% of file size (98.7\% of
-a 14\,GB graph of 1{,}000 chr19 haplotypes). This imposes two costs. For storage,
-general-purpose compressors (gzip, zstd) work over local byte windows and miss the
-cross-haplotype redundancy in traversals, while specialized tools drop GFA semantics
-or offer low throughput. For analysis, GFA is the format pangenomes are built in but
-rarely analyzed in: downstream tools (bcftools, GATK, plink, GWAS) consume
-reference-anchored tables such as VCF, so each task first materializes a whole-graph
-object or snarl index larger than the statistic it computes. \gfaz addresses both
-with one artifact: a lossless GFA compressor whose container doubles as a compute
-substrate, running path-centric analyses directly on the grammar-compressed
-traversal store.
+of gigabytes, dominated by haplotype traversal records (over 90\% of file size). We
+present \gfaz, which plays two roles over one container. As a \emph{compressor}, it is
+lossless and reaches 18 to 84$\times$ compression, 15 to 20$\times$ better than gzip on
+the largest whole-genome graphs and well ahead of specialized tools. As a
+\emph{compute engine}, it runs path-centric analyses directly on the compressed
+traversals, giving 25 to 613$\times$ speedups over standard downstream tools with far
+less memory, and scales to 369\,GB whole-genome HPRC graphs the baselines cannot
+process at all.
 
 \paragraph{Design.}
-\emph{Compression.} \gfaz normalizes paths and walks to signed \texttt{int32}
-traversals (sign = strand) and applies multi-round 2-mer grammar compression that
-exploits forward/reverse orientation symmetry: a negative rule reference denotes a
-rule's reverse complement, so one rulebook serves both orientations. All record
-types, including optional fields, are stored as type-specific columns, giving fully
-lossless round-trips, per-field access, incremental haplotype extension, and
-single-haplotype random access. Both compression and decompression are linear-time
-and fully parallel, with interchangeable OpenMP (CPU) and CUDA/nvComp (GPU) backends
-that share one format.
-\emph{Compute engine.} A streaming primitive expands one traversal to
-orientation-signed node IDs straight from the grammar (array-indexed rule lookup, no
-hashing) and folds it into a compact accumulator, so a query touches only the columns
-it needs and peak memory stays below the uncompressed GFA. The flagship analysis
-\texttt{deconstruct} (GFA to VCF) is a new two-phase algorithm that separates
-one-time, topology-only site discovery (biconnected decomposition of the node-end
-graph, $O(V{+}E)$) from a streaming allele-observation fold, and never builds a graph
-or a snarl index. Five further analyses (\texttt{growth}, \texttt{pav},
-\texttt{depth}, \texttt{similarity}, \texttt{stats}) reuse the same substrate, each
-reproducing an established tool's output.
+One principle underlies both halves: keep haplotype traversals in a grammar-compressed
+form, and both store and query them in that form.
+
+\smallskip\noindent\emph{Compression.}
+\begin{itemize}[nosep, leftmargin=1.2em]
+  \item \textbf{Orientation-aware grammar.} Paths and walks are normalized to a single
+        signed \texttt{int32} traversal form (sign = strand). Each adjacent 2-mer is
+        canonicalized so its forward and reverse-complement occurrences share one
+        rule, and the rule's sign records the observed orientation; one rulebook thus
+        serves both strands with no reverse copy.
+  \item \textbf{Hierarchical multi-round reduction.} Each round replaces frequent
+        adjacent 2-mers with new rule symbols, shrinking the stream by up to half;
+        later rounds pair rules from earlier rounds, so the default 8 rounds capture
+        exponentially longer haplotype repeats (length 4, 8, 16, \dots). Paths and
+        walks are mined jointly, and every round is a single linear scan, making
+        compression and decompression linear-time.
+  \item \textbf{Columnar, fully lossless layout.} All record types, including
+        optional fields, are stored as type-specific columns, enabling per-field
+        access, incremental haplotype extension, and single-haplotype random access.
+  \item \textbf{Parallel CPU/GPU backends.} The whole pipeline is fully parallel, with
+        interchangeable OpenMP (CPU) and CUDA/nvComp (GPU) backends that share one
+        format.
+\end{itemize}
+
+\smallskip\noindent\emph{Compute engine.}
+\begin{itemize}[nosep, leftmargin=1.2em]
+  \item \textbf{Materialization-free execution.} Queries run directly on the
+        grammar-compressed traversal store: \gfaz never rebuilds the GFA text, a
+        whole-graph object, or even a fully expanded list of traversal steps. This
+        avoids the up-front cost that graph- and text-resident tools (vg, odgi,
+        Panacus) pay by materializing a representation larger than the statistic they
+        compute.
+  \item \textbf{Unified decode-and-fold execution model.} A shared primitive expands
+        one traversal to orientation-signed node IDs straight from the grammar
+        (array-indexed rule lookup, no hashing) and folds it into a compact
+        accumulator under a parallel loop. A query touches only the columns it needs,
+        so peak memory stays below the uncompressed GFA and every command is the same
+        decode-and-fold skeleton differing only in its accumulator.
+  \item \textbf{Two-phase GFA-to-VCF projection (\texttt{deconstruct}).} A new
+        algorithm that separates one-time, topology-only site discovery (biconnected
+        decomposition of the node-end graph, $O(V{+}E)$) from a streaming
+        allele-observation fold, never building a graph or a snarl index.
+  \item \textbf{Generality across analyses.} \texttt{growth}, \texttt{pav},
+        \texttt{depth}, \texttt{similarity}, and \texttt{stats} reuse the same
+        substrate, each reproducing an established tool's output.
+\end{itemize}
 
 \paragraph{Compression performance.}
 All results use a single node with an AMD Ryzen Threadripper PRO 9955WX (16 cores,
 32 threads), an NVIDIA RTX Pro 6000 GPU, and 512\,GB of DDR5-6400 memory (503\,GiB
-usable). Across six datasets (113\,MB to 369\,GB), \gfaz gives the best ratio of
-every method on both backends, 18 to 84$\times$, typically over 10$\times$ better
-than gzip/zstd and ahead of the specialized GBZ and sqz; the best sqz variant trails
-\gfaz by about 2$\times$ at chromosome scale and exhausts memory on every HPRC graph.
-It also leads compression and decompression throughput where inputs fit: the CPU
-backend sustains up to 385\,MB/s and 1.8\,GB/s, and the GPU backend up to 4.8\,GB/s
-and 9.4\,GB/s. The ratio advantage widens with graph complexity, reaching
-83.9$\times$ on HPRC v2.0 versus 66.8$\times$ (GBZ) and 6.5$\times$ (zstd)
-(Table~\ref{tab:compress}).
+usable). Across six datasets (113\,MB to 369\,GB), \gfaz gives the best ratio of every
+method on both backends and also leads compression and decompression throughput where
+inputs fit: the CPU backend sustains up to 385\,MB/s and 1.8\,GB/s, and the GPU
+backend up to 4.8\,GB/s and 9.4\,GB/s. The margin over specialized tools widens with
+graph complexity: on HPRC v2.0 \gfaz reaches 83.9$\times$ versus 66.8$\times$ (GBZ)
+and 6.5$\times$ (zstd), while sqz trails by about 2$\times$ at chromosome scale and
+runs out of memory on every HPRC graph (Table~\ref{tab:compress}).
 
 \begin{table}[H]
 \centering
@@ -121,24 +144,24 @@ Dataset (GFA) & & Gzip & Zstd & sqz & GBZ & \gfaz(CPU) & \gfaz(GPU) \\
 \end{table}
 
 \paragraph{Compute performance.}
-Computing on the container makes \gfaz one to three orders of magnitude faster than
-the standard tools at a fraction of their memory, while matching their output:
-\texttt{deconstruct} agrees with \texttt{vg deconstruct} at about 99.99\% of
-reference positions, \texttt{growth} reproduces Panacus curves exactly, and
-\texttt{pav} reproduces \texttt{odgi pav} semantics (Table~\ref{tab:downstream}). The
-sub-GFA memory footprint also lets \gfaz scale to whole human pangenomes the
-baselines cannot load: from a 4.5\,GB container it emits the genome-wide VCF (about
-35\,M records) on the 358 and 369\,GB HPRC v2 graphs in about 40\,min at 191 to
-195\,GB peak RSS (roughly half the GFA), and the exact growth curve in about 40\,s at
-only 13 to 14\,GB (about 27$\times$ smaller than the GFA).
+Computing on the container matches each tool's output while running far faster on far
+less memory (Table~\ref{tab:downstream}): \texttt{deconstruct} is 50 to 71$\times$
+faster than \texttt{vg} at 3.3$\times$ less peak RSS, \texttt{growth} is 25 to
+230$\times$ faster than Panacus at 7 to 16$\times$ less RSS, and \texttt{pav} is 299
+to 613$\times$ faster than \texttt{odgi pav} at about 3$\times$ less RSS, with outputs
+in agreement (about 99.99\% of \texttt{deconstruct} positions, identical growth curves
+and PAV semantics). This sub-GFA footprint is what enables the whole-genome scaling:
+from a 4.5\,GB container \gfaz emits the genome-wide VCF (about 35\,M records) on the
+358 and 369\,GB HPRC v2 graphs in about 40\,min at 191 to 195\,GB RSS (roughly half
+the GFA), and the exact growth curve in about 40\,s at only 13 to 14\,GB.
 
 \begin{table}[H]
 \centering
 \scriptsize
 \caption{Downstream analytics vs.\ standard tools (16 threads): wall-clock time and
 peak RSS. \gfaz reads the compressed \texttt{.gfaz}; baselines read the GFA. ``DNF''
-= baseline does not complete in practical memory; on whole-genome HPRC graphs \gfaz
-runs alone. (odgi \texttt{pav} additionally needs an \texttt{odgi build} step, 31--61\,s;
+= baseline does not complete in practical memory, so \gfaz runs alone. (odgi
+\texttt{pav} additionally needs an \texttt{odgi build} step, 31--61\,s;
 whole-genome \texttt{pav} on the two largest graphs exceeds the 503\,GB node and is
 omitted.)}
 \label{tab:downstream}
@@ -159,7 +182,7 @@ Analysis & Graph (GFA) & Time & RSS & Time & RSS & Speedup \\
 \multirow{5}{*}{\shortstack[l]{\texttt{growth}\\\footnotesize vs.\ Panacus}}
   & chr1 (7.1\,GB)   & 0.74\,s & 0.66\,GB & 18.3\,s & 6.16\,GB & 25$\times$ \\
   & chr6 (3.8\,GB)   & 0.36\,s & 0.31\,GB & 9.0\,s  & 3.77\,GB & 25$\times$ \\
-  & HPRC v1.1 (48\,GB)  & 6.2\,s  & 6.3\,GB  & DNF & n/a & n/a \\
+  & HPRC v1.1 (48\,GB)  & 6.2\,s  & 6.3\,GB  & 1428\,s & 45.8\,GB & 230$\times$ \\
   & HPRC v2.0 (358\,GB) & 39.8\,s & 12.9\,GB & DNF & n/a & n/a \\
   & HPRC v2.1 (369\,GB) & 41.2\,s & 13.7\,GB & DNF & n/a & n/a \\
 \midrule
