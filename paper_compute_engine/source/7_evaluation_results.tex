@@ -152,20 +152,20 @@ Graph & Tool & Time & RSS & Time & RSS \\
 
 \paragraph{Scaling to whole human pangenomes.}
 Table~\ref{tab:eval-growth-hprc} reports \texttt{growth} on the whole-genome
-HPRC graphs. On hprc-v1.1, Panacus completes but takes $23.8$ minutes and
-$45.8$\,GB---\gfaz computes the same curve in $6.2$\,s with $6.3$\,GB, a
-$\sim$$230\times$ speedup with $7\times$ less memory. On the two largest graphs
-($358$ and $369$\,GB of GFA) Panacus does not complete in practical memory,
-whereas \gfaz computes the exact curve in roughly $40$ seconds at 16 threads
-with peak RSS of only $13$--$14$\,GB: about $27\times$ smaller than the GFA and
-close to the compressed container itself. On hprc-v1.1 the \gfaz 1- vs.\
-16-thread runs ($69.2$\,s vs.\ $6.2$\,s) give $11\times$ scaling.
+HPRC graphs. Panacus completes on all three, but its runtime and memory track
+the uncompressed GFA: $23.8$\,min / $45.8$\,GB on hprc-v1.1 and over four hours
+with $327$--$336$\,GB of RSS on the two largest graphs. \gfaz computes the
+identical curve---matching Panacus's node totals exactly at every growth
+point---in $6.2$--$41$\,s with only $6.3$--$13.7$\,GB of RSS, a
+$230$--$369\times$ speedup with $7$--$25\times$ less memory and peak RSS about
+$27\times$ below the GFA. On hprc-v1.1 the \gfaz 1- vs.\ 16-thread runs
+($69.2$\,s vs.\ $6.2$\,s) give $11\times$ scaling.
 
 \begin{table}[t]
 \centering
-\caption{\texttt{growth} on whole-genome HPRC graphs. Panacus completes only on
-hprc-v1.1 (and only at 16 threads); it does not finish in practical memory on
-the two largest graphs. Time and peak RSS.}
+\caption{\texttt{growth} on whole-genome HPRC graphs. Panacus completes on all
+three but is $230$--$369\times$ slower and uses $7$--$25\times$ more memory;
+single-threaded Panacus was not run. Time and peak RSS.}
 \label{tab:eval-growth-hprc}
 \small
 \setlength{\tabcolsep}{4pt}
@@ -175,14 +175,14 @@ the two largest graphs. Time and peak RSS.}
 \cline{3-4}\cline{5-6}
 Graph (GFA) & Tool & Time & RSS & Time & RSS \\
 \hline
-\multirow{2}{*}{hprc-v1.1 (48\,GB)}  & Panacus   & ---     & ---     & 1428\,s & 45.8\,GB \\
-                                     & \thiswork & 69.2\,s & 4.9\,GB & 6.2\,s  & 6.3\,GB \\
+\multirow{2}{*}{hprc-v1.1 (48\,GB)}  & Panacus   & ---     & ---     & 23.8\,min & 45.8\,GB \\
+                                     & \thiswork & 69.2\,s & 4.9\,GB & 6.2\,s    & 6.3\,GB \\
 \hline
-\multirow{2}{*}{hprc-v2.0 (358\,GB)} & Panacus   & ---     & ---     & \multicolumn{2}{c}{\emph{(running)}} \\
-                                     & \thiswork & ---     & ---     & 39.8\,s & 12.9\,GB \\
+\multirow{2}{*}{hprc-v2.0 (358\,GB)} & Panacus   & ---     & ---     & 245\,min & 327\,GB \\
+                                     & \thiswork & ---     & ---     & 39.8\,s  & 12.9\,GB \\
 \hline
-\multirow{2}{*}{hprc-v2.1 (369\,GB)} & Panacus   & ---     & ---     & \multicolumn{2}{c}{\emph{(running)}} \\
-                                     & \thiswork & ---     & ---     & 41.2\,s & 13.7\,GB \\
+\multirow{2}{*}{hprc-v2.1 (369\,GB)} & Panacus   & ---     & ---     & 251\,min & 336\,GB \\
+                                     & \thiswork & ---     & ---     & 41.2\,s  & 13.7\,GB \\
 \hline
 \end{tabular}
 \end{table}
@@ -245,12 +245,14 @@ whole-genome scale; compressing the PAV index is the most pressing optimization
 
 Across all three analyses, computing directly on the compressed container makes
 \gfaz one to three orders of magnitude faster than the established tools---$36$--$71\times$
-over \texttt{vg deconstruct}, $15$--$25\times$ over Panacus, and $299$--$613\times$
+over \texttt{vg deconstruct}, $15$--$369\times$ over Panacus, and $299$--$613\times$
 over \texttt{odgi pav}---and, for \texttt{deconstruct} and \texttt{growth}, keeps
 peak RSS below the size of the uncompressed GFA. The same property lets \gfaz
-scale to whole human pangenomes that the baselines cannot process at all:
-\texttt{deconstruct} and \texttt{growth} run on the $358$ and $369$\,GB HPRC
-graphs from a $4.5$\,GB container in tens of seconds to tens of minutes on a
-single node. The lone exception is whole-genome \texttt{pav}, whose uncompressed
-working set still exceeds node memory on the two largest graphs---the clearest
-target for the next round of optimization.
+scale to whole human pangenomes the baselines cannot practically handle: on the
+$358$ and $369$\,GB HPRC graphs, \texttt{vg} and \texttt{odgi} cannot load the
+input within memory, while Panacus \texttt{growth} completes only after
+$\sim$$4$ hours and $\sim$$330$\,GB---whereas \gfaz runs \texttt{deconstruct} and
+\texttt{growth} from a $4.5$\,GB container in tens of seconds to tens of minutes
+with an order of magnitude less memory. The lone exception is whole-genome
+\texttt{pav}, whose uncompressed working set still exceeds node memory on the two
+largest graphs---the clearest target for the next round of optimization.
