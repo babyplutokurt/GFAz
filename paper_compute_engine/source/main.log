@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  27 JUN 2026 11:19
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  28 JUN 2026 23:42
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1633,7 +1633,7 @@ Underfull \vbox (badness 6001) has occurred while \output is active []
 
  [16.16]
 LaTeX Font Info:    Font shape `T1/zi4/m/n' will be
-(Font)              scaled to size 7.0pt on input line 219.
+(Font)              scaled to size 7.0pt on input line 227.
 
 [17.17]) (./5_conclusion.tex) Processing 'acks' comment.
 \openout3 = `comment.cut'.
@@ -1653,7 +1653,7 @@ Underfull \hbox (badness 2753) in paragraph at lines 169--178
  []
 
 
-Underfull \vbox (badness 10000) has occurred while \output is active []
+Underfull \vbox (badness 1558) has occurred while \output is active []
 
  [18.18])
 
@@ -1671,10 +1671,6 @@ portant to optimize color contrast for the visually impaired. Taking these impo
 rtant steps when creating your papers will ensure that the widest possible audi
 ence can ingest your work..
 
-
-Overfull \vbox (1.16599pt too high) has occurred while \output is active []
-
-
 (/usr/share/texlive/texmf-dist/tex/generic/stringenc/se-pdfdoc.def
 File: se-pdfdoc.def 2019/11/29 v1.12 stringenc: PDFDocEncoding
 )
@@ -1690,11 +1686,11 @@ Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: BEC1EDEC0440088D1F20B6940BF8BF50;7119.
  ) 
 Here is how much of TeX's memory you used:
- 35001 strings out of 474222
- 631337 string characters out of 5748733
+ 35004 strings out of 474222
+ 631415 string characters out of 5748733
  1980975 words of memory out of 5000000
  55366 multiletter control sequences out of 15000+600000
- 844212 words of font info for 669 fonts, out of 8000000 for 9000
+ 844477 words of font info for 671 fonts, out of 8000000 for 9000
  1302 hyphenation exceptions out of 8191
  90i,15n,131p,1025b,945s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/inconsolata/Inconsolata-zi4
@@ -1714,7 +1710,7 @@ ive/texmf-dist/fonts/type1/public/newtx/NewTXMI7.pfb></usr/share/texlive/texmf-
 dist/fonts/type1/public/newtx/txexs.pfb></usr/share/texlive/texmf-dist/fonts/ty
 pe1/public/newtx/txmiaX.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/n
 ewtx/txsys.pfb>
-Output written on main.pdf (19 pages, 1710672 bytes).
+Output written on main.pdf (19 pages, 1711426 bytes).
 PDF statistics:
  831 PDF objects out of 1000 (max. 8388607)
  659 compressed objects within 7 object streams
