@@ -36,6 +36,14 @@ graph is a 13-strain bacterial pangenome used for \texttt{growth}. (The bacteria
 graph is circular and stores only W-line walks, so it is not a meaningful target
 for reference-anchored \texttt{deconstruct} nor for \texttt{odgi pav}, which does
 not load W-line paths; it is retained as a \texttt{growth} data point.)
+The scaling experiments additionally use four whole-genome graphs: the three
+HPRC releases (v1.1, v2.0, v2.1) and HGSVC3---an $80.1$\,GB Minigraph--Cactus
+pangenome from a \emph{different} consortium (the Human Genome Structural
+Variation Consortium; $65$ samples plus CHM13/GRCh38, $29{,}130$ walks,
+$107.1$\,M nodes, compressed $28.1\times$ to a $2.85$\,GB container). HGSVC3
+tests that the engine generalizes beyond a single construction pipeline, and
+being smaller than the largest HPRC graphs it is one on which the baselines
+still (barely) run, enabling a direct whole-genome comparison.
 
 \subsection{Deconstruct (GFA\,$\rightarrow$\,VCF)}\label{subsec:eval-deconstruct}
 
@@ -77,35 +85,43 @@ Graph & Tool & Time & RSS & Time & RSS \\
 \end{table}
 
 \paragraph{Scaling to whole human pangenomes.}
-Table~\ref{tab:eval-deconstruct-hprc} reports \texttt{deconstruct} on the three
-whole-genome HPRC graphs, deconstructing every CHM13 chromosome. Here \gfaz runs
-\emph{alone}: \texttt{vg} must load the entire uncompressed graph and does not
-complete on these inputs within practical memory, whereas \gfaz operates on the
-$2.2$--$4.8$\,GB container. On the largest graphs ($358$ and $369$\,GB of GFA)
+Table~\ref{tab:eval-deconstruct-hprc} reports \texttt{deconstruct} on four
+whole-genome graphs---the three HPRC releases and HGSVC3---each deconstructing
+every CHM13 chromosome. \gfaz operates on the $2.2$--$4.8$\,GB container
+throughout; the baseline \texttt{vg} must load the entire uncompressed graph,
+which it manages on HGSVC3 ($80$\,GB) only by consuming $397$\,GB of RAM---nearly
+the whole node---and cannot do at all on the $358$/$369$\,GB HPRC giants. On
+HGSVC3 \gfaz matches \texttt{vg}'s record count to within $0.17\%$ while running
+$15.2\times$ faster with $7.6\times$ less memory. On the largest HPRC graphs
 \gfaz emits the genome-wide VCF ($\sim$$35$\,M records) in roughly $40$ minutes
 at 16 threads, with peak RSS of $191$--$195$\,GB---about half the size of the GFA
 the input was decompressed from, and well within a single node. On hprc-v1.1,
 the 1- vs.\ 16-thread runs ($79.9$\,min vs.\ $5.1$\,min) show $15.6\times$
-scaling; single-threaded runs on the two largest graphs are omitted as
+scaling; single-threaded runs on the two largest HPRC graphs are omitted as
 impractical ($>$10\,h extrapolated).
 
 \begin{table}[t]
 \centering
-\caption{\texttt{deconstruct} on whole-genome HPRC graphs (\gfaz only;
-\texttt{vg} does not complete in practical memory). Time and peak RSS; ``GFA''
-is the size of the uncompressed input \gfaz never materializes.}
+\caption{\texttt{deconstruct} on whole-genome graphs. \gfaz runs on all four; for
+HGSVC3 we also report \texttt{vg deconstruct}, which completes on the $80$\,GB
+input (using $397$\,GB of RAM) but does not complete within memory on the larger
+HPRC graphs. Time and peak RSS; ``GFA'' is the size of the uncompressed input
+\gfaz never materializes.}
 \label{tab:eval-deconstruct-hprc}
 \small
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{lrrrrr}
+\begin{tabular}{llrrrrr}
 \hline
- & & \multicolumn{2}{c}{1 thread} & \multicolumn{2}{c}{16 threads} \\
-\cline{3-4}\cline{5-6}
-Graph (GFA) & Records & Time & RSS & Time & RSS \\
+ & & & \multicolumn{2}{c}{1 thread} & \multicolumn{2}{c}{16 threads} \\
+\cline{4-5}\cline{6-7}
+Graph (GFA) & Tool & Records & Time & RSS & Time & RSS \\
 \hline
-hprc-v1.1 (48\,GB)  & 23.1\,M & 79.9\,min & 36.8\,GB & 5.1\,min  & 37.4\,GB \\
-hprc-v2.0 (358\,GB) & 35.5\,M & ---       & ---      & 39.8\,min & 191\,GB \\
-hprc-v2.1 (369\,GB) & 34.8\,M & ---       & ---      & 41.4\,min & 195\,GB \\
+hprc-v1.1 (48\,GB)  & \thiswork & 23.1\,M & 79.9\,min & 36.8\,GB & 5.1\,min  & 37.4\,GB \\
+hprc-v2.0 (358\,GB) & \thiswork & 35.5\,M & ---       & ---      & 39.8\,min & 191\,GB \\
+hprc-v2.1 (369\,GB) & \thiswork & 34.8\,M & ---       & ---      & 41.4\,min & 195\,GB \\
+\hline
+\multirow{2}{*}{HGSVC3 (80\,GB)} & \texttt{vg} & 25.4\,M & --- & --- & 132.9\,min & 396.9\,GB \\
+                    & \thiswork & 25.3\,M & 127.6\,min & 51.7\,GB & 8.7\,min & 51.9\,GB \\
 \hline
 \end{tabular}
 \end{table}
@@ -151,21 +167,24 @@ Graph & Tool & Time & RSS & Time & RSS \\
 \end{table}
 
 \paragraph{Scaling to whole human pangenomes.}
-Table~\ref{tab:eval-growth-hprc} reports \texttt{growth} on the whole-genome
-HPRC graphs. Panacus completes on all three, but its runtime and memory track
-the uncompressed GFA: $23.8$\,min / $45.8$\,GB on hprc-v1.1 and over four hours
-with $327$--$336$\,GB of RSS on the two largest graphs. \gfaz computes the
-identical curve---matching Panacus's node totals exactly at every growth
-point---in $6.2$--$41$\,s with only $6.3$--$13.7$\,GB of RSS, a
-$230$--$369\times$ speedup with $7$--$25\times$ less memory and peak RSS about
-$27\times$ below the GFA. On hprc-v1.1 the \gfaz 1- vs.\ 16-thread runs
+Table~\ref{tab:eval-growth-hprc} reports \texttt{growth} on four whole-genome
+graphs. Panacus completes on all of them, but its runtime and memory track the
+uncompressed GFA: $23.8$\,min / $45.8$\,GB on hprc-v1.1, $40.6$\,min / $71.1$\,GB
+on HGSVC3, and over four hours with $327$--$336$\,GB of RSS on the two largest
+HPRC graphs. \gfaz computes the identical curve---matching Panacus's node totals
+exactly at every growth point, on HGSVC3 as on the HPRC graphs---in
+$6.2$--$41$\,s with only $6.3$--$13.7$\,GB of RSS, a $230$--$369\times$ speedup
+with $7$--$25\times$ less memory and peak RSS about $27\times$ below the GFA;
+HGSVC3 alone gives a $253\times$ speedup ($9.6$\,s vs.\ $40.6$\,min) with
+$8.8\times$ less memory. On hprc-v1.1 the \gfaz 1- vs.\ 16-thread runs
 ($69.2$\,s vs.\ $6.2$\,s) give $11\times$ scaling.
 
 \begin{table}[t]
 \centering
-\caption{\texttt{growth} on whole-genome HPRC graphs. Panacus completes on all
-three but is $230$--$369\times$ slower and uses $7$--$25\times$ more memory;
-single-threaded Panacus was not run. Time and peak RSS.}
+\caption{\texttt{growth} on whole-genome graphs (three HPRC releases and
+HGSVC3). Panacus completes on all but is $230$--$369\times$ slower and uses
+$7$--$25\times$ more memory; single-threaded Panacus was not run. Time and peak
+RSS.}
 \label{tab:eval-growth-hprc}
 \small
 \setlength{\tabcolsep}{4pt}
@@ -183,6 +202,9 @@ Graph (GFA) & Tool & Time & RSS & Time & RSS \\
 \hline
 \multirow{2}{*}{hprc-v2.1 (369\,GB)} & Panacus   & ---     & ---     & 251\,min & 336\,GB \\
                                      & \thiswork & ---     & ---     & 41.2\,s  & 13.7\,GB \\
+\hline
+\multirow{2}{*}{HGSVC3 (80\,GB)}     & Panacus   & ---      & ---     & 40.6\,min & 71.1\,GB \\
+                                     & \thiswork & 102.9\,s & 6.5\,GB & 9.6\,s    & 8.1\,GB \\
 \hline
 \end{tabular}
 \end{table}
@@ -229,65 +251,42 @@ Graph & Tool & Time & RSS & Time & RSS \\
 \end{table}
 
 \paragraph{Scaling to whole human pangenomes.}
-On hprc-v1.1, \texttt{pav} over all $30{,}640$ whole-walk windows completes in
-$1.8$\,min at 16 threads ($19.3$\,min at 1 thread, $10.7\times$ scaling) with
-$77$\,GB peak RSS. Unlike \texttt{deconstruct} and \texttt{growth}, \texttt{pav}
-does \emph{not} keep its working set below the GFA: the PAV node-set index and
-per-window accumulators are not grammar-compressed, so memory grows with the
-number of windows and nodes. On the two largest graphs ($94{,}554$ and
-$60{,}807$ windows over $148$--$166$\,M nodes) this working set exceeds the
-$503$\,GB node---both runs were terminated near $470$\,GB before completing.
-This is the one analysis that does not yet meet the sub-GFA memory goal at
-whole-genome scale; compressing the PAV index is the most pressing optimization
-(its working set, not the traversal store, is the bottleneck).
-
-\subsection{A Second Pangenome Family: HGSVC3}\label{subsec:eval-hgsvc3}
-
-All graphs above are drawn from the HPRC. To test that the compute engine is not
-specialized to a single graph-construction pipeline, we add HGSVC3---a
-whole-genome Minigraph--Cactus pangenome from a different consortium
-(the Human Genome Structural Variation Consortium), spanning $65$ samples plus
-the CHM13 and GRCh38 references ($29{,}130$ walks, $107.1$\,M nodes). Its GFA is
-$80.1$\,GB; \gfaz compresses it to a $2.85$\,GB container ($28.1\times$), and the
-engine runs all three analyses directly on that container.
-Table~\ref{tab:eval-hgsvc3} reports the result against \texttt{vg deconstruct}
-and Panacus. The behavior matches the HPRC graphs closely. On \texttt{growth},
-\gfaz reproduces Panacus's curve exactly---identical node totals at every growth
-point (e.g.\ $k{=}100$: $59{,}118{,}657$; $k{=}1000$: $85{,}744{,}210$; full
-pangenome $107{,}125{,}789$)---while running $253\times$ faster ($9.6$\,s vs.\
-$40.6$\,min) with $8.8\times$ less memory. On \texttt{deconstruct}, \gfaz agrees
-with \texttt{vg} to within $0.17\%$ on record count ($25{,}323{,}695$ vs.\
-$25{,}368{,}045$) while running $15.2\times$ faster; the memory gap is the
-striking figure here---\texttt{vg} needs $397$\,GB, nearly the entire $503$\,GB
-node, whereas \gfaz uses $51.9$\,GB ($7.6\times$ less). Thread scaling is
-$10.7$--$14.6\times$ across the three analyses, and---as on the HPRC
-giants---\texttt{pav} is the lone analysis whose uncompressed working set
-($126$\,GB) exceeds the input GFA. The engine thus generalizes across pangenome
-families without modification.
+Table~\ref{tab:eval-pav-hprc} reports \texttt{pav} at whole-genome scale. Here
+\gfaz runs alone: \texttt{odgi} does not load W-line walks (all four graphs use
+W-lines), and \texttt{odgi pav} is already three orders of magnitude slower at
+chromosome scale. On hprc-v1.1, \texttt{pav} over all $30{,}640$ whole-walk
+windows completes in $1.8$\,min at 16 threads ($19.3$\,min at 1 thread,
+$10.7\times$ scaling) with $77$\,GB peak RSS; HGSVC3's $29{,}130$ windows take
+$3.6$\,min / $126$\,GB. Unlike \texttt{deconstruct} and \texttt{growth},
+\texttt{pav} does \emph{not} keep its working set below the GFA: the PAV node-set
+index and per-window accumulators are not grammar-compressed, so memory grows
+with the number of windows and nodes---on HGSVC3 the $126$\,GB working set
+already exceeds the $80$\,GB input. On the two largest HPRC graphs ($94{,}554$
+and $60{,}807$ windows over $148$--$166$\,M nodes) it exceeds the $503$\,GB
+node---both runs were terminated near $470$\,GB before completing. This is the
+one analysis that does not yet meet the sub-GFA memory goal at whole-genome
+scale; compressing the PAV index is the most pressing optimization (its working
+set, not the traversal store, is the bottleneck).
 
 \begin{table}[t]
 \centering
-\caption{\gfaz compute engine on HGSVC3, a non-HPRC whole-genome pangenome
-($80.1$\,GB GFA, $2.85$\,GB \texttt{.gfaz}), vs.\ \texttt{vg deconstruct} and
-Panacus. Wall-clock time and peak RSS at 1 and 16 threads; single-threaded
-baselines were not run ($>$2\,h each at 16 threads). \texttt{pav} is reported
-\gfaz-only (\texttt{odgi} does not load the W-line walks).}
-\label{tab:eval-hgsvc3}
+\caption{\texttt{pav} on whole-genome graphs (\gfaz only; \texttt{odgi} does not
+load W-line walks). ``Windows'' is the number of whole-walk reference ranges.
+Time and peak RSS; the two largest HPRC graphs exceed node memory.}
+\label{tab:eval-pav-hprc}
 \small
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{llrrrr}
+\begin{tabular}{lrrrrr}
 \hline
  & & \multicolumn{2}{c}{1 thread} & \multicolumn{2}{c}{16 threads} \\
 \cline{3-4}\cline{5-6}
-Analysis & Tool & Time & RSS & Time & RSS \\
+Graph (GFA) & Windows & Time & RSS & Time & RSS \\
 \hline
-\multirow{2}{*}{\texttt{deconstruct}} & \texttt{vg} & --- & --- & 132.9\,min & 396.9\,GB \\
-                      & \thiswork     & 127.6\,min & 51.7\,GB & 8.7\,min  & 51.9\,GB \\
+hprc-v1.1 (48\,GB)  & $30{,}640$ & 19.3\,min & 77\,GB    & 1.8\,min & 77\,GB \\
+HGSVC3 (80\,GB)     & $29{,}130$ & 42.4\,min & 126.2\,GB & 3.6\,min & 126.2\,GB \\
 \hline
-\multirow{2}{*}{\texttt{growth}}      & Panacus     & --- & --- & 40.6\,min & 71.1\,GB \\
-                      & \thiswork     & 102.9\,s   & 6.5\,GB  & 9.6\,s    & 8.1\,GB \\
-\hline
-\texttt{pav}          & \thiswork     & 42.4\,min & 126.2\,GB & 3.6\,min & 126.2\,GB \\
+hprc-v2.0 (358\,GB) & $94{,}554$ & \multicolumn{4}{c}{terminated near $470$\,GB (exceeds node)} \\
+hprc-v2.1 (369\,GB) & $60{,}807$ & \multicolumn{4}{c}{terminated near $470$\,GB (exceeds node)} \\
 \hline
 \end{tabular}
 \end{table}

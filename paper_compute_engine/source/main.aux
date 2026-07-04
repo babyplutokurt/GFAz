@@ -166,34 +166,33 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Deconstruct (GFA\,$\rightarrow $\,VCF)}{16}{subsection.6.1}\protected@file@percent }
 \newlabel{subsec:eval-deconstruct}{{6.1}{16}{Deconstruct (GFA\,$\rightarrow $\,VCF)}{subsection.6.1}{}}
 \@writefile{toc}{\contentsline {paragraph}{Scaling to whole human pangenomes.}{16}{section*.36}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Pangenome Growth}{16}{subsection.6.2}\protected@file@percent }
-\newlabel{subsec:eval-growth}{{6.2}{16}{Pangenome Growth}{subsection.6.2}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {13}{\ignorespaces The six compute-engine commands, all built on one streaming decode substrate. ``Resident state'' excludes the grammar-compressed traversal store common to every command; node counts dominate group and window counts at pangenome scale.}}{17}{table.caption.33}\protected@file@percent }
 \newlabel{tab:ce-commands}{{13}{17}{The six compute-engine commands, all built on one streaming decode substrate. ``Resident state'' excludes the grammar-compressed traversal store common to every command; node counts dominate group and window counts at pangenome scale}{table.caption.33}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {14}{\ignorespaces Evaluation graphs. GFAz\xspace  operates on the compressed container, which is $18$--$35\times $ smaller than the GFA the baselines must read.}}{17}{table.caption.34}\protected@file@percent }
 \newlabel{tab:eval-datasets}{{14}{17}{Evaluation graphs. \gfaz operates on the compressed container, which is $18$--$35\times $ smaller than the GFA the baselines must read}{table.caption.34}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {15}{\ignorespaces \texttt  {deconstruct} vs.\ \texttt  {vg deconstruct}: wall-clock time and peak RSS at 1 and 16 threads. GFAz\xspace  reads the $35\times $-smaller \texttt  {.gfaz}; \texttt  {vg} reads the GFA.}}{17}{table.caption.35}\protected@file@percent }
 \newlabel{tab:eval-deconstruct}{{15}{17}{\texttt {deconstruct} vs.\ \texttt {vg deconstruct}: wall-clock time and peak RSS at 1 and 16 threads. \gfaz reads the $35\times $-smaller \texttt {.gfaz}; \texttt {vg} reads the GFA}{table.caption.35}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {16}{\ignorespaces \texttt  {deconstruct} on whole-genome HPRC graphs (GFAz\xspace  only; \texttt  {vg} does not complete in practical memory). Time and peak RSS; ``GFA'' is the size of the uncompressed input GFAz\xspace  never materializes.}}{17}{table.caption.37}\protected@file@percent }
-\newlabel{tab:eval-deconstruct-hprc}{{16}{17}{\texttt {deconstruct} on whole-genome HPRC graphs (\gfaz only; \texttt {vg} does not complete in practical memory). Time and peak RSS; ``GFA'' is the size of the uncompressed input \gfaz never materializes}{table.caption.37}{}}
-\@writefile{toc}{\contentsline {paragraph}{Scaling to whole human pangenomes.}{17}{section*.39}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {16}{\ignorespaces \texttt  {deconstruct} on whole-genome graphs. GFAz\xspace  runs on all four; for HGSVC3 we also report \texttt  {vg deconstruct}, which completes on the $80$\,GB input (using $397$\,GB of RAM) but does not complete within memory on the larger HPRC graphs. Time and peak RSS; ``GFA'' is the size of the uncompressed input GFAz\xspace  never materializes.}}{17}{table.caption.37}\protected@file@percent }
+\newlabel{tab:eval-deconstruct-hprc}{{16}{17}{\texttt {deconstruct} on whole-genome graphs. \gfaz runs on all four; for HGSVC3 we also report \texttt {vg deconstruct}, which completes on the $80$\,GB input (using $397$\,GB of RAM) but does not complete within memory on the larger HPRC graphs. Time and peak RSS; ``GFA'' is the size of the uncompressed input \gfaz never materializes}{table.caption.37}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {17}{\ignorespaces \texttt  {growth} vs.\ Panacus: wall-clock time and peak RSS at 1 and 16 threads. Both tools report identical growth curves.}}{17}{table.caption.38}\protected@file@percent }
 \newlabel{tab:eval-growth}{{17}{17}{\texttt {growth} vs.\ Panacus: wall-clock time and peak RSS at 1 and 16 threads. Both tools report identical growth curves}{table.caption.38}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {18}{\ignorespaces \texttt  {growth} on whole-genome HPRC graphs. Panacus completes on all three but is $230$--$369\times $ slower and uses $7$--$25\times $ more memory; single-threaded Panacus was not run. Time and peak RSS.}}{17}{table.caption.40}\protected@file@percent }
-\newlabel{tab:eval-growth-hprc}{{18}{17}{\texttt {growth} on whole-genome HPRC graphs. Panacus completes on all three but is $230$--$369\times $ slower and uses $7$--$25\times $ more memory; single-threaded Panacus was not run. Time and peak RSS}{table.caption.40}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Pangenome Growth}{17}{subsection.6.2}\protected@file@percent }
+\newlabel{subsec:eval-growth}{{6.2}{17}{Pangenome Growth}{subsection.6.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{Scaling to whole human pangenomes.}{17}{section*.39}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Presence/Absence Variation}{17}{subsection.6.3}\protected@file@percent }
 \newlabel{subsec:eval-pav}{{6.3}{17}{Presence/Absence Variation}{subsection.6.3}{}}
+\bibstyle{ACM-Reference-Format}
+\bibdata{ref}
+\@writefile{lot}{\contentsline {table}{\numberline {18}{\ignorespaces \texttt  {growth} on whole-genome graphs (three HPRC releases and HGSVC3). Panacus completes on all but is $230$--$369\times $ slower and uses $7$--$25\times $ more memory; single-threaded Panacus was not run. Time and peak RSS.}}{18}{table.caption.40}\protected@file@percent }
+\newlabel{tab:eval-growth-hprc}{{18}{18}{\texttt {growth} on whole-genome graphs (three HPRC releases and HGSVC3). Panacus completes on all but is $230$--$369\times $ slower and uses $7$--$25\times $ more memory; single-threaded Panacus was not run. Time and peak RSS}{table.caption.40}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {19}{\ignorespaces \texttt  {pav} vs.\ \texttt  {odgi pav}: wall-clock time and peak RSS. \texttt  {odgi} additionally requires an \texttt  {odgi build} step (chr1 $61$\,s, chr6 $31$\,s at 16 threads); single-threaded \texttt  {odgi pav} did not complete ($>$1 day).}}{18}{table.caption.41}\protected@file@percent }
 \newlabel{tab:eval-pav}{{19}{18}{\texttt {pav} vs.\ \texttt {odgi pav}: wall-clock time and peak RSS. \texttt {odgi} additionally requires an \texttt {odgi build} step (chr1 $61$\,s, chr6 $31$\,s at 16 threads); single-threaded \texttt {odgi pav} did not complete ($>$1 day)}{table.caption.41}{}}
 \@writefile{toc}{\contentsline {paragraph}{Scaling to whole human pangenomes.}{18}{section*.42}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}A Second Pangenome Family: HGSVC3}{18}{subsection.6.4}\protected@file@percent }
-\newlabel{subsec:eval-hgsvc3}{{6.4}{18}{A Second Pangenome Family: HGSVC3}{subsection.6.4}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {20}{\ignorespaces GFAz\xspace  compute engine on HGSVC3, a non-HPRC whole-genome pangenome ($80.1$\,GB GFA, $2.85$\,GB \texttt  {.gfaz}), vs.\ \texttt  {vg deconstruct} and Panacus. Wall-clock time and peak RSS at 1 and 16 threads; single-threaded baselines were not run ($>$2\,h each at 16 threads). \texttt  {pav} is reported GFAz\xspace  -only (\texttt  {odgi} does not load the W-line walks).}}{18}{table.caption.43}\protected@file@percent }
-\newlabel{tab:eval-hgsvc3}{{20}{18}{\gfaz compute engine on HGSVC3, a non-HPRC whole-genome pangenome ($80.1$\,GB GFA, $2.85$\,GB \texttt {.gfaz}), vs.\ \texttt {vg deconstruct} and Panacus. Wall-clock time and peak RSS at 1 and 16 threads; single-threaded baselines were not run ($>$2\,h each at 16 threads). \texttt {pav} is reported \gfaz -only (\texttt {odgi} does not load the W-line walks)}{table.caption.43}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {20}{\ignorespaces \texttt  {pav} on whole-genome graphs (GFAz\xspace  only; \texttt  {odgi} does not load W-line walks). ``Windows'' is the number of whole-walk reference ranges. Time and peak RSS; the two largest HPRC graphs exceed node memory.}}{18}{table.caption.43}\protected@file@percent }
+\newlabel{tab:eval-pav-hprc}{{20}{18}{\texttt {pav} on whole-genome graphs (\gfaz only; \texttt {odgi} does not load W-line walks). ``Windows'' is the number of whole-walk reference ranges. Time and peak RSS; the two largest HPRC graphs exceed node memory}{table.caption.43}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {7}Conclusion and Future Work}{18}{section.7}\protected@file@percent }
 \newlabel{sec:conclusion}{{7}{18}{Conclusion and Future Work}{section.7}{}}
-\bibstyle{ACM-Reference-Format}
-\bibdata{ref}
+\@writefile{toc}{\contentsline {section}{Acknowledgments}{18}{section*.46}\protected@file@percent }
 \bibcite{bonfield2022cram}{{1}{2022}{{Bonfield}}{{}}}
 \bibcite{collet2021rfc}{{2}{2021}{{Collet}}{{}}}
 \bibcite{eizenga2020pangenome}{{3}{2020}{{Eizenga et~al\mbox  {.}}}{{}}}
@@ -228,7 +227,6 @@
 \newlabel{tocindent3}{18.198pt}
 \newlabel{tocindent4}{0pt}
 \newlabel{tocindent5}{0pt}
-\@writefile{toc}{\contentsline {section}{Acknowledgments}{19}{section*.46}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{References}{19}{section*.48}\protected@file@percent }
 \newlabel{TotPages}{{19}{19}{}{page.19}{}}
 \gdef \@abspage@last{19}
