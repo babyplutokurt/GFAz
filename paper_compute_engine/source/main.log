@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  4 JUL 2026 17:12
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  4 JUL 2026 17:25
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1616,51 +1616,22 @@ Package hyperref Warning: Token not allowed in a PDF string (Unicode):
 (hyperref)                \kern 1.50032pt
 (hyperref)                removed on input line 48.
 
-
-Overfull \hbox (8.02213pt too wide) in paragraph at lines 88--102
- []\T1/LinuxLibertineT-TLF/m/it/9 (-20) Scaling to whole hu-man pangenomes.[] \
-T1/LinuxLibertineT-TLF/m/n/9 (-20) Ta-ble []16[] re-ports \T1/zi4/m/n/9 deconst
-ruct
- []
-
-
-Overfull \hbox (11.11824pt too wide) in paragraph at lines 88--102
-\T1/LinuxLibertineT-TLF/m/n/9 (-20) on four whole-genome graphs---the three HPR
-C re-leases and HGSVC3---
- []
-
-[16.16]
-Overfull \hbox (32.86446pt too wide) in paragraph at lines 113--127
- [][] 
- []
-
-[17.17]
-LaTeX Font Info:    Font shape `T1/zi4/m/n' will be
-(Font)              scaled to size 7.0pt on input line 249.
-
-Overfull \hbox (4.9525pt too wide) in paragraph at lines 279--292
- [][] 
- []
-
-) (./5_conclusion.tex) Processing 'acks' comment.
+[16.16] [17.17]) (./5_conclusion.tex) Processing 'acks' comment.
 \openout3 = `comment.cut'.
 
 
 Comment 'acks' writing to comment.cut. Straight input of comment.cut.
-(./comment.cut) (./main.bbl [18.18]
+(./comment.cut) (./main.bbl
 Underfull \hbox (badness 10000) in paragraph at lines 51--56
 []\T1/LinuxLibertineT-TLF/m/n/7 (+20) Yann Col-let. 2021.  RFC 8878: Zs-tan-dar
 d Com-pres-sion and
  []
 
-
+[18.18]
 Underfull \hbox (badness 2753) in paragraph at lines 169--178
 []\T1/LinuxLibertineT-TLF/m/n/7 (+20) Human Pangenome Ref-er-ence Con-sor-tium.
  2025.  Hu-man Pangenome
  []
-
-
-Underfull \vbox (badness 1558) has occurred while \output is active []
 
 )
 
@@ -1679,8 +1650,8 @@ rtant steps when creating your papers will ensure that the widest possible audi
 ence can ingest your work..
 
 
-Package balance Warning: You have called \balance in second column
-(balance)                Columns might not be balanced.
+Overfull \vbox (1.16599pt too high) has occurred while \output is active []
+
 
 (/usr/share/texlive/texmf-dist/tex/generic/stringenc/se-pdfdoc.def
 File: se-pdfdoc.def 2019/11/29 v1.12 stringenc: PDFDocEncoding
@@ -1694,14 +1665,14 @@ LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
  ***********
 Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: 146E4FC1E3EAF2E6BE512D228EC795A6;7119.
+(rerunfilecheck)             Checksum: C0A154E3F1BA9ADE7D57997BEF0D7841;7119.
  ) 
 Here is how much of TeX's memory you used:
- 35017 strings out of 474222
- 631711 string characters out of 5748733
+ 34991 strings out of 474222
+ 631203 string characters out of 5748733
  1980975 words of memory out of 5000000
- 55368 multiletter control sequences out of 15000+600000
- 845100 words of font info for 677 fonts, out of 8000000 for 9000
+ 55363 multiletter control sequences out of 15000+600000
+ 843104 words of font info for 666 fonts, out of 8000000 for 9000
  1302 hyphenation exceptions out of 8191
  90i,15n,131p,1025b,945s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/inconsolata/Inconsolata-zi4
@@ -1717,14 +1688,13 @@ r/share/texlive/texmf-dist/fonts/type1/public/libertine/LinLibertineT.pfb></usr
 /share/texlive/texmf-dist/fonts/type1/public/libertine/LinLibertineTB.pfb></usr
 /share/texlive/texmf-dist/fonts/type1/public/libertine/LinLibertineTI.pfb></usr
 /share/texlive/texmf-dist/fonts/type1/public/newtx/NewTXMI.pfb></usr/share/texl
-ive/texmf-dist/fonts/type1/public/newtx/NewTXMI7.pfb></usr/share/texlive/texmf-
-dist/fonts/type1/public/newtx/txexs.pfb></usr/share/texlive/texmf-dist/fonts/ty
-pe1/public/newtx/txmiaX.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/n
-ewtx/txsys.pfb>
-Output written on main.pdf (19 pages, 1716558 bytes).
+ive/texmf-dist/fonts/type1/public/newtx/txexs.pfb></usr/share/texlive/texmf-dis
+t/fonts/type1/public/newtx/txmiaX.pfb></usr/share/texlive/texmf-dist/fonts/type
+1/public/newtx/txsys.pfb>
+Output written on main.pdf (19 pages, 1712243 bytes).
 PDF statistics:
- 835 PDF objects out of 1000 (max. 8388607)
- 663 compressed objects within 7 object streams
- 263 named destinations out of 1000 (max. 500000)
- 148835 words of extra memory for PDF output out of 154059 (max. 10000000)
+ 822 PDF objects out of 1000 (max. 8388607)
+ 652 compressed objects within 7 object streams
+ 257 named destinations out of 1000 (max. 500000)
+ 148323 words of extra memory for PDF output out of 154059 (max. 10000000)
 
