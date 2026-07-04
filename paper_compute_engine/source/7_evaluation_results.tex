@@ -241,6 +241,44 @@ This is the one analysis that does not yet meet the sub-GFA memory goal at
 whole-genome scale; compressing the PAV index is the most pressing optimization
 (its working set, not the traversal store, is the bottleneck).
 
+\subsection{A Second Pangenome Family: HGSVC3}\label{subsec:eval-hgsvc3}
+
+All graphs above are drawn from the HPRC. To test that the compute engine is not
+specialized to a single graph-construction pipeline, we add HGSVC3---a
+whole-genome Minigraph--Cactus pangenome from a different consortium
+(the Human Genome Structural Variation Consortium), spanning $65$ samples plus
+the CHM13 and GRCh38 references ($29{,}130$ walks, $107.1$\,M nodes). Its GFA is
+$80.1$\,GB; \gfaz compresses it to a $2.85$\,GB container ($28.1\times$), and the
+engine runs all three analyses directly on that container.
+Table~\ref{tab:eval-hgsvc3} reports the result. The behavior matches the HPRC
+graphs closely: \texttt{growth} and \texttt{deconstruct} finish in seconds to
+minutes at 16 threads with peak RSS well below the $80$\,GB GFA
+($8.1$\,GB and $51.9$\,GB respectively), thread scaling is $10.7$--$14.6\times$
+across the three analyses, and---as on the HPRC giants---\texttt{pav} is the lone
+analysis whose uncompressed working set ($126$\,GB) exceeds the input GFA. The
+engine thus generalizes across pangenome families without modification.
+
+\begin{table}[t]
+\centering
+\caption{\gfaz compute engine on HGSVC3 (a non-HPRC whole-genome pangenome;
+$80.1$\,GB GFA, $2.85$\,GB \texttt{.gfaz}). Wall-clock time and peak RSS at 1 and
+16 threads.}
+\label{tab:eval-hgsvc3}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llrrrr}
+\hline
+ & & \multicolumn{2}{c}{1 thread} & \multicolumn{2}{c}{16 threads} \\
+\cline{3-4}\cline{5-6}
+Analysis & Output & Time & RSS & Time & RSS \\
+\hline
+\texttt{deconstruct} & 25.3\,M rec.\   & 127.6\,min & 51.7\,GB & 8.7\,min  & 51.9\,GB \\
+\texttt{growth}      & 107.1\,M nodes  & 102.9\,s   & 6.5\,GB  & 9.6\,s    & 8.1\,GB \\
+\texttt{pav}         & $29{,}130\times70$ & 42.4\,min & 126.2\,GB & 3.6\,min & 126.2\,GB \\
+\hline
+\end{tabular}
+\end{table}
+
 \subsection*{Summary}
 
 Across all three analyses, computing directly on the compressed container makes
