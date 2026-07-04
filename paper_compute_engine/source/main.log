@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  3 JUL 2026 23:11
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.5.26)  3 JUL 2026 23:56
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1509,19 +1509,16 @@ Underfull \vbox (badness 10000) has occurred while \output is active []
 Underfull \vbox (badness 10000) has occurred while \output is active []
 
  [9.9 <./fig_eval_norm_combined.pdf> <./fig_pareto_combined.pdf>]
-Underfull \hbox (badness 10000) in paragraph at lines 205--205
-[]\T1/LinuxLibertineT-TLF/b/n/9 (+20) Table 8: |In-cre-men-tal hap-lo-type ex-t
+Underfull \hbox (badness 10000) in paragraph at lines 221--221
+[]\T1/LinuxLibertineT-TLF/b/n/9 (+20) Table 9: |In-cre-men-tal hap-lo-type ex-t
 en-sion us-ing
  []
 
-(./cpu_breakdown.tex
+[10.10] (./cpu_breakdown.tex
 LaTeX Font Info:    Font shape `T1/LinuxLibertineT-TLF/m/it' will be
 (Font)              scaled to size 6.0pt on input line 6.
-) (./gpu_breakdown.tex)
-Underfull \vbox (badness 1874) has occurred while \output is active []
-
- [10.10])
-(./6_compute_engine.tex [11.11] [12.12]
+) (./gpu_breakdown.tex)) (./6_compute_engine.tex
+[11.11] [12.12]
 Overfull \hbox (18.04485pt too wide) in paragraph at lines 201--210
 []\LMS/ntxsy/m/n/9 ∫$ \T1/LinuxLibertineT-TLF/m/n/9 (-20) for \T1/zi4/m/n/9 pav
  \T1/LinuxLibertineT-TLF/m/n/9 (-20) and an upper-triangular $\OML/nxlmi/m/it/9
@@ -1529,12 +1526,14 @@ Overfull \hbox (18.04485pt too wide) in paragraph at lines 201--210
 9 similarity\T1/LinuxLibertineT-TLF/m/n/9 (-20) . 
  []
 
+[13.13]
 LaTeX Font Info:    Font shape `T1/zi4/b/n' will be
 (Font)              scaled to size 10.95pt on input line 260.
 LaTeX Font Info:    Font shape `OT1/LinuxLibertineT-TLF/m/n' will be
 (Font)              scaled to size 10.95pt on input line 260.
 LaTeX Font Info:    Font shape `OT1/LinuxLibertineT-TLF/m/n' will be
 (Font)              scaled to size 6.1pt on input line 260.
+
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
 (hyperref)                removing `math shift' on input line 260.
@@ -1547,15 +1546,10 @@ Package hyperref Warning: Token not allowed in a PDF string (Unicode):
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
 (hyperref)                removing `math shift' on input line 260.
 
-
-Underfull \vbox (badness 10000) has occurred while \output is active []
-
- [13.13]
 LaTeX Font Info:    Font shape `T1/zi4/m/n' will be
 (Font)              scaled to size 6.0pt on input line 296.
 LaTeX Font Info:    Font shape `T1/LinuxLibertineT-TLF/m/n' will be
 (Font)              scaled to size 5.0pt on input line 313.
-
 
 Class acmart Warning: \vspace should only be used to provide space above/below 
 surrounding objects on input line 316.
@@ -1578,10 +1572,7 @@ surrounding objects on input line 332.
 Class acmart Warning: \vspace should only be used to provide space above/below 
 surrounding objects on input line 332.
 
-[14.14]
-Underfull \vbox (badness 10000) has occurred while \output is active []
-
- [15.15]
+[14.14] [15.15]
 Overfull \hbox (9.96666pt too wide) in paragraph at lines 527--533
 \T1/LinuxLibertineT-TLF/m/n/9 (-20) where the ra-tio $[]\LMS/ntxsy/m/n/9 ù[]$ \
 T1/LinuxLibertineT-TLF/m/n/9 (-20) is eval-u-ated as the sta-ble prod-uct $[][]
@@ -1590,7 +1581,11 @@ T1/LinuxLibertineT-TLF/m/n/9 (-20) is eval-u-ated as the sta-ble prod-uct $[][]
 
 LaTeX Font Info:    Font shape `T1/LinuxLibertineT-TLF/m/n' will be
 (Font)              scaled to size 6.2pt on input line 568.
-) (./7_evaluation_results.tex
+)
+Underfull \vbox (badness 10000) has occurred while \output is active []
+
+
+(./7_evaluation_results.tex
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
 (hyperref)                removing `\leavevmode@ifvmode' on input line 40.
@@ -1624,33 +1619,40 @@ Package hyperref Warning: Token not allowed in a PDF string (Unicode):
 
 Overfull \hbox (8.02213pt too wide) in paragraph at lines 80--91
  []\T1/LinuxLibertineT-TLF/m/it/9 (-20) Scaling to whole hu-man pangenomes.[] \
-T1/LinuxLibertineT-TLF/m/n/9 (-20) Ta-ble []15[] re-ports \T1/zi4/m/n/9 deconst
+T1/LinuxLibertineT-TLF/m/n/9 (-20) Ta-ble []16[] re-ports \T1/zi4/m/n/9 deconst
 ruct
  []
 
-
-Underfull \vbox (badness 6001) has occurred while \output is active []
-
- [16.16]
+[16.16] [17.17]
 LaTeX Font Info:    Font shape `T1/zi4/m/n' will be
 (Font)              scaled to size 7.0pt on input line 227.
+)
+Underfull \vbox (badness 2856) has occurred while \output is active []
 
-[17.17]) (./5_conclusion.tex) Processing 'acks' comment.
+
+(./5_conclusion.tex) Processing 'acks' comment.
 \openout3 = `comment.cut'.
 
 
 Comment 'acks' writing to comment.cut. Straight input of comment.cut.
-(./comment.cut) (./main.bbl
+(./comment.cut)
+Underfull \vbox (badness 6032) has occurred while \output is active []
+
+ [18.18]
+(./main.bbl
 Underfull \hbox (badness 10000) in paragraph at lines 51--56
 []\T1/LinuxLibertineT-TLF/m/n/7 (+20) Yann Col-let. 2021.  RFC 8878: Zs-tan-dar
 d Com-pres-sion and
  []
 
-[18.18]
+
 Underfull \hbox (badness 2753) in paragraph at lines 169--178
 []\T1/LinuxLibertineT-TLF/m/n/7 (+20) Human Pangenome Ref-er-ence Con-sor-tium.
  2025.  Hu-man Pangenome
  []
+
+
+Underfull \vbox (badness 3049) has occurred while \output is active []
 
 )
 
@@ -1669,8 +1671,8 @@ rtant steps when creating your papers will ensure that the widest possible audi
 ence can ingest your work..
 
 
-Overfull \vbox (1.16599pt too high) has occurred while \output is active []
-
+Package balance Warning: You have called \balance in second column
+(balance)                Columns might not be balanced.
 
 (/usr/share/texlive/texmf-dist/tex/generic/stringenc/se-pdfdoc.def
 File: se-pdfdoc.def 2019/11/29 v1.12 stringenc: PDFDocEncoding
@@ -1684,14 +1686,14 @@ LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
  ***********
 Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: 206C559224B69793A7DE373C562121FE;7377.
+(rerunfilecheck)             Checksum: 433F0332980C81053706EA0392A7CD5A;7377.
  ) 
 Here is how much of TeX's memory you used:
- 35021 strings out of 474222
- 631801 string characters out of 5748733
+ 35029 strings out of 474222
+ 631984 string characters out of 5748733
  1980975 words of memory out of 5000000
- 55369 multiletter control sequences out of 15000+600000
- 845561 words of font info for 679 fonts, out of 8000000 for 9000
+ 55370 multiletter control sequences out of 15000+600000
+ 846099 words of font info for 683 fonts, out of 8000000 for 9000
  1302 hyphenation exceptions out of 8191
  90i,15n,131p,1025b,945s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/inconsolata/Inconsolata-zi4
@@ -1711,10 +1713,10 @@ ive/texmf-dist/fonts/type1/public/newtx/NewTXMI7.pfb></usr/share/texlive/texmf-
 dist/fonts/type1/public/newtx/txexs.pfb></usr/share/texlive/texmf-dist/fonts/ty
 pe1/public/newtx/txmiaX.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/n
 ewtx/txsys.pfb>
-Output written on main.pdf (19 pages, 1714994 bytes).
+Output written on main.pdf (19 pages, 1716013 bytes).
 PDF statistics:
- 837 PDF objects out of 1000 (max. 8388607)
- 665 compressed objects within 7 object streams
- 263 named destinations out of 1000 (max. 500000)
+ 839 PDF objects out of 1000 (max. 8388607)
+ 667 compressed objects within 7 object streams
+ 264 named destinations out of 1000 (max. 500000)
  148843 words of extra memory for PDF output out of 154059 (max. 10000000)
 

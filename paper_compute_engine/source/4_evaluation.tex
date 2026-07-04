@@ -153,6 +153,22 @@ Table~\ref{tab:ratio-throughput} reveals three consistent patterns.
 \gfaz gives the best ratio on all datasets with available results, for both backends. On chr1, \gfaz(CPU) reaches 35.4$\times$ versus zstd 7.54$\times$ and GBZ 9.52$\times$; on chr6, 35.4$\times$ versus 6.99$\times$ and 19.2$\times$.
 On larger HPRC graphs, the gap widens: on v2.0, \gfaz(CPU) reaches 83.9$\times$ versus zstd 6.49$\times$ and GBZ 66.8$\times$; on v2.1, 82.8$\times$ versus 6.43$\times$ and 64.2$\times$.
 The GPU ratio is consistently but modestly below CPU (e.g., 31.7$\times$ vs 35.4$\times$ on chr1, 20.4$\times$ vs 22.4$\times$ on v1.1), consistent with checkerboard encoding (Section~\ref{subsec:gpu}) replacing fewer overlapping opportunities than serial greedy encoding in each round.
+The ratio advantage is not specific to the HPRC pipeline. Table~\ref{tab:ratio-other} adds two graphs from other sources: HGSVC3, an $80.1$\,GB whole-genome Minigraph--Cactus pangenome from a different consortium, and a chromosome from the 1000-genome-scale 1KCP collection whose variation is carried entirely in graph topology (a reference-only GFA with no embedded haplotype paths). On both, \gfaz(CPU) again gives by far the best ratio---$28.1\times$ on HGSVC3 and $18.4\times$ on 1KCP-chr1, versus $4.0$--$4.5\times$ for gzip and $6.9$--$7.1\times$ for zstd.
+
+\begin{table}[t]
+\centering
+\caption{Compression ratio on two graphs from outside the HPRC (single-run, ratio only). \gfaz retains its ratio advantage on a different-consortium pangenome (HGSVC3) and on a topology-only graph (1KCP-chr1).}
+\label{tab:ratio-other}
+\small
+\begin{tabular}{lrrrr}
+\hline
+Dataset & GFA & Gzip & Zstd & \gfaz(CPU) \\
+\hline
+HGSVC3      & 80.1\,GB & 4.0$\times$ & 7.1$\times$ & \textbf{28.1$\times$} \\
+1KCP-chr1   & 1.66\,GB & 4.5$\times$ & 6.9$\times$ & \textbf{18.4$\times$} \\
+\hline
+\end{tabular}
+\end{table}
 
 \noindent \textbf{Insight 2 (Throughput remains strong across CPU/GPU).}
 When inputs fit GPU memory, \gfaz(GPU) is the fastest high-ratio operating point: on HPRC v1.1, it reaches 4843/9435 MB/s compression/decompression, versus \gfaz(CPU) at 231/1058 MB/s and zstd at 1657/1234 MB/s.

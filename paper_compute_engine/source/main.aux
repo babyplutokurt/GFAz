@@ -92,66 +92,68 @@
 \newlabel{fig:pareto}{{5}{9}{Pareto trade-off between compression ratio (y-axis) and speed (x-axis), normalized to Zstd (baseline at $1.0$). The dashed diagonal line ($y=1/x$) represents an iso-efficiency curve where a $2\times $ increase in ratio compensates for a $2\times $ drop in speed. Points above this line and to the right represent better trade-offs than the baseline}{figure.caption.14}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Ablation of \texttt  {Compact} and \texttt  {Sort} on rulebook effectiveness. Each cell shows \(H\) / \(L\), where \(H=r\gg 32\) and \(L=r\,\&\,\texttt  {0xffffffff}\); each entry is the ZSTD-compressed size followed by the compression ratio in parentheses.}}{10}{table.caption.15}\protected@file@percent }
 \newlabel{tab:compact-sort-ablation}{{6}{10}{Ablation of \texttt {Compact} and \texttt {Sort} on rulebook effectiveness. Each cell shows \(H\) / \(L\), where \(H=r\gg 32\) and \(L=r\,\&\,\texttt {0xffffffff}\); each entry is the ZSTD-compressed size followed by the compression ratio in parentheses}{table.caption.15}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Random-access evaluation using \texttt  {extract-traversal}. We measure the time and peak memory required to reconstruct only 1, 4, or 16 selected paths/walks from an existing \texttt  {.gfaz} file.}}{10}{table.caption.16}\protected@file@percent }
-\newlabel{tab:random-access}{{7}{10}{Random-access evaluation using \texttt {extract-traversal}. We measure the time and peak memory required to reconstruct only 1, 4, or 16 selected paths/walks from an existing \texttt {.gfaz} file}{table.caption.16}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Incremental haplotype extension using \texttt  {add-haplotypes}. Each run appends 50 new paths/walks using the rulebook already stored in the input \texttt  {.gfaz} file.}}{10}{table.caption.17}\protected@file@percent }
-\newlabel{tab:incremental-extension}{{8}{10}{Incremental haplotype extension using \texttt {add-haplotypes}. Each run appends 50 new paths/walks using the rulebook already stored in the input \texttt {.gfaz} file}{table.caption.17}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Compression ratio on two graphs from outside the HPRC (single-run, ratio only). GFAz\xspace  retains its ratio advantage on a different-consortium pangenome (HGSVC3) and on a topology-only graph (1KCP-chr1).}}{10}{table.caption.16}\protected@file@percent }
+\newlabel{tab:ratio-other}{{7}{10}{Compression ratio on two graphs from outside the HPRC (single-run, ratio only). \gfaz retains its ratio advantage on a different-consortium pangenome (HGSVC3) and on a topology-only graph (1KCP-chr1)}{table.caption.16}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Random-access evaluation using \texttt  {extract-traversal}. We measure the time and peak memory required to reconstruct only 1, 4, or 16 selected paths/walks from an existing \texttt  {.gfaz} file.}}{10}{table.caption.17}\protected@file@percent }
+\newlabel{tab:random-access}{{8}{10}{Random-access evaluation using \texttt {extract-traversal}. We measure the time and peak memory required to reconstruct only 1, 4, or 16 selected paths/walks from an existing \texttt {.gfaz} file}{table.caption.17}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces Incremental haplotype extension using \texttt  {add-haplotypes}. Each run appends 50 new paths/walks using the rulebook already stored in the input \texttt  {.gfaz} file.}}{10}{table.caption.18}\protected@file@percent }
+\newlabel{tab:incremental-extension}{{9}{10}{Incremental haplotype extension using \texttt {add-haplotypes}. Each run appends 50 new paths/walks using the rulebook already stored in the input \texttt {.gfaz} file}{table.caption.18}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Random Access and Incremental Extension}{10}{subsection.4.4}\protected@file@percent }
 \newlabel{subsec:random-access-eval}{{4.4}{10}{Random Access and Incremental Extension}{subsection.4.4}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Ablation: Compact and Sort}{10}{subsection.4.5}\protected@file@percent }
 \newlabel{subsec:ablation-compact-sort}{{4.5}{10}{Ablation: Compact and Sort}{subsection.4.5}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.6}Performance Breakdown}{10}{subsection.4.6}\protected@file@percent }
-\newlabel{subsec:breakdown}{{4.6}{10}{Performance Breakdown}{subsection.4.6}{}}
 \citation{garrison2018variation}
 \citation{guarracino2022odgi}
-\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces CPU stage-level profiling for compression and decompression. Share is computed as \texttt  {time / stage total}.}}{11}{table.caption.18}\protected@file@percent }
-\newlabel{tab:cpu-breakdown}{{9}{11}{CPU stage-level profiling for compression and decompression. Share is computed as \texttt {time / stage total}}{table.caption.18}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {10}{\ignorespaces GPU stage-level profiling for compression and decompression. Share is computed as \texttt  {time / stage total}.}}{11}{table.caption.19}\protected@file@percent }
-\newlabel{tab:gpu-breakdown}{{10}{11}{GPU stage-level profiling for compression and decompression. Share is computed as \texttt {time / stage total}}{table.caption.19}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {11}{\ignorespaces CPU peak resident memory using 16 threads for compression, a legacy decompression baseline that fully materializes the in-memory \texttt  {GfaGraph}, and the implemented streaming decompression path.}}{11}{table.caption.20}\protected@file@percent }
-\newlabel{tab:cpu-memory}{{11}{11}{CPU peak resident memory using 16 threads for compression, a legacy decompression baseline that fully materializes the in-memory \texttt {GfaGraph}, and the implemented streaming decompression path}{table.caption.20}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {10}{\ignorespaces CPU stage-level profiling for compression and decompression. Share is computed as \texttt  {time / stage total}.}}{11}{table.caption.19}\protected@file@percent }
+\newlabel{tab:cpu-breakdown}{{10}{11}{CPU stage-level profiling for compression and decompression. Share is computed as \texttt {time / stage total}}{table.caption.19}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {11}{\ignorespaces GPU stage-level profiling for compression and decompression. Share is computed as \texttt  {time / stage total}.}}{11}{table.caption.20}\protected@file@percent }
+\newlabel{tab:gpu-breakdown}{{11}{11}{GPU stage-level profiling for compression and decompression. Share is computed as \texttt {time / stage total}}{table.caption.20}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.6}Performance Breakdown}{11}{subsection.4.6}\protected@file@percent }
+\newlabel{subsec:breakdown}{{4.6}{11}{Performance Breakdown}{subsection.4.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {12}{\ignorespaces CPU peak resident memory using 16 threads for compression, a legacy decompression baseline that fully materializes the in-memory \texttt  {GfaGraph}, and the implemented streaming decompression path.}}{11}{table.caption.21}\protected@file@percent }
+\newlabel{tab:cpu-memory}{{12}{11}{CPU peak resident memory using 16 threads for compression, a legacy decompression baseline that fully materializes the in-memory \texttt {GfaGraph}, and the implemented streaming decompression path}{table.caption.21}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.7}CPU Memory Profiling}{11}{subsection.4.7}\protected@file@percent }
 \newlabel{subsec:cpu-memory}{{4.7}{11}{CPU Memory Profiling}{subsection.4.7}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {5}GFAz\xspace  as a Compute Engine}{11}{section.5}\protected@file@percent }
 \newlabel{sec:compute}{{5}{11}{\gfaz as a Compute Engine}{section.5}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Overview and Design Contributions}{11}{subsection.5.1}\protected@file@percent }
-\newlabel{subsec:ce-overview}{{5.1}{11}{Overview and Design Contributions}{subsection.5.1}{}}
 \citation{parmigiani2024panacus}
 \citation{guarracino2022odgi}
 \citation{garrison2018variation,hickey2020genotyping}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Overview and Design Contributions}{12}{subsection.5.1}\protected@file@percent }
+\newlabel{subsec:ce-overview}{{5.1}{12}{Overview and Design Contributions}{subsection.5.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Why Analyze on the Compressed Container}{12}{subsection.5.2}\protected@file@percent }
 \newlabel{subsec:ce-downstream}{{5.2}{12}{Why Analyze on the Compressed Container}{subsection.5.2}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.3}The Compute Substrate}{12}{subsection.5.3}\protected@file@percent }
 \newlabel{subsec:ce-model}{{5.3}{12}{The Compute Substrate}{subsection.5.3}{}}
-\@writefile{toc}{\contentsline {paragraph}{Orientation.}{12}{section*.21}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Compressed traversal store.}{12}{section*.22}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Streaming primitive.}{12}{section*.23}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{A shared extension surface.}{12}{section*.24}\protected@file@percent }
-\citation{garrison2018variation}
-\citation{paten2018superbubbles}
+\@writefile{toc}{\contentsline {paragraph}{Orientation.}{12}{section*.22}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Compressed traversal store.}{12}{section*.23}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Streaming primitive.}{12}{section*.24}\protected@file@percent }
 \@writefile{loa}{\contentsline {algorithm}{\numberline {4}{\ignorespaces Streaming traversal expansion for \texttt  {delta\_round} 0 or 1}}{13}{algorithm.4}\protected@file@percent }
 \newlabel{alg:ce-stream}{{4}{13}{Streaming traversal expansion for \texttt {delta\_round} 0 or 1}{algorithm.4}{}}
+\@writefile{toc}{\contentsline {paragraph}{A shared extension surface.}{13}{section*.25}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Memory Model and the Rule-Leaf Cache}{13}{subsection.5.4}\protected@file@percent }
 \newlabel{subsec:ce-memory}{{5.4}{13}{Memory Model and the Rule-Leaf Cache}{subsection.5.4}{}}
-\newlabel{subsec:ce-cache}{{5.4}{13}{Rule-leaf cache}{section*.25}{}}
-\@writefile{toc}{\contentsline {paragraph}{Rule-leaf cache.}{13}{section*.25}\protected@file@percent }
+\newlabel{subsec:ce-cache}{{5.4}{13}{Rule-leaf cache}{section*.26}{}}
+\@writefile{toc}{\contentsline {paragraph}{Rule-leaf cache.}{13}{section*.26}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Parallel Execution}{13}{subsection.5.5}\protected@file@percent }
 \newlabel{subsec:ce-parallel}{{5.5}{13}{Parallel Execution}{subsection.5.5}{}}
+\citation{garrison2018variation}
 \citation{paten2018superbubbles}
-\@writefile{loe}{\contentsline {workedexample}{\numberline {1}{\ignorespaces \texttt  {deconstruct} on two chained sites. Phase\nonbreakingspace 1 recovers the snarls $[A,D]$ and $[D,G]$ from topology alone, decoding no haplotype; Phase\nonbreakingspace 2 streams each haplotype once and reads each interior, taking the reference spelling as allele\nonbreakingspace 0. The sites project to two VCF records---a substitution (\texttt  {C}$\to $\texttt  {T}) and a left-anchored deletion (\texttt  {ACC}$\to $\texttt  {A}).}}{14}{workedexample.1}\protected@file@percent }
-\newlabel{fig:ce-deconstruct-example}{{1}{14}{\texttt {deconstruct} on two chained sites. Phase~1 recovers the snarls $[A,D]$ and $[D,G]$ from topology alone, decoding no haplotype; Phase~2 streams each haplotype once and reads each interior, taking the reference spelling as allele~0. The sites project to two VCF records---a substitution (\texttt {C}$\to $\texttt {T}) and a left-anchored deletion (\texttt {ACC}$\to $\texttt {A})}{workedexample.1}{}}
+\citation{paten2018superbubbles}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.6}\texttt  {deconstruct}: GFA$\rightarrow $VCF as a Two-Phase Compressed-Traversal Algorithm}{14}{subsection.5.6}\protected@file@percent }
 \newlabel{subsec:ce-deconstruct}{{5.6}{14}{\texttt {deconstruct}: GFA$\rightarrow $VCF as a Two-Phase Compressed-Traversal Algorithm}{subsection.5.6}{}}
-\@writefile{toc}{\contentsline {paragraph}{The two-phase idea.}{14}{section*.26}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Phase 1: topology-only site discovery.}{14}{section*.27}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{The two-phase idea.}{14}{section*.27}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Phase 1: topology-only site discovery.}{14}{section*.28}\protected@file@percent }
+\@writefile{loe}{\contentsline {workedexample}{\numberline {1}{\ignorespaces \texttt  {deconstruct} on two chained sites. Phase\nonbreakingspace 1 recovers the snarls $[A,D]$ and $[D,G]$ from topology alone, decoding no haplotype; Phase\nonbreakingspace 2 streams each haplotype once and reads each interior, taking the reference spelling as allele\nonbreakingspace 0. The sites project to two VCF records---a substitution (\texttt  {C}$\to $\texttt  {T}) and a left-anchored deletion (\texttt  {ACC}$\to $\texttt  {A}).}}{14}{workedexample.1}\protected@file@percent }
+\newlabel{fig:ce-deconstruct-example}{{1}{14}{\texttt {deconstruct} on two chained sites. Phase~1 recovers the snarls $[A,D]$ and $[D,G]$ from topology alone, decoding no haplotype; Phase~2 streams each haplotype once and reads each interior, taking the reference spelling as allele~0. The sites project to two VCF records---a substitution (\texttt {C}$\to $\texttt {T}) and a left-anchored deletion (\texttt {ACC}$\to $\texttt {A})}{workedexample.1}{}}
 \@writefile{loa}{\contentsline {algorithm}{\numberline {5}{\ignorespaces Top-level snarl extraction via biconnected decomposition}}{14}{algorithm.5}\protected@file@percent }
 \newlabel{alg:ce-bcc}{{5}{14}{Top-level snarl extraction via biconnected decomposition}{algorithm.5}{}}
-\@writefile{toc}{\contentsline {paragraph}{Phase 2: streaming allele observation.}{14}{section*.28}\protected@file@percent }
 \@writefile{loa}{\contentsline {algorithm}{\numberline {6}{\ignorespaces Streaming allele observation for one haplotype (snarl mode)}}{15}{algorithm.6}\protected@file@percent }
 \newlabel{alg:ce-snarl}{{6}{15}{Streaming allele observation for one haplotype (snarl mode)}{algorithm.6}{}}
-\@writefile{toc}{\contentsline {paragraph}{Handling inversions.}{15}{section*.29}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Assembly and VCF conventions.}{15}{section*.30}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Validation.}{15}{section*.31}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Phase 2: streaming allele observation.}{15}{section*.29}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Handling inversions.}{15}{section*.30}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Assembly and VCF conventions.}{15}{section*.31}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Validation.}{15}{section*.32}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.7}Further Analyses on the Same Substrate}{15}{subsection.5.7}\protected@file@percent }
 \newlabel{subsec:ce-instances}{{5.7}{15}{Further Analyses on the Same Substrate}{subsection.5.7}{}}
 \citation{garrison2018variation}
@@ -163,41 +165,39 @@
 \newlabel{sec:eval-results}{{6}{16}{Evaluation Results}{section.6}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Deconstruct (GFA\,$\rightarrow $\,VCF)}{16}{subsection.6.1}\protected@file@percent }
 \newlabel{subsec:eval-deconstruct}{{6.1}{16}{Deconstruct (GFA\,$\rightarrow $\,VCF)}{subsection.6.1}{}}
-\@writefile{toc}{\contentsline {paragraph}{Scaling to whole human pangenomes.}{16}{section*.35}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Scaling to whole human pangenomes.}{16}{section*.36}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Pangenome Growth}{16}{subsection.6.2}\protected@file@percent }
 \newlabel{subsec:eval-growth}{{6.2}{16}{Pangenome Growth}{subsection.6.2}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {12}{\ignorespaces The six compute-engine commands, all built on one streaming decode substrate. ``Resident state'' excludes the grammar-compressed traversal store common to every command; node counts dominate group and window counts at pangenome scale.}}{17}{table.caption.32}\protected@file@percent }
-\newlabel{tab:ce-commands}{{12}{17}{The six compute-engine commands, all built on one streaming decode substrate. ``Resident state'' excludes the grammar-compressed traversal store common to every command; node counts dominate group and window counts at pangenome scale}{table.caption.32}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {13}{\ignorespaces Evaluation graphs. GFAz\xspace  operates on the compressed container, which is $18$--$35\times $ smaller than the GFA the baselines must read.}}{17}{table.caption.33}\protected@file@percent }
-\newlabel{tab:eval-datasets}{{13}{17}{Evaluation graphs. \gfaz operates on the compressed container, which is $18$--$35\times $ smaller than the GFA the baselines must read}{table.caption.33}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {14}{\ignorespaces \texttt  {deconstruct} vs.\ \texttt  {vg deconstruct}: wall-clock time and peak RSS at 1 and 16 threads. GFAz\xspace  reads the $35\times $-smaller \texttt  {.gfaz}; \texttt  {vg} reads the GFA.}}{17}{table.caption.34}\protected@file@percent }
-\newlabel{tab:eval-deconstruct}{{14}{17}{\texttt {deconstruct} vs.\ \texttt {vg deconstruct}: wall-clock time and peak RSS at 1 and 16 threads. \gfaz reads the $35\times $-smaller \texttt {.gfaz}; \texttt {vg} reads the GFA}{table.caption.34}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {15}{\ignorespaces \texttt  {deconstruct} on whole-genome HPRC graphs (GFAz\xspace  only; \texttt  {vg} does not complete in practical memory). Time and peak RSS; ``GFA'' is the size of the uncompressed input GFAz\xspace  never materializes.}}{17}{table.caption.36}\protected@file@percent }
-\newlabel{tab:eval-deconstruct-hprc}{{15}{17}{\texttt {deconstruct} on whole-genome HPRC graphs (\gfaz only; \texttt {vg} does not complete in practical memory). Time and peak RSS; ``GFA'' is the size of the uncompressed input \gfaz never materializes}{table.caption.36}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {16}{\ignorespaces \texttt  {growth} vs.\ Panacus: wall-clock time and peak RSS at 1 and 16 threads. Both tools report identical growth curves.}}{17}{table.caption.37}\protected@file@percent }
-\newlabel{tab:eval-growth}{{16}{17}{\texttt {growth} vs.\ Panacus: wall-clock time and peak RSS at 1 and 16 threads. Both tools report identical growth curves}{table.caption.37}{}}
-\@writefile{toc}{\contentsline {paragraph}{Scaling to whole human pangenomes.}{17}{section*.38}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {17}{\ignorespaces \texttt  {growth} on whole-genome HPRC graphs. Panacus completes on all three but is $230$--$369\times $ slower and uses $7$--$25\times $ more memory; single-threaded Panacus was not run. Time and peak RSS.}}{17}{table.caption.39}\protected@file@percent }
-\newlabel{tab:eval-growth-hprc}{{17}{17}{\texttt {growth} on whole-genome HPRC graphs. Panacus completes on all three but is $230$--$369\times $ slower and uses $7$--$25\times $ more memory; single-threaded Panacus was not run. Time and peak RSS}{table.caption.39}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {13}{\ignorespaces The six compute-engine commands, all built on one streaming decode substrate. ``Resident state'' excludes the grammar-compressed traversal store common to every command; node counts dominate group and window counts at pangenome scale.}}{17}{table.caption.33}\protected@file@percent }
+\newlabel{tab:ce-commands}{{13}{17}{The six compute-engine commands, all built on one streaming decode substrate. ``Resident state'' excludes the grammar-compressed traversal store common to every command; node counts dominate group and window counts at pangenome scale}{table.caption.33}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {14}{\ignorespaces Evaluation graphs. GFAz\xspace  operates on the compressed container, which is $18$--$35\times $ smaller than the GFA the baselines must read.}}{17}{table.caption.34}\protected@file@percent }
+\newlabel{tab:eval-datasets}{{14}{17}{Evaluation graphs. \gfaz operates on the compressed container, which is $18$--$35\times $ smaller than the GFA the baselines must read}{table.caption.34}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {15}{\ignorespaces \texttt  {deconstruct} vs.\ \texttt  {vg deconstruct}: wall-clock time and peak RSS at 1 and 16 threads. GFAz\xspace  reads the $35\times $-smaller \texttt  {.gfaz}; \texttt  {vg} reads the GFA.}}{17}{table.caption.35}\protected@file@percent }
+\newlabel{tab:eval-deconstruct}{{15}{17}{\texttt {deconstruct} vs.\ \texttt {vg deconstruct}: wall-clock time and peak RSS at 1 and 16 threads. \gfaz reads the $35\times $-smaller \texttt {.gfaz}; \texttt {vg} reads the GFA}{table.caption.35}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {16}{\ignorespaces \texttt  {deconstruct} on whole-genome HPRC graphs (GFAz\xspace  only; \texttt  {vg} does not complete in practical memory). Time and peak RSS; ``GFA'' is the size of the uncompressed input GFAz\xspace  never materializes.}}{17}{table.caption.37}\protected@file@percent }
+\newlabel{tab:eval-deconstruct-hprc}{{16}{17}{\texttt {deconstruct} on whole-genome HPRC graphs (\gfaz only; \texttt {vg} does not complete in practical memory). Time and peak RSS; ``GFA'' is the size of the uncompressed input \gfaz never materializes}{table.caption.37}{}}
+\@writefile{toc}{\contentsline {paragraph}{Scaling to whole human pangenomes.}{17}{section*.39}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {17}{\ignorespaces \texttt  {growth} vs.\ Panacus: wall-clock time and peak RSS at 1 and 16 threads. Both tools report identical growth curves.}}{17}{table.caption.38}\protected@file@percent }
+\newlabel{tab:eval-growth}{{17}{17}{\texttt {growth} vs.\ Panacus: wall-clock time and peak RSS at 1 and 16 threads. Both tools report identical growth curves}{table.caption.38}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {18}{\ignorespaces \texttt  {growth} on whole-genome HPRC graphs. Panacus completes on all three but is $230$--$369\times $ slower and uses $7$--$25\times $ more memory; single-threaded Panacus was not run. Time and peak RSS.}}{17}{table.caption.40}\protected@file@percent }
+\newlabel{tab:eval-growth-hprc}{{18}{17}{\texttt {growth} on whole-genome HPRC graphs. Panacus completes on all three but is $230$--$369\times $ slower and uses $7$--$25\times $ more memory; single-threaded Panacus was not run. Time and peak RSS}{table.caption.40}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Presence/Absence Variation}{17}{subsection.6.3}\protected@file@percent }
 \newlabel{subsec:eval-pav}{{6.3}{17}{Presence/Absence Variation}{subsection.6.3}{}}
-\@writefile{toc}{\contentsline {paragraph}{Scaling to whole human pangenomes.}{17}{section*.41}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {19}{\ignorespaces \texttt  {pav} vs.\ \texttt  {odgi pav}: wall-clock time and peak RSS. \texttt  {odgi} additionally requires an \texttt  {odgi build} step (chr1 $61$\,s, chr6 $31$\,s at 16 threads); single-threaded \texttt  {odgi pav} did not complete ($>$1 day).}}{18}{table.caption.41}\protected@file@percent }
+\newlabel{tab:eval-pav}{{19}{18}{\texttt {pav} vs.\ \texttt {odgi pav}: wall-clock time and peak RSS. \texttt {odgi} additionally requires an \texttt {odgi build} step (chr1 $61$\,s, chr6 $31$\,s at 16 threads); single-threaded \texttt {odgi pav} did not complete ($>$1 day)}{table.caption.41}{}}
+\@writefile{toc}{\contentsline {paragraph}{Scaling to whole human pangenomes.}{18}{section*.42}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}A Second Pangenome Family: HGSVC3}{18}{subsection.6.4}\protected@file@percent }
+\newlabel{subsec:eval-hgsvc3}{{6.4}{18}{A Second Pangenome Family: HGSVC3}{subsection.6.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {20}{\ignorespaces GFAz\xspace  compute engine on HGSVC3, a non-HPRC whole-genome pangenome ($80.1$\,GB GFA, $2.85$\,GB \texttt  {.gfaz}), vs.\ \texttt  {vg deconstruct} and Panacus. Wall-clock time and peak RSS at 1 and 16 threads; single-threaded baselines were not run ($>$2\,h each at 16 threads). \texttt  {pav} is reported GFAz\xspace  -only (\texttt  {odgi} does not load the W-line walks).}}{18}{table.caption.43}\protected@file@percent }
+\newlabel{tab:eval-hgsvc3}{{20}{18}{\gfaz compute engine on HGSVC3, a non-HPRC whole-genome pangenome ($80.1$\,GB GFA, $2.85$\,GB \texttt {.gfaz}), vs.\ \texttt {vg deconstruct} and Panacus. Wall-clock time and peak RSS at 1 and 16 threads; single-threaded baselines were not run ($>$2\,h each at 16 threads). \texttt {pav} is reported \gfaz -only (\texttt {odgi} does not load the W-line walks)}{table.caption.43}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusion and Future Work}{18}{section.7}\protected@file@percent }
+\newlabel{sec:conclusion}{{7}{18}{Conclusion and Future Work}{section.7}{}}
 \bibstyle{ACM-Reference-Format}
 \bibdata{ref}
 \bibcite{bonfield2022cram}{{1}{2022}{{Bonfield}}{{}}}
 \bibcite{collet2021rfc}{{2}{2021}{{Collet}}{{}}}
 \bibcite{eizenga2020pangenome}{{3}{2020}{{Eizenga et~al\mbox  {.}}}{{}}}
 \bibcite{garrison2024building}{{4}{2024}{{Garrison et~al\mbox  {.}}}{{}}}
-\@writefile{lot}{\contentsline {table}{\numberline {18}{\ignorespaces \texttt  {pav} vs.\ \texttt  {odgi pav}: wall-clock time and peak RSS. \texttt  {odgi} additionally requires an \texttt  {odgi build} step (chr1 $61$\,s, chr6 $31$\,s at 16 threads); single-threaded \texttt  {odgi pav} did not complete ($>$1 day).}}{18}{table.caption.40}\protected@file@percent }
-\newlabel{tab:eval-pav}{{18}{18}{\texttt {pav} vs.\ \texttt {odgi pav}: wall-clock time and peak RSS. \texttt {odgi} additionally requires an \texttt {odgi build} step (chr1 $61$\,s, chr6 $31$\,s at 16 threads); single-threaded \texttt {odgi pav} did not complete ($>$1 day)}{table.caption.40}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}A Second Pangenome Family: HGSVC3}{18}{subsection.6.4}\protected@file@percent }
-\newlabel{subsec:eval-hgsvc3}{{6.4}{18}{A Second Pangenome Family: HGSVC3}{subsection.6.4}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {19}{\ignorespaces GFAz\xspace  compute engine on HGSVC3, a non-HPRC whole-genome pangenome ($80.1$\,GB GFA, $2.85$\,GB \texttt  {.gfaz}), vs.\ \texttt  {vg deconstruct} and Panacus. Wall-clock time and peak RSS at 1 and 16 threads; single-threaded baselines were not run ($>$2\,h each at 16 threads). \texttt  {pav} is reported GFAz\xspace  -only (\texttt  {odgi} does not load the W-line walks).}}{18}{table.caption.42}\protected@file@percent }
-\newlabel{tab:eval-hgsvc3}{{19}{18}{\gfaz compute engine on HGSVC3, a non-HPRC whole-genome pangenome ($80.1$\,GB GFA, $2.85$\,GB \texttt {.gfaz}), vs.\ \texttt {vg deconstruct} and Panacus. Wall-clock time and peak RSS at 1 and 16 threads; single-threaded baselines were not run ($>$2\,h each at 16 threads). \texttt {pav} is reported \gfaz -only (\texttt {odgi} does not load the W-line walks)}{table.caption.42}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusion and Future Work}{18}{section.7}\protected@file@percent }
-\newlabel{sec:conclusion}{{7}{18}{Conclusion and Future Work}{section.7}{}}
-\@writefile{toc}{\contentsline {section}{Acknowledgments}{18}{section*.45}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{References}{18}{section*.47}\protected@file@percent }
 \bibcite{garrison2018variation}{{5}{2018}{{Garrison et~al\mbox  {.}}}{{}}}
 \bibcite{gfaspec}{{6}{2023}{{GFA Specification Working Group}}{{}}}
 \bibcite{guarracino2022odgi}{{7}{2022}{{Guarracino et~al\mbox  {.}}}{{}}}
@@ -228,5 +228,7 @@
 \newlabel{tocindent3}{18.198pt}
 \newlabel{tocindent4}{0pt}
 \newlabel{tocindent5}{0pt}
+\@writefile{toc}{\contentsline {section}{Acknowledgments}{19}{section*.46}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{References}{19}{section*.48}\protected@file@percent }
 \newlabel{TotPages}{{19}{19}{}{page.19}{}}
 \gdef \@abspage@last{19}
