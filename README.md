@@ -50,14 +50,14 @@ the reference tool's output while running one to three orders of magnitude faste
 and using far less memory. Measured at 16 threads (wall-clock time / peak RSS);
 baselines read the uncompressed GFA, `gfaz` reads the `.gfaz`.
 
-| Analysis (vs. baseline) | Graph | Baseline | gfaz | Speedup |
-|:---|:---|---:|---:|---:|
-| `deconstruct` vs. `vg deconstruct` | chr1 | 805 s / 30.3 GB | 11.3 s / 8.3 GB | **71×** |
-| | HGSVC3 (80 GB GFA) | 132.9 min / 397 GB | 8.7 min / 51.9 GB | **15×** |
-| `growth` vs. Panacus | chr1 | 18.3 s / 6.16 GB | 0.74 s / 0.66 GB | **25×** |
-| | HPRC v2.0 (358 GB GFA) | 245 min / 327 GB | 39.8 s / 12.9 GB | **369×** |
-| `pav` vs. `odgi pav` | chr1 | 3499 s / 31.9 GB | 11.7 s / 9.5 GB | **299×** |
-| | chr6 | 4759 s / 19.4 GB | 7.8 s / 6.4 GB | **613×** |
+| Analysis (vs. baseline) | Graph | Baseline | gfaz | Speedup | Mem. saving |
+|:---|:---|---:|---:|---:|---:|
+| `deconstruct` vs. `vg deconstruct` | chr1 | 805 s / 30.3 GB | 11.3 s / 8.3 GB | **71×** | **3.7×** |
+| | HGSVC3 (80 GB GFA) | 132.9 min / 397 GB | 8.7 min / 51.9 GB | **15×** | **7.6×** |
+| `growth` vs. Panacus | chr1 | 18.3 s / 6.16 GB | 0.74 s / 0.66 GB | **25×** | **9.3×** |
+| | HPRC v2.0 (358 GB GFA) | 245 min / 327 GB | 39.8 s / 12.9 GB | **369×** | **25×** |
+| `pav` vs. `odgi pav` | chr1 | 3499 s / 31.9 GB | 11.7 s / 9.5 GB | **299×** | **3.4×** |
+| | chr6 | 4759 s / 19.4 GB | 7.8 s / 6.4 GB | **613×** | **3.0×** |
 
 Outputs match the baselines: `deconstruct` VCF record counts agree with `vg` to
 within ~0.2% (~99.99% position concordance), `growth` reproduces Panacus's growth
