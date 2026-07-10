@@ -26,6 +26,12 @@ static_assert(gfaz::cli::kDefaultGpuRollingOutputChunkMb * 1024ull * 1024ull ==
 
 namespace gfaz::cli {
 
+static gfaz::CompressedData deserialize_input(const std::string &input_path) {
+  if (input_path == "-")
+    return gfaz::deserialize_compressed_data(std::cin);
+  return gfaz::deserialize_compressed_data(input_path);
+}
+
 int do_decompress(int argc, char *argv[]) {
   int num_threads = kDefaultNumThreads;
   bool use_gpu = false;
@@ -191,7 +197,7 @@ int do_decompress(int argc, char *argv[]) {
       gpu_options.rolling_output_chunk_bytes =
           static_cast<size_t>(gpu_max_expanded_chunk_mb) * 1024ull * 1024ull;
       gpu_options.use_legacy_full_decompression = use_gpu_legacy;
-      gfaz::CompressedData data_gpu = gfaz::deserialize_compressed_data(input_path);
+      gfaz::CompressedData data_gpu = deserialize_input(input_path);
       const auto deserialize_end = Clock::now();
       deserialize_ms = std::chrono::duration<double, std::milli>(
                            deserialize_end - deserialize_start)
@@ -205,7 +211,7 @@ int do_decompress(int argc, char *argv[]) {
     } else {
 #endif
       const auto deserialize_start = Clock::now();
-      gfaz::CompressedData data = gfaz::deserialize_compressed_data(input_path);
+      gfaz::CompressedData data = deserialize_input(input_path);
       const auto deserialize_end = Clock::now();
       deserialize_ms = std::chrono::duration<double, std::milli>(
                            deserialize_end - deserialize_start)

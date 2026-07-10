@@ -9,6 +9,7 @@ Covers gaps hardened in the audit:
   - a truncated .gfaz fails with a clean non-zero exit, never a crash/signal.
 """
 
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -96,12 +97,59 @@ def test_truncated_gfaz_fails_cleanly(cli: Path):
           f"{result.returncode} (<=0 indicates a crash/signal)")
 
 
+def test_unseekable_stdin_round_trip_and_truncation(cli: Path):
+  with tempfile.TemporaryDirectory() as dd:
+    d = Path(dd)
+    gfa = d / "stdin.gfa"
+    gfa.write_bytes(GFA_LF.encode())
+    gfaz = d / "stdin.gfaz"
+    require_success(run_command([str(cli), "compress", str(gfa), str(gfaz)]),
+                    "compress for stdin")
+
+    blob = gfaz.read_bytes()
+    file_based = d / "file.out.gfa"
+    require_success(
+        run_command([str(cli), "decompress", str(gfaz), str(file_based)]),
+        "file-based decompression for stdin comparison",
+    )
+    for mode, extra_args in (("streaming", []), ("legacy", ["--legacy"])):
+      streamed = d / f"stdin.{mode}.out.gfa"
+      result = subprocess.run(
+          [str(cli), "decompress", *extra_args, "-", str(streamed)],
+          input=blob,
+          capture_output=True,
+          check=False,
+      )
+      if result.returncode != 0:
+        raise AssertionError(
+            f"{mode} stdin decompression failed with exit code "
+            f"{result.returncode}\nSTDOUT:\n"
+            f"{result.stdout.decode(errors='replace')}\nSTDERR:\n"
+            f"{result.stderr.decode(errors='replace')}")
+      if streamed.read_bytes() != file_based.read_bytes():
+        raise AssertionError(
+            f"{mode} stdin decompression differs from file-based decompression")
+
+    truncated = d / "stdin.truncated.out.gfa"
+    result = subprocess.run(
+        [str(cli), "decompress", "-", str(truncated)],
+        input=blob[:max(8, len(blob) // 2)],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode <= 0:
+      raise AssertionError(
+          "truncated stdin should fail with a clean positive exit code, got "
+          f"{result.returncode} (<=0 indicates a crash/signal)")
+
+
 def main():
   cli = Path(CLI_PATH)
   ensure_cli_exists(cli)
   test_crlf_matches_lf(cli)
   test_empty_file_is_empty_graph(cli)
   test_truncated_gfaz_fails_cleanly(cli)
+  test_unseekable_stdin_round_trip_and_truncation(cli)
   print("✅ PASS input_robustness")
 
 
