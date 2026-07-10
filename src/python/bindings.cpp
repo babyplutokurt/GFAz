@@ -682,10 +682,14 @@ PYBIND11_MODULE(gfa_compression, m) {
         "Serialize CompressedData to the shared .gfaz binary format",
         py::arg("data"), py::arg("output_path"));
 
-  m.def("deserialize", &gfaz::deserialize_compressed_data,
+  m.def("deserialize",
+        py::overload_cast<const std::string &>(
+            &gfaz::deserialize_compressed_data),
         "Deserialize CompressedData from the shared .gfaz binary format",
         py::arg("input_path"));
-  m.def("deserialize_file", &gfaz::deserialize_compressed_data,
+  m.def("deserialize_file",
+        py::overload_cast<const std::string &>(
+            &gfaz::deserialize_compressed_data),
         "Deserialize CompressedData from the shared .gfaz binary format",
         py::arg("input_path"));
 

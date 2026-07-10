@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 
@@ -21,19 +22,14 @@ constexpr const char *kSerializationErrorPrefix = "GFAZ serialization error: ";
 // container fails with a clear error instead of a giant allocation, a silent
 // zero-filled buffer, or out-of-bounds decoding downstream.
 struct BinReader {
-  std::ifstream &in;
-  uint64_t file_size;
-
-  uint64_t remaining() {
-    const std::streampos pos = in.tellg();
-    if (pos < 0)
-      return 0;
-    const uint64_t p = static_cast<uint64_t>(pos);
-    return (p <= file_size) ? (file_size - p) : 0;
-  }
+  std::istream &in;
+  bool bounded;
+  uint64_t remaining_bytes;
 
   void need(uint64_t bytes, const char *what) {
-    if (bytes > remaining())
+    if ((bounded && bytes > remaining_bytes) ||
+        bytes > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+        bytes > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max()))
       throw_corrupt(what);
   }
 
@@ -41,13 +37,23 @@ struct BinReader {
   // on-disk footprint already exceeds the remaining bytes, so a corrupt count
   // can't drive a giant reserve() before the per-element reads run.
   void need_count(uint64_t count, uint64_t min_elem_bytes, const char *what) {
-    if (min_elem_bytes != 0 && count > remaining() / min_elem_bytes)
+    if (min_elem_bytes == 0)
+      return;
+    if ((bounded && count > remaining_bytes / min_elem_bytes) ||
+        count > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) /
+                    min_elem_bytes)
       throw_corrupt(what);
   }
 
-  void after_read(const char *what) {
-    if (!in.good())
+  void read_exact(char *destination, uint64_t bytes, const char *what) {
+    need(bytes, what);
+    if (bytes == 0)
+      return;
+    in.read(destination, static_cast<std::streamsize>(bytes));
+    if (in.gcount() != static_cast<std::streamsize>(bytes))
       throw_corrupt(what);
+    if (bounded)
+      remaining_bytes -= bytes;
   }
 };
 
@@ -59,9 +65,7 @@ template <typename T> void write_val(std::ofstream &out, const T &v) {
 
 template <typename T> T read_val(BinReader &r) {
   T v;
-  r.need(sizeof(T), "scalar field");
-  r.in.read(reinterpret_cast<char *>(&v), sizeof(T));
-  r.after_read("scalar field");
+  r.read_exact(reinterpret_cast<char *>(&v), sizeof(T), "scalar field");
   return v;
 }
 
@@ -75,11 +79,8 @@ void write_bytes(std::ofstream &out, const std::vector<uint8_t> &vec) {
 std::vector<uint8_t> read_bytes(BinReader &r) {
   uint64_t size = read_val<uint64_t>(r);
   r.need(size, "byte block");
-  std::vector<uint8_t> vec(size);
-  if (size > 0) {
-    r.in.read(reinterpret_cast<char *>(vec.data()), size);
-    r.after_read("byte block");
-  }
+  std::vector<uint8_t> vec(static_cast<size_t>(size));
+  r.read_exact(reinterpret_cast<char *>(vec.data()), size, "byte block");
   return vec;
 }
 
@@ -93,12 +94,10 @@ void write_u32_vec(std::ofstream &out, const std::vector<uint32_t> &vec) {
 
 std::vector<uint32_t> read_u32_vec(BinReader &r) {
   uint64_t size = read_val<uint64_t>(r);
-  r.need(size * sizeof(uint32_t), "uint32 vector");
-  std::vector<uint32_t> vec(size);
-  if (size > 0) {
-    r.in.read(reinterpret_cast<char *>(vec.data()), size * sizeof(uint32_t));
-    r.after_read("uint32 vector");
-  }
+  r.need_count(size, sizeof(uint32_t), "uint32 vector");
+  const uint64_t bytes = size * sizeof(uint32_t);
+  std::vector<uint32_t> vec(static_cast<size_t>(size));
+  r.read_exact(reinterpret_cast<char *>(vec.data()), bytes, "uint32 vector");
   return vec;
 }
 
@@ -112,11 +111,8 @@ void write_str(std::ofstream &out, const std::string &s) {
 std::string read_str(BinReader &r) {
   uint64_t size = read_val<uint64_t>(r);
   r.need(size, "string field");
-  std::string s(size, '\0');
-  if (size > 0) {
-    r.in.read(&s[0], size);
-    r.after_read("string field");
-  }
+  std::string s(static_cast<size_t>(size), '\0');
+  r.read_exact(s.data(), size, "string field");
   return s;
 }
 
@@ -179,6 +175,34 @@ gfaz::CompressedOptionalFieldColumn read_opt_col(BinReader &r) {
   c.b_lengths_zstd = read_block(r);
   c.b_concat_bytes_zstd = read_block(r);
   return c;
+}
+
+bool try_get_remaining_size(std::istream &in, uint64_t &remaining) {
+  const std::ios::iostate original_state = in.rdstate();
+  const std::streampos start = in.tellg();
+  if (start < 0) {
+    in.clear(original_state);
+    return false;
+  }
+
+  in.seekg(0, std::ios::end);
+  const std::streampos end = in.tellg();
+  if (end < start) {
+    in.clear();
+    in.seekg(start);
+    in.clear(original_state);
+    return false;
+  }
+
+  in.seekg(start);
+  if (!in) {
+    in.clear(original_state);
+    return false;
+  }
+
+  in.clear(original_state);
+  remaining = static_cast<uint64_t>(end - start);
+  return true;
 }
 
 } // namespace
@@ -286,19 +310,10 @@ void serialize_compressed_data(const CompressedData &data,
                             << (file_size / 1024.0 / 1024.0) << " MB)");
 }
 
-CompressedData deserialize_compressed_data(const std::string &input_path) {
-  std::ifstream in(input_path, std::ios::binary);
-  if (!in)
-    throw std::runtime_error(std::string(kSerializationErrorPrefix) +
-                             "failed to open input file: " + input_path);
-
-  in.seekg(0, std::ios::end);
-  const std::streampos end_pos = in.tellg();
-  in.seekg(0, std::ios::beg);
-  if (end_pos < 0)
-    throw std::runtime_error(std::string(kSerializationErrorPrefix) +
-                             "failed to determine file size: " + input_path);
-  BinReader r{in, static_cast<uint64_t>(end_pos)};
+CompressedData deserialize_compressed_data(std::istream &input) {
+  uint64_t remaining = 0;
+  const bool bounded = try_get_remaining_size(input, remaining);
+  BinReader r{input, bounded, remaining};
 
   // Verify magic and version
   uint32_t magic = read_val<uint32_t>(r);
@@ -405,6 +420,17 @@ CompressedData deserialize_compressed_data(const std::string &input_path) {
   data.walk_seq_starts_zstd = read_block(r);
   data.walk_seq_ends_zstd = read_block(r);
 
+  GFAZ_LOG("Deserialized from stream");
+  return data;
+}
+
+CompressedData deserialize_compressed_data(const std::string &input_path) {
+  std::ifstream in(input_path, std::ios::binary);
+  if (!in)
+    throw std::runtime_error(std::string(kSerializationErrorPrefix) +
+                             "failed to open input file: " + input_path);
+
+  CompressedData data = deserialize_compressed_data(in);
   GFAZ_LOG("Deserialized from " << input_path);
   return data;
 }
