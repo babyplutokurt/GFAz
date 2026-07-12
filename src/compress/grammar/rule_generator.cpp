@@ -126,6 +126,7 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer(
   }
 
   // --- 2. Rule Creation Phase ---
+  rules.kmer_to_rule_id.reserve(repeated.size());
   rules.rule_id_to_kmer.reserve(repeated.size());
   for (const auto &kmer : repeated) {
     rules.kmer_to_rule_id[kmer] = current_rule_id;
@@ -234,6 +235,7 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
   }
 
   // Create rules from repeated 2-mers
+  rules.kmer_to_rule_id.reserve(repeated.size());
   rules.rule_id_to_kmer.reserve(repeated.size());
   for (const auto &kmer : repeated) {
     rules.kmer_to_rule_id[kmer] = current_rule_id;
