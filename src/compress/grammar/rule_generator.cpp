@@ -62,10 +62,8 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer(
         }
 
         // Check if we've seen this locally before
-        if (local_seen.count(canonical)) {
+        if (!local_seen.insert(canonical).second) {
           local_repeated.insert(canonical);
-        } else {
-          local_seen.insert(canonical);
         }
       }
     }
@@ -83,10 +81,8 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer(
     for (const auto &kmer : thread_seen[t]) {
       if (repeated.count(kmer)) {
         continue; // Already globally repeated
-      } else if (seen.count(kmer)) {
+      } else if (!seen.insert(kmer).second) {
         repeated.insert(kmer); // Seen by another thread → repeated!
-      } else {
-        seen.insert(kmer); // First global occurrence
       }
     }
   }
@@ -105,10 +101,8 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer(
         continue;
       }
 
-      if (seen.count(canonical)) {
+      if (!seen.insert(canonical).second) {
         repeated.insert(canonical);
-      } else {
-        seen.insert(canonical);
       }
     }
   }
@@ -190,10 +184,8 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
               if (local_repeated.count(canonical))
                 continue;
 
-              if (local_seen.count(canonical)) {
+              if (!local_seen.insert(canonical).second) {
                 local_repeated.insert(canonical);
-              } else {
-                local_seen.insert(canonical);
               }
             }
           }
@@ -207,10 +199,8 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
           for (const auto &kmer : thread_seen[t]) {
             if (repeated.count(kmer))
               continue;
-            if (seen.count(kmer)) {
+            if (!seen.insert(kmer).second) {
               repeated.insert(kmer);
-            } else {
-              seen.insert(kmer);
             }
           }
         }
@@ -223,10 +213,8 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
             Packed2mer canonical = canonical_2mer(kmer);
             if (repeated.count(canonical))
               continue;
-            if (seen.count(canonical)) {
+            if (!seen.insert(canonical).second) {
               repeated.insert(canonical);
-            } else {
-              seen.insert(canonical);
             }
           }
         }
