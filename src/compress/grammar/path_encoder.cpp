@@ -1,7 +1,5 @@
 #include "compress/grammar/path_encoder.hpp"
 #include "compress/grammar/packed_2mer.hpp"
-#include <utility>
-
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -26,16 +24,16 @@ void PathEncoder::encode_paths_2mer(std::vector<std::vector<gfaz::NodeId>> &path
 #endif
   for (size_t p = 0; p < paths.size(); ++p) {
     auto &path = paths[p];
-    std::vector<gfaz::NodeId> stack;
-    stack.reserve(path.size());
+    size_t encoded_size = 0;
 
-    for (gfaz::NodeId node : path) {
-      stack.push_back(node);
+    for (size_t i = 0; i < path.size(); ++i) {
+      const gfaz::NodeId node = path[i];
+      path[encoded_size++] = node;
 
-      if (stack.size() >= 2) {
+      if (encoded_size >= 2) {
         // Get top 2 nodes
-        int32_t first = stack[stack.size() - 2];
-        int32_t second = stack[stack.size() - 1];
+        int32_t first = path[encoded_size - 2];
+        int32_t second = path[encoded_size - 1];
         Packed2mer top_kmer = pack_2mer(first, second);
 
         bool rule_found = false;
@@ -46,10 +44,9 @@ void PathEncoder::encode_paths_2mer(std::vector<std::vector<gfaz::NodeId>> &path
           uint32_t rule_id = it->second;
           int32_t oriented_rule_id = static_cast<int32_t>(rule_id);
 
-          // Replace last 2 nodes with rule ID
-          stack.pop_back();
-          stack.pop_back();
-          stack.push_back(oriented_rule_id);
+          // Replace the last 2 nodes with the rule ID in place.
+          path[encoded_size - 2] = oriented_rule_id;
+          --encoded_size;
 
           // Atomic write to rules_used (benign race - all threads write 1)
           rules_used[rule_id - rules.rules_start_id] = 1;
@@ -64,10 +61,9 @@ void PathEncoder::encode_paths_2mer(std::vector<std::vector<gfaz::NodeId>> &path
             uint32_t rule_id = it_rev->second;
             int32_t oriented_rule_id = -static_cast<int32_t>(rule_id);
 
-            // Replace last 2 nodes with rule ID
-            stack.pop_back();
-            stack.pop_back();
-            stack.push_back(oriented_rule_id);
+            // Replace the last 2 nodes with the rule ID in place.
+            path[encoded_size - 2] = oriented_rule_id;
+            --encoded_size;
 
             // Atomic write to rules_used (benign race - all threads write 1)
             rules_used[rule_id - rules.rules_start_id] = 1;
@@ -76,8 +72,7 @@ void PathEncoder::encode_paths_2mer(std::vector<std::vector<gfaz::NodeId>> &path
         }
       }
     }
-    path = std::move(stack);
-    path.shrink_to_fit();
+    path.resize(encoded_size);
   }
 }
 
