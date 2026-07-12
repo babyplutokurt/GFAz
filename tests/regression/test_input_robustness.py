@@ -5,6 +5,7 @@ Input-robustness regressions for the parser and the deserializer.
 Covers gaps hardened in the audit:
   - CRLF (Windows) line endings round-trip identically to LF (no stray '\\r'
     leaking into the last field of each line);
+  - a parser that starts in sequential-numeric mode can fall back to string IDs;
   - a 0-byte .gfa is a valid empty graph (compress+decompress succeed);
   - a truncated .gfaz fails with a clean non-zero exit, never a crash/signal.
 """
@@ -59,6 +60,32 @@ def test_crlf_matches_lf(cli: Path):
           f"--- LF ---\n{lf_out}\n--- CRLF ---\n{crlf_out}")
     if "\r" in crlf_out:
       raise AssertionError("decompressed CRLF output still contains a '\\r'")
+
+
+def test_numeric_to_string_id_fallback(cli: Path):
+  mixed_ids = (
+      "H\tVN:Z:1.1\n"
+      "S\t1\tA\n"
+      "S\t2\tC\n"
+      "S\talpha\tG\n"
+      "L\t1\t+\talpha\t+\t0M\n"
+      "P\tmixed\t1+,2+,alpha+\t*\n"
+  )
+  with tempfile.TemporaryDirectory() as dd:
+    d = Path(dd)
+    gfa = d / "mixed_ids.gfa"
+    gfa.write_text(mixed_ids)
+    out = _round_trip(cli, gfa, d, "mixed_ids")
+    for expected in (
+        "S\t1\tA",
+        "S\t2\tC",
+        "S\t3\tG",
+        "L\t1\t+\t3\t+\t0M",
+        "P\tmixed\t1+,2+,3+\t*",
+    ):
+      if expected not in out:
+        raise AssertionError(
+            f"numeric-to-string fallback lost {expected!r}:\n{out}")
 
 
 def test_empty_file_is_empty_graph(cli: Path):
@@ -147,6 +174,7 @@ def main():
   cli = Path(CLI_PATH)
   ensure_cli_exists(cli)
   test_crlf_matches_lf(cli)
+  test_numeric_to_string_id_fallback(cli)
   test_empty_file_is_empty_graph(cli)
   test_truncated_gfaz_fails_cleanly(cli)
   test_unseekable_stdin_round_trip_and_truncation(cli)

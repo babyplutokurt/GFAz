@@ -559,7 +559,6 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
 
   graph.segments.node_id_to_name.reserve(num_segments_hint_ + 1);
   graph.segments.node_sequences.reserve(num_segments_hint_ + 1);
-  node_name_lookup_.reserve(num_segments_hint_);
 
   graph.links.from_ids.reserve(num_links_hint_);
   graph.links.to_ids.reserve(num_links_hint_);
@@ -754,31 +753,35 @@ void GfaParser::parse_s_line(std::string_view line, gfaz::GfaGraph &graph) {
   std::string_view sequence_view = next_field(line, pos);
 
   size_t segment_index = 0;
-  auto lookup_it = node_name_lookup_.find(node_name_view);
-  if (lookup_it == node_name_lookup_.end()) {
-    if (all_segment_names_numeric_ && !is_numeric(node_name_view))
-      all_segment_names_numeric_ = false;
+  const uint32_t next_id = graph.segments.node_id_to_name.size();
 
-    uint32_t new_id = graph.segments.node_id_to_name.size();
-
-    // Validate fast-path: numeric segment names must match their assigned IDs
+  if (all_segment_names_numeric_ && is_numeric(node_name_view) &&
+      parse_uint32(node_name_view) == next_id) {
+    graph.segments.node_id_to_name.emplace_back(node_name_view);
+    graph.segments.node_sequences.emplace_back(sequence_view);
+    segment_index = next_id - 1;
+  } else {
     if (all_segment_names_numeric_) {
-      uint32_t numeric_name = parse_uint32(node_name_view);
-      if (numeric_name != new_id)
-        all_segment_names_numeric_ = false;
+      all_segment_names_numeric_ = false;
+      node_name_lookup_.reserve(num_segments_hint_);
+      for (uint32_t id = 1; id < graph.segments.node_id_to_name.size(); ++id) {
+        node_name_lookup_.emplace(graph.segments.node_id_to_name[id], id);
+      }
     }
 
-    std::string node_name(node_name_view);
-    // Invariant: the CPU compressor never reads graph.node_name_to_id (name
-    // resolution during parsing goes through the parser-local node_name_lookup_),
-    // so it is intentionally left empty here. The decompress and GPU paths
-    // rebuild it when they need name->id lookups.
-    graph.segments.node_id_to_name.push_back(node_name);
-    graph.segments.node_sequences.emplace_back(sequence_view);
-    node_name_lookup_.emplace(graph.segments.node_id_to_name.back(), new_id);
-    segment_index = new_id - 1;
-  } else {
-    segment_index = lookup_it->second - 1;
+    auto lookup_it = node_name_lookup_.find(node_name_view);
+    if (lookup_it == node_name_lookup_.end()) {
+      const uint32_t new_id = graph.segments.node_id_to_name.size();
+      // Invariant: the CPU compressor never reads graph.node_name_to_id (name
+      // resolution during parsing goes through the parser-local
+      // node_name_lookup_), so it is intentionally left empty here.
+      graph.segments.node_id_to_name.emplace_back(node_name_view);
+      graph.segments.node_sequences.emplace_back(sequence_view);
+      node_name_lookup_.emplace(graph.segments.node_id_to_name.back(), new_id);
+      segment_index = new_id - 1;
+    } else {
+      segment_index = lookup_it->second - 1;
+    }
   }
 
   while (pos < line.size()) {
