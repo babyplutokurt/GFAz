@@ -137,6 +137,7 @@ set(GFAZ_CORE_SOURCES
 
 set(GFAZ_COMPRESS_SOURCES
   src/compress/io/gfa_parser.cpp
+  src/compress/io/gfa_decoder.cpp
   src/compress/io/gfa_writer.cpp
   src/compress/io/gfa_write_utils.cpp
   src/compress/grammar/rule_generator.cpp
