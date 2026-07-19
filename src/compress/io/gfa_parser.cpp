@@ -4,6 +4,7 @@
 #include "core/utils/threading_utils.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cerrno>
 #include <chrono>
@@ -290,6 +291,95 @@ void append_optional_value(gfaz::OptionalFieldColumn &col, char type,
               << type << "' for tag '" << col.tag << "'" << std::endl;
     break;
   }
+}
+
+bool numeric_name_matches_id(std::string_view name, uint32_t expected) {
+  if (name.empty())
+    return false;
+  uint64_t value = 0;
+  for (char c : name) {
+    if (c < '0' || c > '9')
+      return false;
+    value = value * 10 + static_cast<uint32_t>(c - '0');
+    if (value > std::numeric_limits<uint32_t>::max())
+      return false;
+  }
+  return value == expected;
+}
+
+using FixedFieldMeta =
+    std::unordered_map<uint16_t, std::pair<char, size_t>>;
+
+bool initialize_fixed_optional_columns(
+    std::string_view line, size_t pos, size_t row_count,
+    std::vector<gfaz::OptionalFieldColumn> &columns, FixedFieldMeta &meta) {
+  columns.clear();
+  meta.clear();
+  while (pos < line.size()) {
+    const std::string_view field = next_field(line, pos);
+    if (field.empty())
+      break;
+    if (field.size() < 5 || field[2] != ':' || field[4] != ':')
+      continue;
+    const char type = field[3];
+    if (type != 'i' && type != 'f' && type != 'A')
+      return false;
+    const uint16_t key =
+        (static_cast<uint16_t>(static_cast<unsigned char>(field[0])) << 8) |
+        static_cast<uint16_t>(static_cast<unsigned char>(field[1]));
+    if (meta.find(key) != meta.end())
+      return false;
+
+    const size_t index = columns.size();
+    if (index >= 64)
+      return false;
+    meta.emplace(key, std::make_pair(type, index));
+    gfaz::OptionalFieldColumn col;
+    col.tag = std::string(field.substr(0, 2));
+    col.type = type;
+    if (type == 'i')
+      col.int_values.assign(row_count, std::numeric_limits<int64_t>::min());
+    else if (type == 'f')
+      col.float_values.assign(row_count, std::numeric_limits<float>::lowest());
+    else
+      col.char_values.assign(row_count, '\0');
+    columns.push_back(std::move(col));
+  }
+  return true;
+}
+
+bool assign_fixed_optional_fields(
+    std::string_view line, size_t pos, size_t row,
+    std::vector<gfaz::OptionalFieldColumn> &columns,
+    const FixedFieldMeta &meta) {
+  uint64_t assigned = 0;
+  while (pos < line.size()) {
+    const std::string_view field = next_field(line, pos);
+    if (field.empty())
+      break;
+    if (field.size() < 5 || field[2] != ':' || field[4] != ':')
+      continue;
+    const uint16_t key =
+        (static_cast<uint16_t>(static_cast<unsigned char>(field[0])) << 8) |
+        static_cast<uint16_t>(static_cast<unsigned char>(field[1]));
+    const auto it = meta.find(key);
+    if (it == meta.end() || it->second.first != field[3])
+      return false;
+    const uint64_t bit = uint64_t{1} << it->second.second;
+    if ((assigned & bit) != 0)
+      return false;
+    assigned |= bit;
+
+    auto &col = columns[it->second.second];
+    const std::string_view value = field.substr(5);
+    if (col.type == 'i')
+      col.int_values[row] = parse_int64(value);
+    else if (col.type == 'f')
+      col.float_values[row] = parse_float(value);
+    else
+      col.char_values[row] = value.empty() ? '\0' : value[0];
+  }
+  return true;
 }
 
 } // namespace
@@ -653,11 +743,69 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   graph.containments.overlaps.reserve(c_offsets.size());
   graph.containments.rest_fields.reserve(c_offsets.size());
   log_phase("reserve");
-  // Phase 1: Parse S-lines (sequential - must populate parser-local name lookup
-  // first)
-  for (const auto &off : s_offsets) {
-    std::string_view line(mmap_data + off.offset, off.length);
-    parse_s_line(line, graph);
+  // Phase 1: Numeric, sequential segment IDs can be written directly by row.
+  // The fast path supports fixed-width optional columns discovered on the
+  // first row; any irregularity falls back to the general sequential parser.
+  bool parsed_segments_in_parallel = false;
+  if (!s_offsets.empty()) {
+    const auto &first_offset = s_offsets.front();
+    const std::string_view first_line(mmap_data + first_offset.offset,
+                                      first_offset.length);
+    size_t first_pos = 1;
+    (void)next_field(first_line, first_pos);
+    (void)next_field(first_line, first_pos);
+    FixedFieldMeta fixed_meta;
+    std::vector<gfaz::OptionalFieldColumn> fixed_columns;
+    if (initialize_fixed_optional_columns(first_line, first_pos,
+                                          s_offsets.size(), fixed_columns,
+                                          fixed_meta)) {
+      graph.segments.node_id_to_name.resize(s_offsets.size() + 1);
+      graph.segments.node_sequences.resize(s_offsets.size() + 1);
+      graph.segments.optional_fields = std::move(fixed_columns);
+      segment_field_meta_ = fixed_meta;
+      std::atomic<bool> failed{false};
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+      for (size_t i = 0; i < s_offsets.size(); ++i) {
+        if (failed.load(std::memory_order_relaxed))
+          continue;
+        try {
+          const auto &off = s_offsets[i];
+          const std::string_view line(mmap_data + off.offset, off.length);
+          size_t pos = 1;
+          const std::string_view name = next_field(line, pos);
+          const std::string_view sequence = next_field(line, pos);
+          if (!numeric_name_matches_id(name, static_cast<uint32_t>(i + 1)) ||
+              !assign_fixed_optional_fields(
+                  line, pos, i, graph.segments.optional_fields, fixed_meta)) {
+            failed.store(true, std::memory_order_relaxed);
+            continue;
+          }
+          graph.segments.node_id_to_name[i + 1] = std::string(name);
+          graph.segments.node_sequences[i + 1] = std::string(sequence);
+        } catch (...) {
+          failed.store(true, std::memory_order_relaxed);
+        }
+      }
+      parsed_segments_in_parallel = !failed.load(std::memory_order_relaxed);
+      if (!parsed_segments_in_parallel) {
+        graph.segments.node_id_to_name.clear();
+        graph.segments.node_sequences.clear();
+        graph.segments.node_id_to_name.push_back("");
+        graph.segments.node_sequences.push_back("");
+        graph.segments.optional_fields.clear();
+        segment_field_meta_.clear();
+      }
+    }
+  }
+
+  if (!parsed_segments_in_parallel) {
+    for (const auto &off : s_offsets) {
+      std::string_view line(mmap_data + off.offset, off.length);
+      parse_s_line(line, graph);
+    }
   }
 
   // Pad optional field columns to segment count
@@ -695,10 +843,83 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   s_offsets.shrink_to_fit();
   log_phase("parse S-lines");
 
-  // Phase 2: Parse L-lines (sequential)
-  for (const auto &off : l_offsets) {
-    std::string_view line(mmap_data + off.offset, off.length);
-    parse_l_line(line, graph);
+  // Phase 2: With numeric node IDs, links are independent indexed rows and can
+  // use the same fixed-width optional-column fast path.
+  bool parsed_links_in_parallel = false;
+  if (all_segment_names_numeric_ && !l_offsets.empty()) {
+    const auto &first_offset = l_offsets.front();
+    const std::string_view first_line(mmap_data + first_offset.offset,
+                                      first_offset.length);
+    size_t first_pos = 1;
+    for (int field = 0; field < 5; ++field)
+      (void)next_field(first_line, first_pos);
+    FixedFieldMeta fixed_meta;
+    std::vector<gfaz::OptionalFieldColumn> fixed_columns;
+    if (initialize_fixed_optional_columns(first_line, first_pos,
+                                          l_offsets.size(), fixed_columns,
+                                          fixed_meta)) {
+      graph.links.from_ids.resize(l_offsets.size());
+      graph.links.to_ids.resize(l_offsets.size());
+      graph.links.from_orients.resize(l_offsets.size());
+      graph.links.to_orients.resize(l_offsets.size());
+      graph.links.overlap_nums.resize(l_offsets.size());
+      graph.links.overlap_ops.resize(l_offsets.size());
+      graph.link_optional_fields = std::move(fixed_columns);
+      link_field_meta_ = fixed_meta;
+      std::atomic<bool> failed{false};
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+      for (size_t i = 0; i < l_offsets.size(); ++i) {
+        if (failed.load(std::memory_order_relaxed))
+          continue;
+        try {
+          const auto &off = l_offsets[i];
+          const std::string_view line(mmap_data + off.offset, off.length);
+          size_t pos = 1;
+          const uint32_t from_id = parse_uint32(next_field(line, pos));
+          const std::string_view from_orient = next_field(line, pos);
+          const uint32_t to_id = parse_uint32(next_field(line, pos));
+          const std::string_view to_orient = next_field(line, pos);
+          const std::string_view overlap = next_field(line, pos);
+          if (from_id == 0 || to_id == 0 ||
+              !assign_fixed_optional_fields(
+                  line, pos, i, graph.link_optional_fields, fixed_meta)) {
+            failed.store(true, std::memory_order_relaxed);
+            continue;
+          }
+          graph.links.from_ids[i] = from_id;
+          graph.links.to_ids[i] = to_id;
+          graph.links.from_orients[i] =
+              from_orient.empty() ? '+' : from_orient[0];
+          graph.links.to_orients[i] = to_orient.empty() ? '+' : to_orient[0];
+          if (overlap.empty() || overlap == "*") {
+            graph.links.overlap_nums[i] = 0;
+            graph.links.overlap_ops[i] = '\0';
+          } else {
+            char op = '\0';
+            graph.links.overlap_nums[i] = parse_overlap_num(overlap, op);
+            graph.links.overlap_ops[i] = op;
+          }
+        } catch (...) {
+          failed.store(true, std::memory_order_relaxed);
+        }
+      }
+      parsed_links_in_parallel = !failed.load(std::memory_order_relaxed);
+      if (!parsed_links_in_parallel) {
+        graph.links = {};
+        graph.link_optional_fields.clear();
+        link_field_meta_.clear();
+      }
+    }
+  }
+
+  if (!parsed_links_in_parallel) {
+    for (const auto &off : l_offsets) {
+      std::string_view line(mmap_data + off.offset, off.length);
+      parse_l_line(line, graph);
+    }
   }
 
   // Pad link optional field columns
