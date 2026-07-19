@@ -22,6 +22,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#if (defined(__x86_64__) || defined(__i386__)) &&                         \
+    (defined(__GNUC__) || defined(__clang__))
+#include <immintrin.h>
+#define GFAZ_X86_SIMD 1
+#endif
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -127,6 +133,98 @@ inline std::string_view next_field(std::string_view line, size_t &pos) {
     ++pos;
   return line.substr(start, pos - start);
 }
+
+#ifdef GFAZ_X86_SIMD
+inline bool parse_numeric_path_token(const char *begin, const char *end,
+                                     std::vector<gfaz::NodeId> &path) {
+  if (begin == end)
+    return true;
+  if (end - begin < 2)
+    return false;
+
+  const char orientation = end[-1];
+  if (orientation != '+' && orientation != '-')
+    return false;
+
+  const size_t digit_count = static_cast<size_t>(end - begin - 1);
+  if (digit_count == 0 || digit_count > 10)
+    return false;
+
+  uint64_t value = 0;
+  for (size_t i = 0; i < digit_count; ++i) {
+    const unsigned digit = static_cast<unsigned>(begin[i] - '0');
+    if (digit > 9)
+      return false;
+    value = value * 10 + digit;
+  }
+  if (value > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()))
+    return false;
+  if (value == 0)
+    return true;
+
+  const auto node = static_cast<gfaz::NodeId>(value);
+  path.push_back(orientation == '-' ? -node : node);
+  return true;
+}
+
+__attribute__((target("avx2")))
+bool parse_numeric_path_avx2(std::string_view nodes,
+                             std::vector<gfaz::NodeId> &path) {
+  const char *data = nodes.data();
+  const size_t size = nodes.size();
+  const __m256i commas = _mm256_set1_epi8(',');
+
+  size_t comma_count = 0;
+  size_t offset = 0;
+  for (; offset + 32 <= size; offset += 32) {
+    const __m256i chars =
+        _mm256_loadu_si256(reinterpret_cast<const __m256i *>(data + offset));
+    const uint32_t mask = static_cast<uint32_t>(
+        _mm256_movemask_epi8(_mm256_cmpeq_epi8(chars, commas)));
+    comma_count += static_cast<size_t>(__builtin_popcount(mask));
+  }
+  for (size_t i = offset; i < size; ++i)
+    comma_count += data[i] == ',';
+
+  path.clear();
+  path.reserve(comma_count + 1);
+  const char *token_begin = data;
+  offset = 0;
+  for (; offset + 32 <= size; offset += 32) {
+    const __m256i chars =
+        _mm256_loadu_si256(reinterpret_cast<const __m256i *>(data + offset));
+    uint32_t mask = static_cast<uint32_t>(
+        _mm256_movemask_epi8(_mm256_cmpeq_epi8(chars, commas)));
+    while (mask != 0) {
+      const size_t delimiter =
+          offset + static_cast<size_t>(__builtin_ctz(mask));
+      if (!parse_numeric_path_token(token_begin, data + delimiter, path))
+        return false;
+      token_begin = data + delimiter + 1;
+      mask &= mask - 1;
+    }
+  }
+  for (size_t i = offset; i < size; ++i) {
+    if (data[i] != ',')
+      continue;
+    if (!parse_numeric_path_token(token_begin, data + i, path))
+      return false;
+    token_begin = data + i + 1;
+  }
+  return parse_numeric_path_token(token_begin, data + size, path);
+}
+
+bool try_parse_numeric_path_simd(std::string_view nodes,
+                                 std::vector<gfaz::NodeId> &path) {
+  static const bool has_avx2 = __builtin_cpu_supports("avx2");
+  return has_avx2 && parse_numeric_path_avx2(nodes, path);
+}
+#else
+bool try_parse_numeric_path_simd(std::string_view,
+                                 std::vector<gfaz::NodeId> &) {
+  return false;
+}
+#endif
 
 inline uint32_t parse_overlap_num(std::string_view overlap_view, char &op) {
   uint32_t num = 0;
@@ -1239,29 +1337,33 @@ void GfaParser::parse_p_line(std::string_view line, gfaz::GfaGraph &graph,
   std::string overlaps(line.substr(pos));
 
   std::vector<gfaz::NodeId> path;
-  path.reserve(1 + std::count(nodes_str.begin(), nodes_str.end(), ','));
-  size_t node_start = 0;
+  if (!(all_segment_names_numeric_ &&
+        try_parse_numeric_path_simd(nodes_str, path))) {
+    path.clear();
+    path.reserve(1 + std::count(nodes_str.begin(), nodes_str.end(), ','));
+    size_t node_start = 0;
 
-  for (size_t i = 0; i <= nodes_str.size(); ++i) {
-    if (i == nodes_str.size() || nodes_str[i] == ',') {
-      if (i > node_start) {
-        std::string_view node_with_orient =
-            nodes_str.substr(node_start, i - node_start);
-        if (!node_with_orient.empty()) {
-          char orientation = node_with_orient.back();
-          std::string_view node_name_view =
-              node_with_orient.substr(0, node_with_orient.size() - 1);
+    for (size_t i = 0; i <= nodes_str.size(); ++i) {
+      if (i == nodes_str.size() || nodes_str[i] == ',') {
+        if (i > node_start) {
+          std::string_view node_with_orient =
+              nodes_str.substr(node_start, i - node_start);
+          if (!node_with_orient.empty()) {
+            char orientation = node_with_orient.back();
+            std::string_view node_name_view =
+                node_with_orient.substr(0, node_with_orient.size() - 1);
 
-          uint32_t node_id = resolve_node_id(node_name_view);
-          if (node_id != 0) {
-            gfaz::NodeId oriented_node_id = node_id;
-            if (orientation == '-')
-              oriented_node_id = -node_id;
-            path.push_back(oriented_node_id);
+            uint32_t node_id = resolve_node_id(node_name_view);
+            if (node_id != 0) {
+              gfaz::NodeId oriented_node_id = node_id;
+              if (orientation == '-')
+                oriented_node_id = -node_id;
+              path.push_back(oriented_node_id);
+            }
           }
         }
+        node_start = i + 1;
       }
-      node_start = i + 1;
     }
   }
 
