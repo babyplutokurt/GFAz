@@ -18,6 +18,16 @@ std::string format_float(float val) {
   return oss.str();
 }
 
+void append_int64(std::string &out, int64_t value) {
+  char buffer[32];
+  const auto [end, error] =
+      std::to_chars(std::begin(buffer), std::end(buffer), value);
+  if (error != std::errc())
+    throw std::runtime_error(std::string(kWriterErrorPrefix) +
+                             "failed to format integer optional field");
+  out.append(buffer, end);
+}
+
 inline size_t b_elem_size(char subtype) {
   switch (subtype) {
   case 'c':
@@ -86,8 +96,12 @@ void append_optional_fields(std::string &result,
     case 'i':
       if (index < col.int_values.size()) {
         int64_t val = col.int_values[index];
-        if (val != std::numeric_limits<int64_t>::min())
-          result += "\t" + col.tag + ":i:" + std::to_string(val);
+        if (val != std::numeric_limits<int64_t>::min()) {
+          result += '\t';
+          result += col.tag;
+          result += ":i:";
+          append_int64(result, val);
+        }
       }
       break;
     case 'f':
