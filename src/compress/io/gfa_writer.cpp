@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <stdexcept>
 #include <utility>
@@ -123,18 +124,29 @@ void write_sequence_batch_stream(std::ofstream &out, size_t total_count,
     return;
 
   const int effective_threads = std::max(1, resolve_omp_thread_count(num_threads));
+  // Format the next batch concurrently with ordered writes from the current
+  // batch. Keeping the original batch width avoids extra OpenMP team setup.
   const size_t batch_size = static_cast<size_t>(effective_threads) * 8;
 
-  for (size_t batch_start = 0; batch_start < total_count;
-       batch_start += batch_size) {
+  auto format_batch = [&](size_t batch_start) {
     const size_t batch_end = std::min(batch_start + batch_size, total_count);
     std::vector<std::string> lines(batch_end - batch_start);
 
 #ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(dynamic) num_threads(effective_threads)
 #endif
     for (size_t i = batch_start; i < batch_end; ++i)
       lines[i - batch_start] = formatter(i);
+    return lines;
+  };
+
+  size_t batch_start = 0;
+  auto pending = std::async(std::launch::async, format_batch, batch_start);
+  while (batch_start < total_count) {
+    std::vector<std::string> lines = pending.get();
+    batch_start += batch_size;
+    if (batch_start < total_count)
+      pending = std::async(std::launch::async, format_batch, batch_start);
 
     for (const auto &line : lines)
       out.write(line.data(), static_cast<std::streamsize>(line.size()));
