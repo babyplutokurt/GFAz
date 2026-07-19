@@ -2,12 +2,17 @@
 #include "core/utils/debug_log.hpp"
 #include "robin_hood.h"
 #include "core/utils/threading_utils.hpp"
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <vector>
 
 #ifdef _OPENMP
 #include <omp.h>
+#endif
+
+#if defined(_OPENMP) && defined(__GLIBCXX__)
+#include <parallel/algorithm>
 #endif
 
 RuleGenerator::RuleGenerator() {}
@@ -149,84 +154,96 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
   rules.rules_start_id = starting_id;
   uint32_t current_rule_id = starting_id;
 
-  // Global sets for final result - using Packed2mer (int64_t) for faster
-  // hashing
-  robin_hood::unordered_flat_set<Packed2mer> seen;
-  robin_hood::unordered_flat_set<Packed2mer> repeated;
+  std::vector<Packed2mer> repeated_pairs;
 
-  // Helper lambda to process a sequence vector
-  auto process_sequences =
-      [&](const std::vector<std::vector<gfaz::NodeId>> &sequences) {
 #ifdef _OPENMP
-        int actual_threads = resolve_omp_thread_count(num_threads);
-
-        std::vector<robin_hood::unordered_flat_set<Packed2mer>> thread_seen(
-            actual_threads);
-        std::vector<robin_hood::unordered_flat_set<Packed2mer>> thread_repeated(
-            actual_threads);
+  const int actual_threads = resolve_omp_thread_count(num_threads);
+  std::vector<robin_hood::unordered_flat_set<Packed2mer>> thread_seen(
+      actual_threads);
+  std::vector<robin_hood::unordered_flat_set<Packed2mer>> thread_repeated(
+      actual_threads);
+  const size_t total_sequences = paths.size() + walks.size();
 
 #pragma omp parallel
-        {
-          int tid = omp_get_thread_num();
-          auto &local_seen = thread_seen[tid];
-          auto &local_repeated = thread_repeated[tid];
+  {
+    const int tid = omp_get_thread_num();
+    auto &local_seen = thread_seen[tid];
+    auto &local_repeated = thread_repeated[tid];
 
 #pragma omp for schedule(dynamic)
+    for (size_t p = 0; p < total_sequences; ++p) {
+      const auto &seq =
+          p < paths.size() ? paths[p] : walks[p - paths.size()];
+      if (seq.size() < 2)
+        continue;
 
-          for (size_t p = 0; p < sequences.size(); ++p) {
-            const auto &seq = sequences[p];
-            if (seq.size() < 2)
-              continue;
+      for (size_t i = 0; i + 1 < seq.size(); ++i) {
+        const Packed2mer canonical =
+            canonical_2mer(pack_2mer(seq[i], seq[i + 1]));
+        if (local_repeated.count(canonical))
+          continue;
+        if (!local_seen.insert(canonical).second)
+          local_repeated.insert(canonical);
+      }
+    }
+  }
 
-            for (size_t i = 0; i <= seq.size() - 2; ++i) {
-              Packed2mer kmer = pack_2mer(seq[i], seq[i + 1]);
-              Packed2mer canonical = canonical_2mer(kmer);
+  std::vector<size_t> offsets(static_cast<size_t>(actual_threads) + 1, 0);
+  for (int t = 0; t < actual_threads; ++t) {
+    offsets[static_cast<size_t>(t) + 1] =
+        offsets[static_cast<size_t>(t)] + thread_seen[t].size() +
+        thread_repeated[t].size();
+  }
 
-              if (local_repeated.count(canonical))
-                continue;
+  std::vector<Packed2mer> merge_keys(offsets.back());
+#pragma omp parallel for schedule(static)
+  for (int t = 0; t < actual_threads; ++t) {
+    size_t pos = offsets[static_cast<size_t>(t)];
+    for (Packed2mer kmer : thread_seen[t])
+      merge_keys[pos++] = kmer;
+    for (Packed2mer kmer : thread_repeated[t])
+      merge_keys[pos++] = kmer;
+    thread_seen[t].clear();
+    thread_repeated[t].clear();
+  }
+  thread_seen.clear();
+  thread_repeated.clear();
 
-              if (!local_seen.insert(canonical).second) {
-                local_repeated.insert(canonical);
-              }
-            }
-          }
-        }
-
-        // Merge thread results into global sets
-        for (int t = 0; t < actual_threads; ++t) {
-          for (const auto &kmer : thread_repeated[t]) {
-            repeated.insert(kmer);
-          }
-          for (const auto &kmer : thread_seen[t]) {
-            if (repeated.count(kmer))
-              continue;
-            if (!seen.insert(kmer).second) {
-              repeated.insert(kmer);
-            }
-          }
-        }
+#if defined(__GLIBCXX__)
+  __gnu_parallel::sort(merge_keys.begin(), merge_keys.end());
 #else
-        for (const auto &seq : sequences) {
-          if (seq.size() < 2)
-            continue;
-          for (size_t i = 0; i <= seq.size() - 2; ++i) {
-            Packed2mer kmer = pack_2mer(seq[i], seq[i + 1]);
-            Packed2mer canonical = canonical_2mer(kmer);
-            if (repeated.count(canonical))
-              continue;
-            if (!seen.insert(canonical).second) {
-              repeated.insert(canonical);
-            }
-          }
-        }
+  std::sort(merge_keys.begin(), merge_keys.end());
 #endif
-      };
 
-  // Process paths
+  for (size_t i = 1; i < merge_keys.size();) {
+    if (merge_keys[i] != merge_keys[i - 1]) {
+      ++i;
+      continue;
+    }
+    repeated_pairs.push_back(merge_keys[i]);
+    const Packed2mer repeated = merge_keys[i];
+    while (i < merge_keys.size() && merge_keys[i] == repeated)
+      ++i;
+  }
+#else
+  robin_hood::unordered_flat_set<Packed2mer> seen;
+  robin_hood::unordered_flat_set<Packed2mer> repeated;
+  auto process_sequences = [&](const auto &sequences) {
+    for (const auto &seq : sequences) {
+      for (size_t i = 0; i + 1 < seq.size(); ++i) {
+        const Packed2mer canonical =
+            canonical_2mer(pack_2mer(seq[i], seq[i + 1]));
+        if (repeated.count(canonical))
+          continue;
+        if (!seen.insert(canonical).second)
+          repeated.insert(canonical);
+      }
+    }
+  };
   process_sequences(paths);
-
-  // Process walks (adds to same seen/repeated sets)
   process_sequences(walks);
+  repeated_pairs.assign(repeated.begin(), repeated.end());
+#endif
 
   if (freq_threshold > 2) {
     std::cerr << "Warning: freq_threshold > 2 not fully supported with two-set "
@@ -235,9 +252,9 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
   }
 
   // Create rules from repeated 2-mers
-  rules.kmer_to_rule_id.reserve(repeated.size());
-  rules.rule_id_to_kmer.reserve(repeated.size());
-  for (const auto &kmer : repeated) {
+  rules.kmer_to_rule_id.reserve(repeated_pairs.size());
+  rules.rule_id_to_kmer.reserve(repeated_pairs.size());
+  for (const auto &kmer : repeated_pairs) {
     rules.kmer_to_rule_id[kmer] = current_rule_id;
     rules.rule_id_to_kmer.push_back(
         kmer); // Vector index = rule_id - rules_start_id
@@ -248,4 +265,3 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
 
   return rules;
 }
-
