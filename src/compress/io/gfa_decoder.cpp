@@ -131,6 +131,21 @@ GfaTagList tags_for_row(const std::vector<gfaz::OptionalFieldColumn> &columns,
   return tags;
 }
 
+GfaTagList tags_from_tab_suffix(const std::string &fields, size_t start) {
+  GfaTagList tags;
+  while (start < fields.size()) {
+    const size_t end = fields.find('\t', start);
+    if (end == std::string::npos) {
+      tags.push_back(fields.substr(start));
+      break;
+    }
+    if (end > start)
+      tags.push_back(fields.substr(start, end - start));
+    start = end + 1;
+  }
+  return tags;
+}
+
 template <typename Emitter>
 void decode_sequence_batches(const std::vector<int32_t> &flat,
                              const SequenceOffsets &compressed_offsets,
@@ -413,10 +428,21 @@ void decode_gfa_records(const CompressedData &data, GfaRecordVisitor &visitor,
       num_threads, [&](size_t index, const std::vector<NodeId> &visits) {
         const std::string fallback_name = std::to_string(index);
         const std::string empty;
-        visitor.on_path(
-            index < path_names.size() ? path_names[index] : fallback_name,
-            visits, index < path_overlaps.size() ? path_overlaps[index] : empty,
-            no_tags);
+        const std::string &path_fields =
+            index < path_overlaps.size() ? path_overlaps[index] : empty;
+        const size_t tag_start = path_fields.find('\t');
+        if (tag_start == std::string::npos) {
+          visitor.on_path(
+              index < path_names.size() ? path_names[index] : fallback_name,
+              visits, path_fields, no_tags);
+        } else {
+          const std::string overlap = path_fields.substr(0, tag_start);
+          const GfaTagList tags =
+              tags_from_tab_suffix(path_fields, tag_start + 1);
+          visitor.on_path(
+              index < path_names.size() ? path_names[index] : fallback_name,
+              visits, overlap, tags);
+        }
       });
 
   decode_sequence_batches(
@@ -434,7 +460,7 @@ void decode_gfa_records(const CompressedData &data, GfaRecordVisitor &visitor,
             index < walk_sequence_starts.size() ? walk_sequence_starts[index]
                                                 : -1,
             index < walk_sequence_ends.size() ? walk_sequence_ends[index] : -1,
-            visits, no_tags);
+            visits);
       });
 }
 

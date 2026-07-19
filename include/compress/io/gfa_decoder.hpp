@@ -16,9 +16,17 @@ using GfaTagList = std::vector<std::string>;
  * Receives decoded GFA records from a GFAz container.
  *
  * Every reference passed to a callback is valid only for the duration of that
- * callback. Callbacks are invoked synchronously and in GFA record order. The
- * default implementations ignore records so consumers only need to override
- * the record types they use.
+ * callback. Callbacks are invoked synchronously in type-grouped canonical
+ * order: H, S, L, J, C, P, then W. Records retain their source order within
+ * each group, but the original ordering between different record types is not
+ * represented by the GFAz container.
+ *
+ * Orientation booleans are false for forward ('+') and true for reverse ('-').
+ * Oriented NodeId values use the same convention through their sign: positive
+ * is forward and negative is reverse.
+ *
+ * The default implementations ignore records so consumers only need to
+ * override the record types they use.
  */
 class GfaRecordVisitor {
 public:
@@ -35,8 +43,7 @@ public:
                        const std::string &, const GfaTagList &) {}
 
   virtual void on_walk(const std::string &, uint32_t, const std::string &,
-                       int64_t, int64_t, const std::vector<NodeId> &,
-                       const GfaTagList &) {}
+                       int64_t, int64_t, const std::vector<NodeId> &) {}
 
   virtual void on_jump(uint32_t, bool, uint32_t, bool, const std::string &,
                        const std::string &) {}

@@ -301,6 +301,21 @@ if(BUILD_CLI)
     endif()
   endif()
 
+  add_executable(gfaz_front_door_api_test
+    tests/cpp/test_gfa_decoder.cpp
+  )
+  target_link_libraries(gfaz_front_door_api_test PRIVATE
+    gfaz_compress gfaz_core)
+  configure_gfa_target(gfaz_front_door_api_test)
+
+  enable_testing()
+  add_test(
+    NAME gfaz_front_door_api
+    COMMAND gfaz_front_door_api_test
+      ${CMAKE_SOURCE_DIR}/tests/fixtures/front_door_api_fixture.gfa
+      ${CMAKE_BINARY_DIR}/front_door_api_test.gfaz
+  )
+
   # Hermetic CPU-only test suite (CLI regressions + golden-file concordance).
   # A single CTest entry delegates to the Python harness so its PASS/SKIP/FAIL
   # logic stays the source of truth. Binding-dependent round-trip suites are run
