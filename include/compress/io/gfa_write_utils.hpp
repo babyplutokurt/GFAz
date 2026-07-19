@@ -17,6 +17,10 @@ using SequenceOffsets = std::vector<size_t>;
 
 FieldOffsets build_field_offsets(const std::vector<gfaz::OptionalFieldColumn> &cols);
 
+void append_optional_fields(std::string &out,
+                            const std::vector<gfaz::OptionalFieldColumn> &cols,
+                            const FieldOffsets &offsets, size_t index);
+
 std::string format_optional_fields(const std::vector<gfaz::OptionalFieldColumn> &cols,
                                    const FieldOffsets &offsets, size_t index);
 

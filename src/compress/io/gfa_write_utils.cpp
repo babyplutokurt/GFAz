@@ -77,9 +77,9 @@ FieldOffsets build_field_offsets(const std::vector<gfaz::OptionalFieldColumn> &c
   return offsets;
 }
 
-std::string format_optional_fields(const std::vector<gfaz::OptionalFieldColumn> &cols,
-                                   const FieldOffsets &offsets, size_t index) {
-  std::string result;
+void append_optional_fields(std::string &result,
+                            const std::vector<gfaz::OptionalFieldColumn> &cols,
+                            const FieldOffsets &offsets, size_t index) {
   for (size_t c = 0; c < cols.size(); ++c) {
     const auto &col = cols[c];
     switch (col.type) {
@@ -162,6 +162,13 @@ std::string format_optional_fields(const std::vector<gfaz::OptionalFieldColumn> 
       break;
     }
   }
+}
+
+std::string format_optional_fields(
+    const std::vector<gfaz::OptionalFieldColumn> &cols,
+    const FieldOffsets &offsets, size_t index) {
+  std::string result;
+  append_optional_fields(result, cols, offsets, index);
   return result;
 }
 
@@ -319,7 +326,7 @@ void write_segments_numeric(std::ofstream &out,
     line.append(segment_sequences, segment_seq_offset, len);
     segment_seq_offset += len;
 
-    line += format_optional_fields(segment_optional_fields, segment_offsets, i);
+    append_optional_fields(line, segment_optional_fields, segment_offsets, i);
     line += '\n';
     out.write(line.data(), static_cast<std::streamsize>(line.size()));
   }
@@ -353,7 +360,7 @@ void write_links_numeric(
     } else {
       line += '*';
     }
-    line += format_optional_fields(link_optional_fields, link_offsets, i);
+    append_optional_fields(line, link_optional_fields, link_offsets, i);
     line += '\n';
     out.write(line.data(), static_cast<std::streamsize>(line.size()));
   }
