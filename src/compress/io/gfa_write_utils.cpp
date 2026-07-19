@@ -2,6 +2,7 @@
 
 #include "core/codec/codec.hpp"
 
+#include <charconv>
 #include <cstring>
 #include <limits>
 #include <sstream>
@@ -165,7 +166,13 @@ std::string format_optional_fields(const std::vector<gfaz::OptionalFieldColumn> 
 }
 
 void append_numeric_node_name(std::string &out, uint32_t node_id) {
-  out += std::to_string(node_id);
+  char buffer[16];
+  const auto [end, error] =
+      std::to_chars(std::begin(buffer), std::end(buffer), node_id);
+  if (error != std::errc())
+    throw std::runtime_error(std::string(kWriterErrorPrefix) +
+                             "failed to format numeric node ID");
+  out.append(buffer, end);
 }
 
 std::vector<std::string>
