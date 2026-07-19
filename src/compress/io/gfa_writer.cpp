@@ -639,7 +639,7 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
     line += link_to_orients[i];
     line += '\t';
     if (i < link_overlap_ops.size() && link_overlap_ops[i] != '\0') {
-      line += std::to_string(link_overlap_nums[i]);
+      append_numeric_node_name(line, link_overlap_nums[i]);
       line += link_overlap_ops[i];
     } else {
       line += '*';
