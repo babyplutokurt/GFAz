@@ -784,14 +784,23 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
 
   std::vector<ClassifiedLines> classified(
       static_cast<size_t>(classifier_threads));
+  const size_t mapping_page_size =
+      static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  // Classification is a single forward pass. Release completed windows so
+  // later parsing phases can fault them in with their own access pattern.
+  constexpr size_t kClassificationReleaseWindow = 64ull * 1024ull * 1024ull;
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
   for (int t = 0; t < classifier_threads; ++t) {
     auto &local = classified[static_cast<size_t>(t)];
-    size_t line_start = boundaries[static_cast<size_t>(t)];
+    const size_t range_start = boundaries[static_cast<size_t>(t)];
+    size_t line_start = range_start;
     const size_t range_end = boundaries[static_cast<size_t>(t) + 1];
+    size_t release_cursor =
+        ((range_start + mapping_page_size - 1) / mapping_page_size) *
+        mapping_page_size;
 
     while (line_start < range_end) {
       const void *newline =
@@ -834,6 +843,23 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
       }
 
       line_start = line_end + (newline == nullptr ? 0 : 1);
+
+      if (line_start >= release_cursor + kClassificationReleaseWindow) {
+        const size_t release_end =
+            (line_start / mapping_page_size) * mapping_page_size;
+        if (release_end > release_cursor) {
+          madvise(const_cast<char *>(mmap_data) + release_cursor,
+                  release_end - release_cursor, MADV_DONTNEED);
+          release_cursor = release_end;
+        }
+      }
+    }
+
+    const size_t release_end =
+        (range_end / mapping_page_size) * mapping_page_size;
+    if (release_end > release_cursor) {
+      madvise(const_cast<char *>(mmap_data) + release_cursor,
+              release_end - release_cursor, MADV_DONTNEED);
     }
   }
 
@@ -868,7 +894,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   // that needs each page, discard the classification residency, and release
   // pages again as their owning phase completes. Pages shared by interleaved
   // record types remain resident until the latest consumer is finished.
-  const size_t page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  const size_t page_size = mapping_page_size;
   const size_t page_count = (file_size + page_size - 1) / page_size;
   std::vector<uint8_t> page_last_phase(page_count, 0);
   auto mark_last_phase = [&](const std::vector<gfaz::LineOffset> &offsets,
