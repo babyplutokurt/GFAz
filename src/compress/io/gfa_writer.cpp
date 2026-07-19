@@ -182,8 +182,8 @@ void write_gfa(const gfaz::GfaGraph &graph, const std::string &output_path) {
     append_node_name(line, i, graph.segments.node_id_to_name);
     line += '\t';
     line += graph.segments.node_sequences[i];
-    line += format_optional_fields(graph.segments.optional_fields, seg_offsets,
-                                   i - 1);
+    append_optional_fields(line, graph.segments.optional_fields, seg_offsets,
+                           i - 1);
     line += '\n';
     out.write(line.data(), line.size());
 
@@ -216,7 +216,7 @@ void write_gfa(const gfaz::GfaGraph &graph, const std::string &output_path) {
       line += '*';
     }
 
-    line += format_optional_fields(graph.link_optional_fields, link_offsets, i);
+    append_optional_fields(line, graph.link_optional_fields, link_offsets, i);
     line += '\n';
     out.write(line.data(), line.size());
 
@@ -619,7 +619,7 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
     line.append(segment_sequences, segment_seq_offset, len);
     segment_seq_offset += len;
 
-    line += format_optional_fields(segment_optional_fields, seg_offsets, i);
+    append_optional_fields(line, segment_optional_fields, seg_offsets, i);
     line += '\n';
     out.write(line.data(), static_cast<std::streamsize>(line.size()));
   }
@@ -644,7 +644,7 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
     } else {
       line += '*';
     }
-    line += format_optional_fields(link_optional_fields, link_offsets, i);
+    append_optional_fields(line, link_optional_fields, link_offsets, i);
     line += '\n';
     out.write(line.data(), static_cast<std::streamsize>(line.size()));
   }
