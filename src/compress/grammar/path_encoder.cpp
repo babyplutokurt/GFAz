@@ -22,19 +22,13 @@ void encode_path_2mer(std::vector<gfaz::NodeId> &path,
     int32_t first = path[encoded_size - 2];
     int32_t second = path[encoded_size - 1];
     Packed2mer top_kmer = pack_2mer(first, second);
-
-    auto it = rules.kmer_to_rule_id.find(top_kmer);
-    int32_t oriented_rule_id = 0;
-    if (it != rules.kmer_to_rule_id.end()) {
-      oriented_rule_id = static_cast<int32_t>(it->second);
-    } else {
-      auto reverse_it =
-          rules.kmer_to_rule_id.find(reverse_2mer(top_kmer));
-      if (reverse_it == rules.kmer_to_rule_id.end())
-        continue;
-      it = reverse_it;
-      oriented_rule_id = -static_cast<int32_t>(it->second);
-    }
+    const Packed2mer canonical = canonical_2mer(top_kmer);
+    auto it = rules.kmer_to_rule_id.find(canonical);
+    if (it == rules.kmer_to_rule_id.end())
+      continue;
+    const int32_t oriented_rule_id =
+        top_kmer == canonical ? static_cast<int32_t>(it->second)
+                              : -static_cast<int32_t>(it->second);
 
     path[encoded_size - 2] = oriented_rule_id;
     --encoded_size;
