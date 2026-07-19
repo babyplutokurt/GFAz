@@ -214,9 +214,57 @@ bool parse_numeric_path_avx2(std::string_view nodes,
   return parse_numeric_path_token(token_begin, data + size, path);
 }
 
+__attribute__((target("avx512f,avx512bw")))
+bool parse_numeric_path_avx512(std::string_view nodes,
+                               std::vector<gfaz::NodeId> &path) {
+  const char *data = nodes.data();
+  const size_t size = nodes.size();
+  const __m512i commas = _mm512_set1_epi8(',');
+
+  size_t comma_count = 0;
+  size_t offset = 0;
+  for (; offset + 64 <= size; offset += 64) {
+    const __m512i chars = _mm512_loadu_si512(data + offset);
+    const uint64_t mask = static_cast<uint64_t>(
+        _mm512_cmpeq_epi8_mask(chars, commas));
+    comma_count += static_cast<size_t>(__builtin_popcountll(mask));
+  }
+  for (size_t i = offset; i < size; ++i)
+    comma_count += data[i] == ',';
+
+  path.clear();
+  path.reserve(comma_count + 1);
+  const char *token_begin = data;
+  offset = 0;
+  for (; offset + 64 <= size; offset += 64) {
+    const __m512i chars = _mm512_loadu_si512(data + offset);
+    uint64_t mask = static_cast<uint64_t>(
+        _mm512_cmpeq_epi8_mask(chars, commas));
+    while (mask != 0) {
+      const size_t delimiter =
+          offset + static_cast<size_t>(__builtin_ctzll(mask));
+      if (!parse_numeric_path_token(token_begin, data + delimiter, path))
+        return false;
+      token_begin = data + delimiter + 1;
+      mask &= mask - 1;
+    }
+  }
+  for (size_t i = offset; i < size; ++i) {
+    if (data[i] != ',')
+      continue;
+    if (!parse_numeric_path_token(token_begin, data + i, path))
+      return false;
+    token_begin = data + i + 1;
+  }
+  return parse_numeric_path_token(token_begin, data + size, path);
+}
+
 bool try_parse_numeric_path_simd(std::string_view nodes,
                                  std::vector<gfaz::NodeId> &path) {
+  static const bool has_avx512bw = __builtin_cpu_supports("avx512bw");
   static const bool has_avx2 = __builtin_cpu_supports("avx2");
+  if (has_avx512bw)
+    return parse_numeric_path_avx512(nodes, path);
   return has_avx2 && parse_numeric_path_avx2(nodes, path);
 }
 #else
