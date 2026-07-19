@@ -512,47 +512,118 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   madvise(const_cast<char *>(mmap_data), file_size, MADV_SEQUENTIAL);
   log_phase("mmap+madvise");
 
-  // Single-pass line classification
+  // Parallel line classification. Split the mapping at newline boundaries so
+  // each worker owns complete lines, then concatenate the per-range offsets in
+  // range order to preserve the input order within each record type.
   std::vector<gfaz::LineOffset> s_offsets, l_offsets, p_offsets, w_offsets;
   std::vector<gfaz::LineOffset> j_offsets, c_offsets;
-  size_t line_start = 0;
 
-  for (size_t i = 0; i <= file_size; ++i) {
-    if (i == file_size || mmap_data[i] == '\n') {
-      size_t line_len = i - line_start;
-      // Drop a trailing CR so CRLF (Windows) line endings don't leak a '\r'
-      // into the last field of every line (e.g. a segment sequence).
+  struct ClassifiedLines {
+    std::vector<gfaz::LineOffset> segments;
+    std::vector<gfaz::LineOffset> links;
+    std::vector<gfaz::LineOffset> paths;
+    std::vector<gfaz::LineOffset> walks;
+    std::vector<gfaz::LineOffset> jumps;
+    std::vector<gfaz::LineOffset> containments;
+    gfaz::LineOffset last_header{};
+    bool has_header = false;
+  };
+
+  const int classifier_threads =
+      std::max(1, resolve_omp_thread_count(num_threads));
+  std::vector<size_t> boundaries(static_cast<size_t>(classifier_threads) + 1);
+  boundaries.front() = 0;
+  boundaries.back() = file_size;
+  for (int t = 1; t < classifier_threads; ++t) {
+    size_t boundary =
+        (file_size / static_cast<size_t>(classifier_threads)) *
+        static_cast<size_t>(t);
+    while (boundary < file_size && mmap_data[boundary - 1] != '\n')
+      ++boundary;
+    boundaries[static_cast<size_t>(t)] = boundary;
+  }
+
+  std::vector<ClassifiedLines> classified(
+      static_cast<size_t>(classifier_threads));
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (int t = 0; t < classifier_threads; ++t) {
+    auto &local = classified[static_cast<size_t>(t)];
+    size_t line_start = boundaries[static_cast<size_t>(t)];
+    const size_t range_end = boundaries[static_cast<size_t>(t) + 1];
+
+    while (line_start < range_end) {
+      const void *newline =
+          std::memchr(mmap_data + line_start, '\n', range_end - line_start);
+      const size_t line_end =
+          newline == nullptr
+              ? range_end
+              : static_cast<size_t>(static_cast<const char *>(newline) -
+                                    mmap_data);
+      size_t line_len = line_end - line_start;
       if (line_len > 0 && mmap_data[line_start + line_len - 1] == '\r')
         --line_len;
+
       if (line_len > 0) {
-        char line_type = mmap_data[line_start];
-        switch (line_type) {
+        const gfaz::LineOffset offset{line_start, line_len};
+        switch (mmap_data[line_start]) {
         case 'S':
-          s_offsets.push_back({line_start, line_len});
+          local.segments.push_back(offset);
           break;
         case 'H':
-          graph.header_line = std::string(mmap_data + line_start, line_len);
+          local.last_header = offset;
+          local.has_header = true;
           break;
         case 'L':
-          l_offsets.push_back({line_start, line_len});
+          local.links.push_back(offset);
           break;
         case 'P':
-          p_offsets.push_back({line_start, line_len});
+          local.paths.push_back(offset);
           break;
         case 'W':
-          w_offsets.push_back({line_start, line_len});
+          local.walks.push_back(offset);
           break;
         case 'J':
-          j_offsets.push_back({line_start, line_len});
+          local.jumps.push_back(offset);
           break;
         case 'C':
-          c_offsets.push_back({line_start, line_len});
+          local.containments.push_back(offset);
           break;
         }
       }
-      line_start = i + 1;
+
+      line_start = line_end + (newline == nullptr ? 0 : 1);
     }
   }
+
+  auto merge_offsets = [&](auto ClassifiedLines::*member,
+                           std::vector<gfaz::LineOffset> &output) {
+    size_t total = 0;
+    for (const auto &local : classified)
+      total += (local.*member).size();
+    output.reserve(total);
+    for (auto &local : classified) {
+      auto &offsets = local.*member;
+      output.insert(output.end(), offsets.begin(), offsets.end());
+    }
+  };
+
+  merge_offsets(&ClassifiedLines::segments, s_offsets);
+  merge_offsets(&ClassifiedLines::links, l_offsets);
+  merge_offsets(&ClassifiedLines::paths, p_offsets);
+  merge_offsets(&ClassifiedLines::walks, w_offsets);
+  merge_offsets(&ClassifiedLines::jumps, j_offsets);
+  merge_offsets(&ClassifiedLines::containments, c_offsets);
+  for (const auto &local : classified) {
+    if (local.has_header) {
+      graph.header_line = std::string(mmap_data + local.last_header.offset,
+                                      local.last_header.length);
+    }
+  }
+  classified.clear();
+  classified.shrink_to_fit();
   num_segments_hint_ = s_offsets.size();
   num_links_hint_ = l_offsets.size();
   log_phase("line classification");
