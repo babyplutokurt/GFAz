@@ -714,6 +714,50 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   }
   classified.clear();
   classified.shrink_to_fit();
+
+  // Classification touches the entire mapping. Record the last parse phase
+  // that needs each page, discard the classification residency, and release
+  // pages again as their owning phase completes. Pages shared by interleaved
+  // record types remain resident until the latest consumer is finished.
+  const size_t page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  const size_t page_count = (file_size + page_size - 1) / page_size;
+  std::vector<uint8_t> page_last_phase(page_count, 0);
+  auto mark_last_phase = [&](const std::vector<gfaz::LineOffset> &offsets,
+                             uint8_t phase) {
+    for (const auto &off : offsets) {
+      const size_t first_page = off.offset / page_size;
+      const size_t last_page = (off.offset + off.length - 1) / page_size;
+      for (size_t page = first_page; page <= last_page && page < page_count;
+           ++page) {
+        page_last_phase[page] = std::max(page_last_phase[page], phase);
+      }
+    }
+  };
+  mark_last_phase(s_offsets, 1);
+  mark_last_phase(l_offsets, 2);
+  mark_last_phase(p_offsets, 3);
+  mark_last_phase(w_offsets, 3);
+  mark_last_phase(j_offsets, 4);
+  mark_last_phase(c_offsets, 4);
+
+  auto release_phase_pages = [&](uint8_t phase) {
+    size_t run_start = page_count;
+    for (size_t page = 0; page <= page_count; ++page) {
+      const bool in_phase =
+          page < page_count && page_last_phase[page] == phase;
+      if (in_phase && run_start == page_count) {
+        run_start = page;
+      } else if (!in_phase && run_start != page_count) {
+        const size_t byte_start = run_start * page_size;
+        const size_t byte_end = std::min(page * page_size, file_size);
+        madvise(const_cast<char *>(mmap_data) + byte_start,
+                byte_end - byte_start, MADV_DONTNEED);
+        run_start = page_count;
+      }
+    }
+  };
+
+  madvise(const_cast<char *>(mmap_data), file_size, MADV_DONTNEED);
   num_segments_hint_ = s_offsets.size();
   num_links_hint_ = l_offsets.size();
   log_phase("line classification");
@@ -841,6 +885,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
 
   s_offsets.clear();
   s_offsets.shrink_to_fit();
+  release_phase_pages(1);
   log_phase("parse S-lines");
 
   // Phase 2: With numeric node IDs, links are independent indexed rows and can
@@ -954,6 +999,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   }
   l_offsets.clear();
   l_offsets.shrink_to_fit();
+  release_phase_pages(2);
   log_phase("parse L-lines");
 
   // Phase 3: Parse P/W-lines (parallel - each writes to pre-allocated index)
@@ -988,6 +1034,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   p_offsets.shrink_to_fit();
   w_offsets.clear();
   w_offsets.shrink_to_fit();
+  release_phase_pages(3);
   log_phase("parse P/W-lines");
 
   // Phase 4: Parse J/C lines (after S-lines, so the parser-local name lookup is
@@ -1005,6 +1052,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   j_offsets.shrink_to_fit();
   c_offsets.clear();
   c_offsets.shrink_to_fit();
+  release_phase_pages(4);
   log_phase("parse J/C-lines");
 
   munmap(const_cast<char *>(mmap_data), file_size);
