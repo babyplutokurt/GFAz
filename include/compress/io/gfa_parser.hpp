@@ -13,7 +13,8 @@
 class GfaParser {
 public:
   GfaParser();
-  gfaz::GfaGraph parse(const std::string &gfa_file_path, int num_threads = 0);
+  gfaz::GfaGraph parse(const std::string &gfa_file_path, int num_threads = 0,
+                       bool direct_segment_columns = false);
 
 private:
   std::unordered_map<uint16_t, std::pair<char, size_t>> segment_field_meta_;
@@ -42,4 +43,3 @@ private:
 };
 
 #endif
-
