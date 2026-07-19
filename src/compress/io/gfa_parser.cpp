@@ -434,7 +434,9 @@ optional_field_columns_bytes(const std::vector<gfaz::OptionalFieldColumn> &cols)
 
 size_t segment_bytes(const gfaz::GfaGraph &graph) {
   return string_vector_owned_bytes(graph.segments.node_id_to_name) +
-         string_vector_owned_bytes(graph.segments.node_sequences);
+         string_vector_owned_bytes(graph.segments.node_sequences) +
+         string_owned_bytes(graph.segments.node_sequences_concat) +
+         vector_buffer_bytes(graph.segments.node_sequence_lengths);
 }
 
 size_t path_bytes(const gfaz::GfaGraph &graph) {
@@ -536,7 +538,8 @@ bool GfaParser::is_numeric(std::string_view s) {
   return true;
 }
 
-gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads) {
+gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads,
+                                bool direct_segment_columns) {
   ScopedOMPThreads omp_scope(num_threads);
   const auto parse_start = Clock::now();
   auto phase_start = parse_start;
@@ -762,8 +765,10 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   num_links_hint_ = l_offsets.size();
   log_phase("line classification");
 
-  graph.segments.node_id_to_name.reserve(num_segments_hint_ + 1);
-  graph.segments.node_sequences.reserve(num_segments_hint_ + 1);
+  if (!direct_segment_columns) {
+    graph.segments.node_id_to_name.reserve(num_segments_hint_ + 1);
+    graph.segments.node_sequences.reserve(num_segments_hint_ + 1);
+  }
 
   graph.links.from_ids.reserve(num_links_hint_);
   graph.links.to_ids.reserve(num_links_hint_);
@@ -803,8 +808,12 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     if (initialize_fixed_optional_columns(first_line, first_pos,
                                           s_offsets.size(), fixed_columns,
                                           fixed_meta)) {
-      graph.segments.node_id_to_name.resize(s_offsets.size() + 1);
-      graph.segments.node_sequences.resize(s_offsets.size() + 1);
+      if (direct_segment_columns) {
+        graph.segments.node_sequence_lengths.resize(s_offsets.size());
+      } else {
+        graph.segments.node_id_to_name.resize(s_offsets.size() + 1);
+        graph.segments.node_sequences.resize(s_offsets.size() + 1);
+      }
       graph.segments.optional_fields = std::move(fixed_columns);
       segment_field_meta_ = fixed_meta;
       std::atomic<bool> failed{false};
@@ -827,16 +836,48 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
             failed.store(true, std::memory_order_relaxed);
             continue;
           }
-          graph.segments.node_id_to_name[i + 1] = std::string(name);
-          graph.segments.node_sequences[i + 1] = std::string(sequence);
+          if (direct_segment_columns) {
+            if (sequence.size() > std::numeric_limits<uint32_t>::max()) {
+              failed.store(true, std::memory_order_relaxed);
+              continue;
+            }
+            graph.segments.node_sequence_lengths[i] =
+                static_cast<uint32_t>(sequence.size());
+          } else {
+            graph.segments.node_id_to_name[i + 1] = std::string(name);
+            graph.segments.node_sequences[i + 1] = std::string(sequence);
+          }
         } catch (...) {
           failed.store(true, std::memory_order_relaxed);
         }
       }
       parsed_segments_in_parallel = !failed.load(std::memory_order_relaxed);
+      if (parsed_segments_in_parallel && direct_segment_columns) {
+        std::vector<size_t> sequence_offsets(s_offsets.size() + 1, 0);
+        for (size_t i = 0; i < s_offsets.size(); ++i) {
+          sequence_offsets[i + 1] =
+              sequence_offsets[i] + graph.segments.node_sequence_lengths[i];
+        }
+        graph.segments.node_sequences_concat.resize(sequence_offsets.back());
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+        for (size_t i = 0; i < s_offsets.size(); ++i) {
+          const auto &off = s_offsets[i];
+          const std::string_view line(mmap_data + off.offset, off.length);
+          size_t pos = 1;
+          (void)next_field(line, pos);
+          const std::string_view sequence = next_field(line, pos);
+          std::memcpy(graph.segments.node_sequences_concat.data() +
+                          sequence_offsets[i],
+                      sequence.data(), sequence.size());
+        }
+      }
       if (!parsed_segments_in_parallel) {
         graph.segments.node_id_to_name.clear();
         graph.segments.node_sequences.clear();
+        graph.segments.node_sequences_concat.clear();
+        graph.segments.node_sequence_lengths.clear();
         graph.segments.node_id_to_name.push_back("");
         graph.segments.node_sequences.push_back("");
         graph.segments.optional_fields.clear();
@@ -846,6 +887,10 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   }
 
   if (!parsed_segments_in_parallel) {
+    if (direct_segment_columns) {
+      graph.segments.node_id_to_name.reserve(num_segments_hint_ + 1);
+      graph.segments.node_sequences.reserve(num_segments_hint_ + 1);
+    }
     for (const auto &off : s_offsets) {
       std::string_view line(mmap_data + off.offset, off.length);
       parse_s_line(line, graph);
@@ -853,7 +898,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   }
 
   // Pad optional field columns to segment count
-  size_t num_segments = graph.segments.node_id_to_name.size() - 1;
+  size_t num_segments = graph.segments.size();
   for (auto &col : graph.segments.optional_fields) {
     switch (col.type) {
     case 'i':

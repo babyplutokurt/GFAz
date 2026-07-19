@@ -127,6 +127,10 @@ void release_walk_fields(CompressionContext &ctx) {
 void release_segment_link_fields(CompressionContext &ctx) {
   ctx.graph.segments.node_sequences.clear();
   ctx.graph.segments.node_sequences.shrink_to_fit();
+  ctx.graph.segments.node_sequences_concat.clear();
+  ctx.graph.segments.node_sequences_concat.shrink_to_fit();
+  ctx.graph.segments.node_sequence_lengths.clear();
+  ctx.graph.segments.node_sequence_lengths.shrink_to_fit();
   ctx.graph.links.from_ids.clear();
   ctx.graph.links.from_ids.shrink_to_fit();
   ctx.graph.links.to_ids.clear();
@@ -394,9 +398,16 @@ double compress_walk_fields(CompressionContext &ctx) {
 double compress_segment_link_fields(CompressionContext &ctx) {
   SegmentCompressionInput segment_input;
   LinkCompressionInput link_input;
-  flatten_segment_sequences(ctx.graph.segments.node_sequences,
-                            segment_input.segment_concat,
-                            segment_input.segment_lengths, ctx.next_id);
+  if (!ctx.graph.segments.node_sequence_lengths.empty()) {
+    segment_input.segment_concat =
+        std::move(ctx.graph.segments.node_sequences_concat);
+    segment_input.segment_lengths =
+        std::move(ctx.graph.segments.node_sequence_lengths);
+  } else {
+    flatten_segment_sequences(ctx.graph.segments.node_sequences,
+                              segment_input.segment_concat,
+                              segment_input.segment_lengths, ctx.next_id);
+  }
   ctx.num_segments = segment_input.segment_lengths.size();
   link_input.links = &ctx.graph.links;
   ctx.out.num_links = link_input.links->from_ids.size();
@@ -734,7 +745,7 @@ gfaz::CompressedData compress_gfa(const std::string &gfa_file_path, int num_roun
 
   {
     GfaParser parser;
-    ctx.graph = parser.parse(gfa_file_path, num_threads);
+    ctx.graph = parser.parse(gfa_file_path, num_threads, true);
   }
   log_cpu_memory_checkpoint("[CPU Workflow][Memory] after parse");
 

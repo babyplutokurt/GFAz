@@ -79,13 +79,26 @@ struct SegmentData {
   // Index 0 is a placeholder for 1-based node IDs.
   std::vector<std::string> node_id_to_name;
   std::vector<std::string> node_sequences;
+  // CPU compression may parse numeric segments directly into the flattened
+  // columns consumed by the entropy codec, avoiding per-segment strings.
+  std::string node_sequences_concat;
+  std::vector<uint32_t> node_sequence_lengths;
   std::vector<OptionalFieldColumn> optional_fields;
 
   size_t size() const {
+    if (!node_sequence_lengths.empty())
+      return node_sequence_lengths.size();
     return node_sequences.empty() ? 0 : node_sequences.size() - 1;
   }
 
-  bool valid() const { return node_id_to_name.size() == node_sequences.size(); }
+  bool valid() const {
+    if (!node_sequence_lengths.empty()) {
+      return node_sequences.size() <= 1 &&
+             (node_id_to_name.size() == 1 ||
+              node_id_to_name.size() == node_sequence_lengths.size() + 1);
+    }
+    return node_id_to_name.size() == node_sequences.size();
+  }
 };
 
 struct PathData {
