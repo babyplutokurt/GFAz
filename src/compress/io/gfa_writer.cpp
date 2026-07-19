@@ -36,10 +36,11 @@ inline void append_node_name(std::string &out, uint32_t node_id,
     out += std::to_string(node_id);
 }
 
-void expand_rule(uint32_t rule_id, bool reverse,
-                 const std::vector<int32_t> &first,
-                 const std::vector<int32_t> &second, uint32_t min_id,
-                 uint32_t max_id, std::vector<gfaz::NodeId> &out) {
+template <typename Emit>
+void expand_rule_emit(uint32_t rule_id, bool reverse,
+                      const std::vector<int32_t> &first,
+                      const std::vector<int32_t> &second, uint32_t min_id,
+                      uint32_t max_id, Emit &emit) {
   const uint32_t idx = rule_id - min_id;
   const int32_t a = first[idx];
   const int32_t b = second[idx];
@@ -47,37 +48,38 @@ void expand_rule(uint32_t rule_id, bool reverse,
   if (!reverse) {
     const uint32_t abs_a = static_cast<uint32_t>(std::abs(a));
     if (abs_a >= min_id && abs_a < max_id)
-      expand_rule(abs_a, a < 0, first, second, min_id, max_id, out);
+      expand_rule_emit(abs_a, a < 0, first, second, min_id, max_id, emit);
     else
-      out.push_back(a);
+      emit(a);
 
     const uint32_t abs_b = static_cast<uint32_t>(std::abs(b));
     if (abs_b >= min_id && abs_b < max_id)
-      expand_rule(abs_b, b < 0, first, second, min_id, max_id, out);
+      expand_rule_emit(abs_b, b < 0, first, second, min_id, max_id, emit);
     else
-      out.push_back(b);
+      emit(b);
   } else {
     const uint32_t abs_b = static_cast<uint32_t>(std::abs(b));
     if (abs_b >= min_id && abs_b < max_id)
-      expand_rule(abs_b, b >= 0, first, second, min_id, max_id, out);
+      expand_rule_emit(abs_b, b >= 0, first, second, min_id, max_id, emit);
     else
-      out.push_back(-b);
+      emit(-b);
 
     const uint32_t abs_a = static_cast<uint32_t>(std::abs(a));
     if (abs_a >= min_id && abs_a < max_id)
-      expand_rule(abs_a, a >= 0, first, second, min_id, max_id, out);
+      expand_rule_emit(abs_a, a >= 0, first, second, min_id, max_id, emit);
     else
-      out.push_back(-a);
+      emit(-a);
   }
 }
 
-std::vector<gfaz::NodeId>
-decode_sequence_at_index(const std::vector<int32_t> &flat,
-                         const SequenceOffsets &compressed_offsets,
-                         const SequenceOffsets &original_offsets, size_t index,
-                         const std::vector<int32_t> &rules_first,
-                         const std::vector<int32_t> &rules_second,
-                         uint32_t min_rule_id, int delta_round) {
+template <typename Emit>
+void decode_sequence_at_index(const std::vector<int32_t> &flat,
+                              const SequenceOffsets &compressed_offsets,
+                              size_t index,
+                              const std::vector<int32_t> &rules_first,
+                              const std::vector<int32_t> &rules_second,
+                              uint32_t min_rule_id, int delta_round,
+                              Emit emit) {
   if (index + 1 >= compressed_offsets.size()) {
     throw std::out_of_range(std::string(kWriterErrorPrefix) +
                             "sequence index out of range");
@@ -92,29 +94,25 @@ decode_sequence_at_index(const std::vector<int32_t> &flat,
 
   const uint32_t max_rule_id =
       min_rule_id + static_cast<uint32_t>(rules_first.size());
-  const size_t original_length =
-      (index + 1 < original_offsets.size())
-          ? (original_offsets[index + 1] - original_offsets[index])
-          : (end - start);
-
-  std::vector<gfaz::NodeId> decoded;
-  decoded.reserve(original_length);
+  std::vector<int64_t> delta_sums(static_cast<size_t>(delta_round), 0);
+  auto emit_delta_decoded = [&](gfaz::NodeId node) {
+    int64_t decoded = node;
+    for (int64_t &sum : delta_sums) {
+      sum += decoded;
+      decoded = sum;
+    }
+    emit(static_cast<gfaz::NodeId>(decoded));
+  };
 
   for (size_t pos = start; pos < end; ++pos) {
     const gfaz::NodeId node = flat[pos];
     const uint32_t abs_id = static_cast<uint32_t>(std::abs(node));
     if (abs_id >= min_rule_id && abs_id < max_rule_id)
-      expand_rule(abs_id, node < 0, rules_first, rules_second, min_rule_id,
-                  max_rule_id, decoded);
+      expand_rule_emit(abs_id, node < 0, rules_first, rules_second, min_rule_id,
+                       max_rule_id, emit_delta_decoded);
     else
-      decoded.push_back(node);
+      emit_delta_decoded(node);
   }
-
-  std::vector<std::vector<gfaz::NodeId>> seqs(1);
-  seqs[0] = std::move(decoded);
-  for (int round = 0; round < delta_round; ++round)
-    gfaz::Codec::inverse_delta_transform(seqs);
-  return std::move(seqs[0]);
 }
 
 template <typename Formatter>
@@ -596,10 +594,6 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
   const FieldOffsets link_offsets = build_field_offsets(link_optional_fields);
   const SequenceOffsets path_offsets = build_offsets(data.sequence_lengths);
   const SequenceOffsets walk_offsets = build_offsets(data.walk_lengths);
-  const SequenceOffsets original_path_offsets =
-      build_offsets(data.original_path_lengths);
-  const SequenceOffsets original_walk_offsets =
-      build_offsets(data.original_walk_lengths);
   t1 = Clock::now();
   debug_stages.push_back({"build traversal offsets", elapsed_ms(t0, t1)});
 
@@ -713,12 +707,6 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
   t0 = Clock::now();
   write_sequence_batch_stream(out, data.sequence_lengths.size(), num_threads,
                               [&](size_t index) {
-                                const std::vector<gfaz::NodeId> path =
-                                    decode_sequence_at_index(
-                                        paths_flat, path_offsets,
-                                        original_path_offsets, index,
-                                        rules_first, rules_second, min_rule_id,
-                                        data.delta_round);
                                 const std::string &name =
                                     (index < path_names.size()) ? path_names[index]
                                                                 : std::to_string(index);
@@ -726,8 +714,35 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
                                     (index < path_overlaps.size())
                                         ? path_overlaps[index]
                                         : "";
-                                return format_path_line_numeric(
-                                    name, path.data(), path.size(), overlap);
+                                const size_t original_length =
+                                    index < data.original_path_lengths.size()
+                                        ? data.original_path_lengths[index]
+                                        : 0;
+                                std::string path_line;
+                                path_line.reserve(name.size() + overlap.size() +
+                                                  original_length * 10 + 8);
+                                path_line += "P\t";
+                                path_line += name;
+                                path_line += '\t';
+                                bool first_node = true;
+                                decode_sequence_at_index(
+                                    paths_flat, path_offsets, index, rules_first,
+                                    rules_second, min_rule_id, data.delta_round,
+                                    [&](gfaz::NodeId node) {
+                                      if (!first_node)
+                                        path_line += ',';
+                                      first_node = false;
+                                      const bool reverse = node < 0;
+                                      append_numeric_node_name(
+                                          path_line,
+                                          static_cast<uint32_t>(reverse ? -node
+                                                                        : node));
+                                      path_line += reverse ? '-' : '+';
+                                    });
+                                path_line += '\t';
+                                path_line += overlap.empty() ? "*" : overlap;
+                                path_line += '\n';
+                                return path_line;
                               });
   t1 = Clock::now();
   debug_stages.push_back({"expand and stream paths", elapsed_ms(t0, t1)});
@@ -737,12 +752,6 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
   t0 = Clock::now();
   write_sequence_batch_stream(out, data.walk_lengths.size(), num_threads,
                               [&](size_t index) {
-                                const std::vector<gfaz::NodeId> walk =
-                                    decode_sequence_at_index(
-                                        walks_flat, walk_offsets,
-                                        original_walk_offsets, index,
-                                        rules_first, rules_second, min_rule_id,
-                                        data.delta_round);
                                 const std::string &sample_id =
                                     (index < walk_sample_ids.size())
                                         ? walk_sample_ids[index]
@@ -763,9 +772,41 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
                                     (index < walk_seq_ends.size())
                                         ? walk_seq_ends[index]
                                         : -1;
-                                return format_walk_line_numeric(
-                                    sample_id, hap_index, seq_id, seq_start,
-                                    seq_end, walk.data(), walk.size());
+                                const size_t original_length =
+                                    index < data.original_walk_lengths.size()
+                                        ? data.original_walk_lengths[index]
+                                        : 0;
+                                std::string walk_line;
+                                walk_line.reserve(sample_id.size() + seq_id.size() +
+                                                  original_length * 10 + 32);
+                                walk_line += "W\t";
+                                walk_line += sample_id;
+                                walk_line += '\t';
+                                walk_line += std::to_string(hap_index);
+                                walk_line += '\t';
+                                walk_line += seq_id;
+                                walk_line += '\t';
+                                walk_line += seq_start >= 0
+                                                 ? std::to_string(seq_start)
+                                                 : "*";
+                                walk_line += '\t';
+                                walk_line += seq_end >= 0
+                                                 ? std::to_string(seq_end)
+                                                 : "*";
+                                walk_line += '\t';
+                                decode_sequence_at_index(
+                                    walks_flat, walk_offsets, index, rules_first,
+                                    rules_second, min_rule_id, data.delta_round,
+                                    [&](gfaz::NodeId node) {
+                                      const bool reverse = node < 0;
+                                      walk_line += reverse ? '<' : '>';
+                                      append_numeric_node_name(
+                                          walk_line,
+                                          static_cast<uint32_t>(reverse ? -node
+                                                                        : node));
+                                    });
+                                walk_line += '\n';
+                                return walk_line;
                               });
   t1 = Clock::now();
   debug_stages.push_back({"expand and stream walks", elapsed_ms(t0, t1)});
