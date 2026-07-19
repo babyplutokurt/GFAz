@@ -338,27 +338,21 @@ compress_delta_varint_uint32(const std::vector<uint32_t> &data) {
     return block;
   }
 
-  // Signed delta encode (handles non-sorted data correctly)
-  std::vector<int32_t> deltas(data.size());
-  deltas[0] = static_cast<int32_t>(data[0]);
-  for (size_t i = 1; i < data.size(); ++i) {
-    deltas[i] =
-        static_cast<int32_t>(data[i]) - static_cast<int32_t>(data[i - 1]);
-  }
-
-  // Zigzag + Varint encode (zigzag maps signed to unsigned for efficient
-  // varint)
+  // Fuse signed delta, zigzag, and varint encoding so large ID columns do not
+  // require a full-size delta staging vector.
   std::vector<uint8_t> varint_bytes;
   varint_bytes.reserve(data.size() * 2);
-  for (int32_t val : deltas) {
-    // Zigzag encode: (val << 1) ^ (val >> 31)
-    uint32_t zigzag = static_cast<uint32_t>((val << 1) ^ (val >> 31));
+  uint32_t previous = 0;
+  for (uint32_t value : data) {
+    const int32_t delta = static_cast<int32_t>(value - previous);
+    previous = value;
+    const uint32_t zigzag =
+        (static_cast<uint32_t>(delta) << 1) ^
+        static_cast<uint32_t>(delta >> 31);
     append_varint(zigzag, varint_bytes);
   }
 
-  // ZSTD compress
-  return zstd_compress_string(
-      std::string(varint_bytes.begin(), varint_bytes.end()));
+  return zstd_compress_bytes(varint_bytes.data(), varint_bytes.size());
 }
 
 std::vector<uint32_t>
