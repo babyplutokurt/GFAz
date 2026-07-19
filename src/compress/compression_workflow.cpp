@@ -18,6 +18,10 @@
 #include <string>
 #include <vector>
 
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -58,6 +62,26 @@ struct CompressionContext {
 
   std::vector<Packed2mer> rulebook;
 };
+
+// Grammar encoding shrinks vectors in place, leaving their original traversal
+// capacity resident. Copy only heavily over-provisioned vectors after the last
+// round so entropy coding runs with the compact representation.
+void compact_encoded_traversals(
+    std::vector<std::vector<gfaz::NodeId>> &sequences) {
+  constexpr size_t kMinimumReclaimElements =
+      (64ull * 1024ull) / sizeof(gfaz::NodeId);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic)
+#endif
+  for (size_t i = 0; i < sequences.size(); ++i) {
+    auto &sequence = sequences[i];
+    const size_t unused = sequence.capacity() - sequence.size();
+    if (unused <= sequence.size() ||
+        unused < kMinimumReclaimElements)
+      continue;
+    std::vector<gfaz::NodeId>(sequence).swap(sequence);
+  }
+}
 
 struct PathCompressionInput {
   std::vector<int32_t> flat;
@@ -283,6 +307,12 @@ double run_grammar_stage(CompressionContext &ctx) {
   run_grammar_compression(ctx.graph.paths_data.traversals, ctx.graph.walks.walks, ctx.next_id,
                           ctx.num_rounds, ctx.freq_threshold, ctx.layer_start,
                           ctx.rulebook, ctx.num_threads);
+  compact_encoded_traversals(ctx.graph.paths_data.traversals);
+  compact_encoded_traversals(ctx.graph.walks.walks);
+#if defined(__GLIBC__)
+  // Return pages released from OpenMP allocator arenas to the OS.
+  malloc_trim(0);
+#endif
   const auto end = std::chrono::high_resolution_clock::now();
 
   const uint32_t rule_count = ctx.next_id - ctx.layer_start;
