@@ -751,6 +751,587 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   madvise(const_cast<char *>(mmap_data), file_size, MADV_SEQUENTIAL);
   log_phase("mmap+madvise");
 
+  // Dense numeric GFAs can be parsed without retaining an offset for every
+  // record. The first pass counts each record family per ordered byte range;
+  // the second uses family-specific prefix sums to write directly into exact
+  // output slots. Cross-family records may be arbitrarily interleaved.
+  {
+    struct DirectChunkStats {
+      size_t segments = 0;
+      size_t links = 0;
+      size_t paths = 0;
+      size_t walks = 0;
+      size_t jumps = 0;
+      size_t containments = 0;
+      size_t sequence_bytes = 0;
+      uint32_t first_segment_id = 0;
+      uint32_t last_segment_id = 0;
+      bool numeric_segments = true;
+      bool locally_sequential_segments = true;
+      gfaz::LineOffset first_segment{};
+      gfaz::LineOffset first_link{};
+      gfaz::LineOffset last_header{};
+      bool has_first_segment = false;
+      bool has_first_link = false;
+      bool has_header = false;
+    };
+
+    const int direct_threads =
+        std::max(1, resolve_omp_thread_count(num_threads));
+    std::vector<size_t> direct_boundaries(
+        static_cast<size_t>(direct_threads) + 1);
+    direct_boundaries.front() = 0;
+    direct_boundaries.back() = file_size;
+    for (int t = 1; t < direct_threads; ++t) {
+      size_t boundary =
+          (file_size / static_cast<size_t>(direct_threads)) *
+          static_cast<size_t>(t);
+      while (boundary < file_size && mmap_data[boundary - 1] != '\n')
+        ++boundary;
+      direct_boundaries[static_cast<size_t>(t)] = boundary;
+    }
+
+    const size_t direct_page_size =
+        static_cast<size_t>(sysconf(_SC_PAGESIZE));
+    constexpr size_t kDirectReleaseWindow = 16ull * 1024ull * 1024ull;
+    std::vector<DirectChunkStats> direct_stats(
+        static_cast<size_t>(direct_threads));
+    std::atomic<bool> direct_scan_failed{false};
+
+    auto parse_numeric_id_noexcept = [](std::string_view value,
+                                        uint32_t &parsed) {
+      if (value.empty())
+        return false;
+      uint64_t result = 0;
+      for (char c : value) {
+        if (c < '0' || c > '9')
+          return false;
+        result = result * 10 + static_cast<uint32_t>(c - '0');
+        if (result > std::numeric_limits<uint32_t>::max())
+          return false;
+      }
+      parsed = static_cast<uint32_t>(result);
+      return true;
+    };
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for (int t = 0; t < direct_threads; ++t) {
+      auto &local = direct_stats[static_cast<size_t>(t)];
+      const size_t range_start =
+          direct_boundaries[static_cast<size_t>(t)];
+      const size_t range_end =
+          direct_boundaries[static_cast<size_t>(t) + 1];
+      size_t line_start = range_start;
+      size_t release_cursor =
+          ((range_start + direct_page_size - 1) / direct_page_size) *
+          direct_page_size;
+
+      while (line_start < range_end) {
+        const void *newline =
+            std::memchr(mmap_data + line_start, '\n', range_end - line_start);
+        const size_t line_end =
+            newline == nullptr
+                ? range_end
+                : static_cast<size_t>(static_cast<const char *>(newline) -
+                                      mmap_data);
+        size_t line_len = line_end - line_start;
+        if (line_len > 0 && mmap_data[line_start + line_len - 1] == '\r')
+          --line_len;
+
+        if (line_len > 0) {
+          const gfaz::LineOffset offset{line_start, line_len};
+          switch (mmap_data[line_start]) {
+          case 'S': {
+            if (!local.has_first_segment) {
+              local.first_segment = offset;
+              local.has_first_segment = true;
+            }
+            const std::string_view line(mmap_data + line_start, line_len);
+            size_t pos = 1;
+            const std::string_view name = next_field(line, pos);
+            const std::string_view sequence = next_field(line, pos);
+            if (sequence.size() > std::numeric_limits<uint32_t>::max())
+              direct_scan_failed.store(true, std::memory_order_relaxed);
+
+            uint32_t id = 0;
+            if (!parse_numeric_id_noexcept(name, id) || id == 0) {
+              local.numeric_segments = false;
+            } else {
+              if (local.segments == 0) {
+                local.first_segment_id = id;
+              } else if (id != local.last_segment_id + 1) {
+                local.locally_sequential_segments = false;
+              }
+              local.last_segment_id = id;
+            }
+            if (sequence.size() >
+                std::numeric_limits<size_t>::max() - local.sequence_bytes) {
+              direct_scan_failed.store(true, std::memory_order_relaxed);
+            } else {
+              local.sequence_bytes += sequence.size();
+            }
+            ++local.segments;
+            break;
+          }
+          case 'L':
+            if (!local.has_first_link) {
+              local.first_link = offset;
+              local.has_first_link = true;
+            }
+            ++local.links;
+            break;
+          case 'P':
+            ++local.paths;
+            break;
+          case 'W':
+            ++local.walks;
+            break;
+          case 'J':
+            ++local.jumps;
+            break;
+          case 'C':
+            ++local.containments;
+            break;
+          case 'H':
+            local.last_header = offset;
+            local.has_header = true;
+            break;
+          }
+        }
+
+        line_start = line_end + (newline == nullptr ? 0 : 1);
+        if (line_start >= release_cursor + kDirectReleaseWindow) {
+          const size_t release_end =
+              (line_start / direct_page_size) * direct_page_size;
+          if (release_end > release_cursor) {
+            madvise(const_cast<char *>(mmap_data) + release_cursor,
+                    release_end - release_cursor, MADV_DONTNEED);
+            release_cursor = release_end;
+          }
+        }
+      }
+
+      const size_t release_end =
+          (range_end / direct_page_size) * direct_page_size;
+      if (release_end > release_cursor) {
+        madvise(const_cast<char *>(mmap_data) + release_cursor,
+                release_end - release_cursor, MADV_DONTNEED);
+      }
+    }
+
+    std::vector<size_t> segment_bases(
+        static_cast<size_t>(direct_threads) + 1, 0);
+    std::vector<size_t> link_bases(
+        static_cast<size_t>(direct_threads) + 1, 0);
+    std::vector<size_t> path_bases(
+        static_cast<size_t>(direct_threads) + 1, 0);
+    std::vector<size_t> walk_bases(
+        static_cast<size_t>(direct_threads) + 1, 0);
+    std::vector<size_t> jump_bases(
+        static_cast<size_t>(direct_threads) + 1, 0);
+    std::vector<size_t> containment_bases(
+        static_cast<size_t>(direct_threads) + 1, 0);
+    std::vector<size_t> sequence_byte_bases(
+        static_cast<size_t>(direct_threads) + 1, 0);
+
+    bool direct_eligible =
+        !direct_scan_failed.load(std::memory_order_relaxed);
+    gfaz::LineOffset first_segment{};
+    gfaz::LineOffset first_link{};
+    bool have_first_segment = false;
+    bool have_first_link = false;
+    gfaz::LineOffset last_header{};
+    bool have_header = false;
+
+    for (int t = 0; t < direct_threads; ++t) {
+      const size_t i = static_cast<size_t>(t);
+      const auto &local = direct_stats[i];
+      segment_bases[i + 1] = segment_bases[i] + local.segments;
+      link_bases[i + 1] = link_bases[i] + local.links;
+      path_bases[i + 1] = path_bases[i] + local.paths;
+      walk_bases[i + 1] = walk_bases[i] + local.walks;
+      jump_bases[i + 1] = jump_bases[i] + local.jumps;
+      containment_bases[i + 1] =
+          containment_bases[i] + local.containments;
+      if (local.sequence_bytes >
+          std::numeric_limits<size_t>::max() - sequence_byte_bases[i]) {
+        direct_eligible = false;
+      } else {
+        sequence_byte_bases[i + 1] =
+            sequence_byte_bases[i] + local.sequence_bytes;
+      }
+
+      if (local.segments > 0) {
+        const uint64_t expected_first =
+            static_cast<uint64_t>(segment_bases[i]) + 1;
+        if (!local.numeric_segments ||
+            !local.locally_sequential_segments ||
+            expected_first > std::numeric_limits<uint32_t>::max() ||
+            local.first_segment_id != expected_first) {
+          direct_eligible = false;
+        }
+        if (!have_first_segment) {
+          first_segment = local.first_segment;
+          have_first_segment = true;
+        }
+      }
+      if (local.has_first_link && !have_first_link) {
+        first_link = local.first_link;
+        have_first_link = true;
+      }
+      if (local.has_header) {
+        last_header = local.last_header;
+        have_header = true;
+      }
+    }
+
+    FixedFieldMeta direct_segment_meta;
+    FixedFieldMeta direct_link_meta;
+    std::vector<gfaz::OptionalFieldColumn> direct_segment_optional_columns;
+    std::vector<gfaz::OptionalFieldColumn> direct_link_optional_columns;
+    if (direct_eligible && have_first_segment) {
+      const std::string_view line(mmap_data + first_segment.offset,
+                                  first_segment.length);
+      size_t pos = 1;
+      (void)next_field(line, pos);
+      (void)next_field(line, pos);
+      direct_eligible = initialize_fixed_optional_columns(
+          line, pos, segment_bases.back(), direct_segment_optional_columns,
+          direct_segment_meta);
+    }
+    if (direct_eligible && have_first_link) {
+      const std::string_view line(mmap_data + first_link.offset,
+                                  first_link.length);
+      size_t pos = 1;
+      for (int field = 0; field < 5; ++field)
+        (void)next_field(line, pos);
+      direct_eligible = initialize_fixed_optional_columns(
+          line, pos, link_bases.back(), direct_link_optional_columns,
+          direct_link_meta);
+    }
+    log_phase(direct_eligible ? "direct pass 1" : "direct pass 1 fallback");
+
+    if (direct_eligible) {
+      gfaz::GfaGraph direct_graph;
+      direct_graph.segments.node_id_to_name.push_back("");
+      direct_graph.segments.node_sequences.push_back("");
+      if (have_header) {
+        direct_graph.header_line =
+            std::string(mmap_data + last_header.offset, last_header.length);
+      }
+
+      if (direct_segment_columns) {
+        direct_graph.segments.node_sequence_lengths.resize(
+            segment_bases.back());
+        direct_graph.segments.node_sequences_concat.resize(
+            sequence_byte_bases.back());
+      } else {
+        direct_graph.segments.node_id_to_name.resize(
+            segment_bases.back() + 1);
+        direct_graph.segments.node_sequences.resize(
+            segment_bases.back() + 1);
+      }
+      direct_graph.segments.optional_fields =
+          std::move(direct_segment_optional_columns);
+
+      direct_graph.links.from_ids.resize(link_bases.back());
+      direct_graph.links.to_ids.resize(link_bases.back());
+      direct_graph.links.from_orients.resize(link_bases.back());
+      direct_graph.links.to_orients.resize(link_bases.back());
+      direct_graph.links.overlap_nums.resize(link_bases.back());
+      direct_graph.links.overlap_ops.resize(link_bases.back());
+      direct_graph.link_optional_fields =
+          std::move(direct_link_optional_columns);
+
+      direct_graph.paths_data.traversals.resize(path_bases.back());
+      direct_graph.paths_data.names.resize(path_bases.back());
+      direct_graph.paths_data.overlaps.resize(path_bases.back());
+      direct_graph.walks.walks.resize(walk_bases.back());
+      direct_graph.walks.sample_ids.resize(walk_bases.back());
+      direct_graph.walks.hap_indices.resize(walk_bases.back());
+      direct_graph.walks.seq_ids.resize(walk_bases.back());
+      direct_graph.walks.seq_starts.resize(walk_bases.back());
+      direct_graph.walks.seq_ends.resize(walk_bases.back());
+
+      direct_graph.jumps.from_ids.resize(jump_bases.back());
+      direct_graph.jumps.from_orients.resize(jump_bases.back());
+      direct_graph.jumps.to_ids.resize(jump_bases.back());
+      direct_graph.jumps.to_orients.resize(jump_bases.back());
+      direct_graph.jumps.distances.resize(jump_bases.back());
+      direct_graph.jumps.rest_fields.resize(jump_bases.back());
+
+      direct_graph.containments.container_ids.resize(
+          containment_bases.back());
+      direct_graph.containments.container_orients.resize(
+          containment_bases.back());
+      direct_graph.containments.contained_ids.resize(
+          containment_bases.back());
+      direct_graph.containments.contained_orients.resize(
+          containment_bases.back());
+      direct_graph.containments.positions.resize(
+          containment_bases.back());
+      direct_graph.containments.overlaps.resize(
+          containment_bases.back());
+      direct_graph.containments.rest_fields.resize(
+          containment_bases.back());
+
+      num_segments_hint_ = segment_bases.back();
+      num_links_hint_ = link_bases.back();
+      all_segment_names_numeric_ = true;
+      std::atomic<bool> direct_fill_failed{false};
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+      for (int t = 0; t < direct_threads; ++t) {
+        const size_t chunk = static_cast<size_t>(t);
+        const size_t range_start = direct_boundaries[chunk];
+        const size_t range_end = direct_boundaries[chunk + 1];
+        size_t segment_index = segment_bases[chunk];
+        size_t link_index = link_bases[chunk];
+        size_t path_index = path_bases[chunk];
+        size_t walk_index = walk_bases[chunk];
+        size_t jump_index = jump_bases[chunk];
+        size_t containment_index = containment_bases[chunk];
+        size_t sequence_byte_index = sequence_byte_bases[chunk];
+        size_t line_start = range_start;
+        size_t release_cursor =
+            ((range_start + direct_page_size - 1) / direct_page_size) *
+            direct_page_size;
+
+        while (line_start < range_end) {
+          const void *newline =
+              std::memchr(mmap_data + line_start, '\n',
+                          range_end - line_start);
+          const size_t line_end =
+              newline == nullptr
+                  ? range_end
+                  : static_cast<size_t>(
+                        static_cast<const char *>(newline) - mmap_data);
+          size_t line_len = line_end - line_start;
+          if (line_len > 0 && mmap_data[line_start + line_len - 1] == '\r')
+            --line_len;
+
+          if (line_len > 0 &&
+              !direct_fill_failed.load(std::memory_order_relaxed)) {
+            try {
+              const std::string_view line(mmap_data + line_start, line_len);
+              switch (mmap_data[line_start]) {
+              case 'S': {
+                size_t pos = 1;
+                const std::string_view name = next_field(line, pos);
+                const std::string_view sequence = next_field(line, pos);
+                if (!numeric_name_matches_id(
+                        name, static_cast<uint32_t>(segment_index + 1)) ||
+                    !assign_fixed_optional_fields(
+                        line, pos, segment_index,
+                        direct_graph.segments.optional_fields,
+                        direct_segment_meta)) {
+                  direct_fill_failed.store(true, std::memory_order_relaxed);
+                  break;
+                }
+                if (direct_segment_columns) {
+                  direct_graph.segments.node_sequence_lengths[segment_index] =
+                      static_cast<uint32_t>(sequence.size());
+                  std::memcpy(
+                      direct_graph.segments.node_sequences_concat.data() +
+                          sequence_byte_index,
+                      sequence.data(), sequence.size());
+                  sequence_byte_index += sequence.size();
+                } else {
+                  direct_graph.segments.node_id_to_name[segment_index + 1] =
+                      std::string(name);
+                  direct_graph.segments.node_sequences[segment_index + 1] =
+                      std::string(sequence);
+                }
+                ++segment_index;
+                break;
+              }
+              case 'L': {
+                size_t pos = 1;
+                const uint32_t from_id = parse_uint32(next_field(line, pos));
+                const std::string_view from_orient = next_field(line, pos);
+                const uint32_t to_id = parse_uint32(next_field(line, pos));
+                const std::string_view to_orient = next_field(line, pos);
+                const std::string_view overlap = next_field(line, pos);
+                if (from_id == 0 || to_id == 0 ||
+                    !assign_fixed_optional_fields(
+                        line, pos, link_index,
+                        direct_graph.link_optional_fields,
+                        direct_link_meta)) {
+                  direct_fill_failed.store(true, std::memory_order_relaxed);
+                  break;
+                }
+                direct_graph.links.from_ids[link_index] = from_id;
+                direct_graph.links.to_ids[link_index] = to_id;
+                direct_graph.links.from_orients[link_index] =
+                    from_orient.empty() ? '+' : from_orient[0];
+                direct_graph.links.to_orients[link_index] =
+                    to_orient.empty() ? '+' : to_orient[0];
+                if (overlap.empty() || overlap == "*") {
+                  direct_graph.links.overlap_nums[link_index] = 0;
+                  direct_graph.links.overlap_ops[link_index] = '\0';
+                } else {
+                  char op = '\0';
+                  direct_graph.links.overlap_nums[link_index] =
+                      parse_overlap_num(overlap, op);
+                  direct_graph.links.overlap_ops[link_index] = op;
+                }
+                ++link_index;
+                break;
+              }
+              case 'P':
+                parse_p_line(line, direct_graph, path_index++);
+                break;
+              case 'W':
+                parse_w_line(line, direct_graph, walk_index++);
+                break;
+              case 'J': {
+                size_t pos = 1;
+                const uint32_t from_id =
+                    parse_uint32(next_field(line, pos));
+                const std::string_view from_orient = next_field(line, pos);
+                const uint32_t to_id = parse_uint32(next_field(line, pos));
+                const std::string_view to_orient = next_field(line, pos);
+                const std::string_view distance = next_field(line, pos);
+                if (from_id == 0 || to_id == 0) {
+                  direct_fill_failed.store(true, std::memory_order_relaxed);
+                  break;
+                }
+                direct_graph.jumps.from_ids[jump_index] = from_id;
+                direct_graph.jumps.from_orients[jump_index] =
+                    from_orient.empty() ? '+' : from_orient[0];
+                direct_graph.jumps.to_ids[jump_index] = to_id;
+                direct_graph.jumps.to_orients[jump_index] =
+                    to_orient.empty() ? '+' : to_orient[0];
+                direct_graph.jumps.distances[jump_index] =
+                    std::string(distance);
+                std::string rest;
+                while (pos < line.size()) {
+                  const std::string_view field = next_field(line, pos);
+                  if (field.empty())
+                    break;
+                  if (!rest.empty())
+                    rest += '\t';
+                  rest.append(field.data(), field.size());
+                }
+                direct_graph.jumps.rest_fields[jump_index] = std::move(rest);
+                ++jump_index;
+                break;
+              }
+              case 'C': {
+                size_t pos = 1;
+                const uint32_t container_id =
+                    parse_uint32(next_field(line, pos));
+                const std::string_view container_orient =
+                    next_field(line, pos);
+                const uint32_t contained_id =
+                    parse_uint32(next_field(line, pos));
+                const std::string_view contained_orient =
+                    next_field(line, pos);
+                const std::string_view position = next_field(line, pos);
+                const std::string_view overlap = next_field(line, pos);
+                if (container_id == 0 || contained_id == 0) {
+                  direct_fill_failed.store(true, std::memory_order_relaxed);
+                  break;
+                }
+                direct_graph.containments.container_ids[containment_index] =
+                    container_id;
+                direct_graph.containments.container_orients[
+                    containment_index] =
+                    container_orient.empty() ? '+' : container_orient[0];
+                direct_graph.containments.contained_ids[containment_index] =
+                    contained_id;
+                direct_graph.containments.contained_orients[
+                    containment_index] =
+                    contained_orient.empty() ? '+' : contained_orient[0];
+                direct_graph.containments.positions[containment_index] =
+                    parse_uint32(position);
+                direct_graph.containments.overlaps[containment_index] =
+                    std::string(overlap);
+                std::string rest;
+                while (pos < line.size()) {
+                  const std::string_view field = next_field(line, pos);
+                  if (field.empty())
+                    break;
+                  if (!rest.empty())
+                    rest += '\t';
+                  rest.append(field.data(), field.size());
+                }
+                direct_graph.containments.rest_fields[containment_index] =
+                    std::move(rest);
+                ++containment_index;
+                break;
+              }
+              }
+            } catch (...) {
+              direct_fill_failed.store(true, std::memory_order_relaxed);
+            }
+          }
+
+          line_start = line_end + (newline == nullptr ? 0 : 1);
+          if (line_start >= release_cursor + kDirectReleaseWindow) {
+            const size_t release_end =
+                (line_start / direct_page_size) * direct_page_size;
+            if (release_end > release_cursor) {
+              madvise(const_cast<char *>(mmap_data) + release_cursor,
+                      release_end - release_cursor, MADV_DONTNEED);
+              release_cursor = release_end;
+            }
+          }
+        }
+
+        const size_t release_end =
+            (range_end / direct_page_size) * direct_page_size;
+        if (release_end > release_cursor) {
+          madvise(const_cast<char *>(mmap_data) + release_cursor,
+                  release_end - release_cursor, MADV_DONTNEED);
+        }
+      }
+
+      if (!direct_fill_failed.load(std::memory_order_relaxed)) {
+        graph = std::move(direct_graph);
+        log_phase("direct pass 2");
+        madvise(const_cast<char *>(mmap_data), file_size, MADV_DONTNEED);
+        munmap(const_cast<char *>(mmap_data), file_size);
+        close(fd);
+        log_phase("munmap+close");
+
+        if (gfaz_debug_enabled()) {
+          const auto parse_end = Clock::now();
+          const double parse_ms =
+              std::chrono::duration<double, std::milli>(parse_end - parse_start)
+                  .count();
+          const auto snapshot = read_process_memory_snapshot();
+          std::cerr << "[GfaParser] segments=" << graph.segments.size()
+                    << ", links=" << graph.links.from_ids.size()
+                    << ", paths=" << graph.paths_data.traversals.size()
+                    << ", walks=" << graph.walks.size()
+                    << ", jumps=" << graph.jumps.size()
+                    << ", containments=" << graph.containments.size()
+                    << ", mode=direct-two-pass"
+                    << ", time=" << std::fixed << std::setprecision(2)
+                    << parse_ms << " ms"
+                    << " | " << format_memory_snapshot(snapshot) << std::endl;
+          print_graph_memory_breakdown(graph);
+        }
+        return graph;
+      }
+
+      log_phase("direct pass 2 fallback");
+      segment_field_meta_.clear();
+      link_field_meta_.clear();
+      node_name_lookup_.clear();
+      num_segments_hint_ = 0;
+      num_links_hint_ = 0;
+      all_segment_names_numeric_ = true;
+    }
+
+    madvise(const_cast<char *>(mmap_data), file_size, MADV_DONTNEED);
+  }
+
   // Parallel line classification. Split the mapping at newline boundaries so
   // each worker owns complete lines, then concatenate the per-range offsets in
   // range order to preserve the input order within each record type.

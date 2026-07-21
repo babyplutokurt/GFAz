@@ -134,11 +134,26 @@ def test_interleaved_record_families(cli: Path):
       "S\tbeta\tC\n"
   )
 
+  grouped_out_of_order = (
+      "H\tVN:Z:1.1\n"
+      "S\t2\tC\n"
+      "S\t1\tA\n"
+      "P\tout-of-order\t2+,1+\t*\n"
+  )
+  interleaved_out_of_order = (
+      "H\tVN:Z:1.1\n"
+      "P\tout-of-order\t2+,1+\t*\n"
+      "S\t2\tC\n"
+      "S\t1\tA\n"
+  )
+
   with tempfile.TemporaryDirectory() as dd:
     d = Path(dd)
     for label, grouped, interleaved in (
         ("numeric", grouped_numeric, interleaved_numeric),
         ("named", grouped_named, interleaved_named),
+        ("out-of-order", grouped_out_of_order,
+         interleaved_out_of_order),
     ):
       grouped_gfa = d / f"{label}.grouped.gfa"
       interleaved_gfa = d / f"{label}.interleaved.gfa"
