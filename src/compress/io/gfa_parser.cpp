@@ -755,7 +755,41 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   // record. The first pass counts each record family per ordered byte range;
   // the second uses family-specific prefix sums to write directly into exact
   // output slots. Cross-family records may be arbitrarily interleaved.
-  {
+  bool try_direct_parser = true;
+  size_t direct_probe_start = 0;
+  while (direct_probe_start < file_size) {
+    const void *newline =
+        std::memchr(mmap_data + direct_probe_start, '\n',
+                    file_size - direct_probe_start);
+    const size_t line_end =
+        newline == nullptr
+            ? file_size
+            : static_cast<size_t>(
+                  static_cast<const char *>(newline) - mmap_data);
+    size_t line_len = line_end - direct_probe_start;
+    if (line_len > 0 &&
+        mmap_data[direct_probe_start + line_len - 1] == '\r')
+      --line_len;
+
+    if (line_len > 0 && mmap_data[direct_probe_start] == 'S') {
+      const std::string_view line(mmap_data + direct_probe_start, line_len);
+      size_t pos = 1;
+      const std::string_view name = next_field(line, pos);
+      (void)next_field(line, pos);
+      try_direct_parser = numeric_name_matches_id(name, 1);
+      if (try_direct_parser) {
+        std::vector<gfaz::OptionalFieldColumn> probe_columns;
+        FixedFieldMeta probe_meta;
+        try_direct_parser = initialize_fixed_optional_columns(
+            line, pos, 0, probe_columns, probe_meta);
+      }
+      break;
+    }
+
+    direct_probe_start = line_end + (newline == nullptr ? 0 : 1);
+  }
+
+  if (try_direct_parser) {
     struct DirectChunkStats {
       size_t segments = 0;
       size_t links = 0;
@@ -829,6 +863,9 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
           direct_page_size;
 
       while (line_start < range_end) {
+        if (direct_scan_failed.load(std::memory_order_relaxed))
+          break;
+
         const void *newline =
             std::memchr(mmap_data + line_start, '\n', range_end - line_start);
         const size_t line_end =
@@ -858,11 +895,15 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
             uint32_t id = 0;
             if (!parse_numeric_id_noexcept(name, id) || id == 0) {
               local.numeric_segments = false;
+              direct_scan_failed.store(true, std::memory_order_relaxed);
+              break;
             } else {
               if (local.segments == 0) {
                 local.first_segment_id = id;
               } else if (id != local.last_segment_id + 1) {
                 local.locally_sequential_segments = false;
+                direct_scan_failed.store(true, std::memory_order_relaxed);
+                break;
               }
               local.last_segment_id = id;
             }
@@ -1330,6 +1371,9 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     }
 
     madvise(const_cast<char *>(mmap_data), file_size, MADV_DONTNEED);
+  } else {
+    madvise(const_cast<char *>(mmap_data), file_size, MADV_DONTNEED);
+    log_phase("direct preflight fallback");
   }
 
   // Parallel line classification. Split the mapping at newline boundaries so
