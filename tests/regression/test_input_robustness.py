@@ -6,6 +6,8 @@ Covers gaps hardened in the audit:
   - CRLF (Windows) line endings round-trip identically to LF (no stray '\\r'
     leaking into the last field of each line);
   - a parser that starts in sequential-numeric mode can fall back to string IDs;
+  - record families may be arbitrarily interleaved, including references that
+    appear before their segment definitions;
   - a 0-byte .gfa is a valid empty graph (compress+decompress succeed);
   - a truncated .gfaz fails with a clean non-zero exit, never a crash/signal.
 """
@@ -42,6 +44,11 @@ def _round_trip(cli: Path, gfa: Path, d: Path, tag: str) -> str:
   require_success(run_command([str(cli), "decompress", str(gfaz), str(out)]),
                   f"decompress {tag}")
   return out.read_text()
+
+
+def _compress(cli: Path, gfa: Path, gfaz: Path, tag: str):
+  require_success(run_command([str(cli), "compress", str(gfa), str(gfaz)]),
+                  f"compress {tag}")
 
 
 def test_crlf_matches_lf(cli: Path):
@@ -86,6 +93,75 @@ def test_numeric_to_string_id_fallback(cli: Path):
       if expected not in out:
         raise AssertionError(
             f"numeric-to-string fallback lost {expected!r}:\n{out}")
+
+
+def test_interleaved_record_families(cli: Path):
+  grouped_numeric = (
+      "H\tVN:Z:1.1\n"
+      "S\t1\tA\tLN:i:1\n"
+      "S\t2\tC\tLN:i:1\n"
+      "L\t2\t+\t1\t-\t0M\n"
+      "J\t2\t+\t1\t-\t*\n"
+      "C\t2\t+\t1\t-\t0\t0M\n"
+      "P\tp\t2-,1+\t*\n"
+      "W\ts\t0\tchr\t0\t2\t>1<2\n"
+  )
+  interleaved_numeric = (
+      "H\tVN:Z:1.1\n"
+      "P\tp\t2-,1+\t*\n"
+      "L\t2\t+\t1\t-\t0M\n"
+      "S\t1\tA\tLN:i:1\n"
+      "W\ts\t0\tchr\t0\t2\t>1<2\n"
+      "J\t2\t+\t1\t-\t*\n"
+      "S\t2\tC\tLN:i:1\n"
+      "C\t2\t+\t1\t-\t0\t0M\n"
+  )
+
+  grouped_named = (
+      "H\tVN:Z:1.1\n"
+      "S\talpha\tA\n"
+      "S\tbeta\tC\n"
+      "L\tbeta\t+\talpha\t-\t0M\n"
+      "P\tnamed\tbeta+,alpha-\t*\n"
+      "W\ts\t0\tchr\t0\t2\t>beta<alpha\n"
+  )
+  interleaved_named = (
+      "H\tVN:Z:1.1\n"
+      "P\tnamed\tbeta+,alpha-\t*\n"
+      "L\tbeta\t+\talpha\t-\t0M\n"
+      "S\talpha\tA\n"
+      "W\ts\t0\tchr\t0\t2\t>beta<alpha\n"
+      "S\tbeta\tC\n"
+  )
+
+  with tempfile.TemporaryDirectory() as dd:
+    d = Path(dd)
+    for label, grouped, interleaved in (
+        ("numeric", grouped_numeric, interleaved_numeric),
+        ("named", grouped_named, interleaved_named),
+    ):
+      grouped_gfa = d / f"{label}.grouped.gfa"
+      interleaved_gfa = d / f"{label}.interleaved.gfa"
+      grouped_gfaz = d / f"{label}.grouped.gfaz"
+      interleaved_gfaz = d / f"{label}.interleaved.gfaz"
+      grouped_gfa.write_text(grouped)
+      interleaved_gfa.write_text(interleaved)
+
+      _compress(cli, grouped_gfa, grouped_gfaz, f"{label} grouped")
+      _compress(cli, interleaved_gfa, interleaved_gfaz,
+                f"{label} interleaved")
+      if grouped_gfaz.read_bytes() != interleaved_gfaz.read_bytes():
+        raise AssertionError(
+            f"{label} interleaving changed the compressed archive")
+
+      grouped_out = _round_trip(cli, grouped_gfa, d, f"{label}.grouped.rt")
+      interleaved_out = _round_trip(
+          cli, interleaved_gfa, d, f"{label}.interleaved.rt")
+      if grouped_out != interleaved_out:
+        raise AssertionError(
+            f"{label} interleaving changed decompressed output:\n"
+            f"--- grouped ---\n{grouped_out}\n"
+            f"--- interleaved ---\n{interleaved_out}")
 
 
 def test_empty_file_is_empty_graph(cli: Path):
@@ -175,6 +251,7 @@ def main():
   ensure_cli_exists(cli)
   test_crlf_matches_lf(cli)
   test_numeric_to_string_id_fallback(cli)
+  test_interleaved_record_families(cli)
   test_empty_file_is_empty_graph(cli)
   test_truncated_gfaz_fails_cleanly(cli)
   test_unseekable_stdin_round_trip_and_truncation(cli)
