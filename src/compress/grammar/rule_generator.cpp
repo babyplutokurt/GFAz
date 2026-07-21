@@ -215,16 +215,19 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
   std::sort(merge_keys.begin(), merge_keys.end());
 #endif
 
+  size_t repeated_count = 0;
   for (size_t i = 1; i < merge_keys.size();) {
     if (merge_keys[i] != merge_keys[i - 1]) {
       ++i;
       continue;
     }
-    repeated_pairs.push_back(merge_keys[i]);
     const Packed2mer repeated = merge_keys[i];
+    merge_keys[repeated_count++] = repeated;
     while (i < merge_keys.size() && merge_keys[i] == repeated)
       ++i;
   }
+  merge_keys.resize(repeated_count);
+  repeated_pairs.swap(merge_keys);
 #else
   robin_hood::unordered_flat_set<Packed2mer> seen;
   robin_hood::unordered_flat_set<Packed2mer> repeated;
