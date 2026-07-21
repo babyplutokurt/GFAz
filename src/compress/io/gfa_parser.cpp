@@ -38,6 +38,12 @@ constexpr const char *kParserErrorPrefix = "GFA parser error: ";
 constexpr const char *kParserWarningPrefix = "GFA parser warning: ";
 using Clock = std::chrono::steady_clock;
 
+#if defined(__GNUC__) || defined(__clang__)
+#define GFAZ_NOINLINE __attribute__((noinline))
+#else
+#define GFAZ_NOINLINE
+#endif
+
 inline int64_t parse_int64(std::string_view s) {
   if (s.empty())
     throw std::invalid_argument("parse_int64: empty");
@@ -755,6 +761,10 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   // record. The first pass counts each record family per ordered byte range;
   // the second uses family-specific prefix sums to write directly into exact
   // output slots. Cross-family records may be arbitrarily interleaved.
+  // Keep this large branch out of the legacy parser's compiler function. When
+  // inlined here it changes register allocation and slows large fallback GFAs.
+  auto try_parse_direct =
+      [&] GFAZ_NOINLINE () -> bool {
   bool try_direct_parser = true;
   size_t direct_probe_start = 0;
   while (direct_probe_start < file_size) {
@@ -1358,7 +1368,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
                     << " | " << format_memory_snapshot(snapshot) << std::endl;
           print_graph_memory_breakdown(graph);
         }
-        return graph;
+        return true;
       }
 
       log_phase("direct pass 2 fallback");
@@ -1375,6 +1385,12 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     madvise(const_cast<char *>(mmap_data), file_size, MADV_DONTNEED);
     log_phase("direct preflight fallback");
   }
+
+  return false;
+  };
+
+  if (try_parse_direct())
+    return graph;
 
   // Parallel line classification. Split the mapping at newline boundaries so
   // each worker owns complete lines, then concatenate the per-range offsets in
