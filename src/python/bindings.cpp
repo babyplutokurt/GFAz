@@ -764,7 +764,10 @@ PYBIND11_MODULE(gfa_compression, m) {
       .def("num_paths", &FlattenedPaths::num_paths)
       .def("total_nodes", &FlattenedPaths::total_nodes);
 
-  // GPU-friendly graph/view data types available at module root.
+  // GPU-friendly graph/view data types available at module root. The backing
+  // definitions live in the CUDA-only sources, so these stay behind the guard;
+  // CPU-only builds would otherwise load with an undefined symbol.
+#ifdef ENABLE_CUDA
   py::class_<GfaGraph_gpu>(m, "GfaGraph_gpu")
       .def(py::init<>())
       .def_readonly("header_line", &GfaGraph_gpu::header_line)
@@ -801,6 +804,7 @@ PYBIND11_MODULE(gfa_compression, m) {
 
   m.def("convert_from_gpu_layout", &convert_from_gpu_layout,
         "Convert GfaGraph_gpu back to GfaGraph", py::arg("gpu_graph"));
+#endif
 
   py::module_ experimental =
       m.def_submodule("experimental", "Experimental or low-level APIs.");
