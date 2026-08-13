@@ -763,8 +763,10 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   // output slots. Cross-family records may be arbitrarily interleaved.
   // Keep this large branch out of the legacy parser's compiler function. When
   // inlined here it changes register allocation and slows large fallback GFAs.
+  // Clang only accepts a lambda attribute after the parameter list; GCC accepts
+  // it in either position, so keep it here to build with both.
   auto try_parse_direct =
-      [&] GFAZ_NOINLINE () -> bool {
+      [&]() GFAZ_NOINLINE -> bool {
   bool try_direct_parser = true;
   size_t direct_probe_start = 0;
   while (direct_probe_start < file_size) {
