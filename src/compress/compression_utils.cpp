@@ -3,6 +3,7 @@
 #include "compress/grammar/packed_2mer.hpp"
 #include "core/utils/runtime_utils.hpp"
 
+#include <algorithm>
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
@@ -39,18 +40,22 @@ void append_string_column(const std::vector<std::string> &values,
 void flatten_traversal_sequences(
     const std::vector<std::vector<gfaz::NodeId>> &sequences,
     std::vector<int32_t> &flattened, std::vector<uint32_t> &lengths) {
-  const size_t total = total_node_count(sequences);
+  const size_t num_sequences = sequences.size();
+  lengths.clear();
+  lengths.reserve(num_sequences);
+  std::vector<size_t> offsets(num_sequences + 1, 0);
+  for (size_t i = 0; i < num_sequences; ++i) {
+    lengths.push_back(static_cast<uint32_t>(sequences[i].size()));
+    offsets[i + 1] = offsets[i] + sequences[i].size();
+  }
 
   flattened.clear();
-  flattened.resize(total);
-  lengths.clear();
-  lengths.reserve(sequences.size());
+  flattened.resize(offsets.back());
+  int32_t *out = flattened.data();
 
-  size_t offset = 0;
-  for (const auto &sequence : sequences) {
-    lengths.push_back(static_cast<uint32_t>(sequence.size()));
-    for (gfaz::NodeId node : sequence)
-      flattened[offset++] = node;
+  for (size_t i = 0; i < num_sequences; ++i) {
+    const auto &sequence = sequences[i];
+    std::copy(sequence.begin(), sequence.end(), out + offsets[i]);
   }
 }
 

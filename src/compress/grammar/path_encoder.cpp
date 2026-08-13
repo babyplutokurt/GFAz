@@ -6,9 +6,9 @@
 
 namespace {
 
-template <typename MarkRule>
+template <typename RuleLookup, typename MarkRule>
 void encode_path_2mer(std::vector<gfaz::NodeId> &path,
-                      const CompressionRules2Mer &rules,
+                      const CompressionRules2Mer &rules, RuleLookup lookup,
                       MarkRule mark_rule) {
   size_t encoded_size = 0;
 
@@ -23,19 +23,40 @@ void encode_path_2mer(std::vector<gfaz::NodeId> &path,
     int32_t second = path[encoded_size - 1];
     Packed2mer top_kmer = pack_2mer(first, second);
     const Packed2mer canonical = canonical_2mer(top_kmer);
-    auto it = rules.kmer_to_rule_id.find(canonical);
-    if (it == rules.kmer_to_rule_id.end())
+    const uint32_t rule_id = lookup(canonical);
+    if (rule_id == RuleFlatMap::kNotFound)
       continue;
     const int32_t oriented_rule_id =
-        top_kmer == canonical ? static_cast<int32_t>(it->second)
-                              : -static_cast<int32_t>(it->second);
+        top_kmer == canonical ? static_cast<int32_t>(rule_id)
+                              : -static_cast<int32_t>(rule_id);
 
     path[encoded_size - 2] = oriented_rule_id;
     --encoded_size;
-    mark_rule(it->second - rules.rules_start_id);
+    mark_rule(rule_id - rules.rules_start_id);
   }
 
   path.resize(encoded_size);
+}
+
+template <typename MarkRule>
+void encode_path_2mer_dispatch(std::vector<gfaz::NodeId> &path,
+                               const CompressionRules2Mer &rules,
+                               MarkRule mark_rule) {
+  if (!rules.flat_map.empty()) {
+    encode_path_2mer(
+        path, rules,
+        [&rules](Packed2mer canonical) { return rules.flat_map.find(canonical); },
+        mark_rule);
+  } else {
+    encode_path_2mer(
+        path, rules,
+        [&rules](Packed2mer canonical) {
+          auto it = rules.kmer_to_rule_id.find(canonical);
+          return it == rules.kmer_to_rule_id.end() ? RuleFlatMap::kNotFound
+                                                   : it->second;
+        },
+        mark_rule);
+  }
 }
 
 } // namespace
@@ -65,7 +86,7 @@ void PathEncoder::encode_paths_2mer(
 
 #pragma omp for schedule(dynamic)
     for (size_t p = 0; p < paths.size(); ++p) {
-      encode_path_2mer(paths[p], rules, [&](size_t rule_offset) {
+      encode_path_2mer_dispatch(paths[p], rules, [&](size_t rule_offset) {
         local_usage[rule_offset / 64] |=
             uint64_t{1} << (rule_offset % 64);
       });
@@ -88,7 +109,7 @@ void PathEncoder::encode_paths_2mer(
   }
 #else
   for (auto &path : paths) {
-    encode_path_2mer(path, rules, [&](size_t rule_offset) {
+    encode_path_2mer_dispatch(path, rules, [&](size_t rule_offset) {
       rules_used[rule_offset] = 1;
     });
   }
