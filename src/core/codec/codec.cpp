@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -109,7 +110,7 @@ int get_zstd_level() {
   return level;
 }
 
-int get_zstd_workers() {
+int get_zstd_env_workers() {
   static int env_workers = -1;
   if (env_workers == -1) {
     env_workers = 0;
@@ -125,19 +126,52 @@ int get_zstd_workers() {
       }
     }
   }
+  return env_workers;
+}
 
+// Per-job input size for multithreaded ZSTD. Smaller jobs mean more of the
+// worker pool is usable on mid-size payloads; 8 MiB keeps the ratio cost
+// negligible at level 9 (whose window is 8 MiB).
+size_t get_zstd_job_size() {
+  static size_t job_size = 0;
+  if (job_size == 0) {
+    job_size = 8ull * 1024 * 1024;
+    const char *env_val = std::getenv("GFA_COMPRESSION_ZSTD_JOBSIZE_MB");
+    if (env_val) {
+      int parsed = std::atoi(env_val);
+      if (parsed > 0) {
+        job_size = static_cast<size_t>(parsed) * 1024 * 1024;
+      } else {
+        std::cerr << "Warning: GFA_COMPRESSION_ZSTD_JOBSIZE_MB=" << env_val
+                  << " is invalid (must be > 0), using default 8." << std::endl;
+      }
+    }
+  }
+  return job_size;
+}
+
+// Size the worker count to the payload: a stream only splits into
+// size/job_size jobs, so extra workers beyond that are pure pool overhead,
+// and small payloads compress fastest single-threaded on the calling thread.
+int resolve_zstd_workers(size_t size_bytes) {
+  const int env_workers = get_zstd_env_workers();
   if (env_workers > 0) {
     return env_workers;
   }
 
+  int max_workers = 1;
 #ifdef _OPENMP
-  return std::max(1, omp_get_max_threads());
-#else
-  return 1;
+  max_workers = std::max(1, omp_get_max_threads());
 #endif
+  const size_t jobs = size_bytes / get_zstd_job_size();
+  const int workers =
+      static_cast<int>(std::min<size_t>(jobs, static_cast<size_t>(max_workers)));
+  return workers >= 2 ? workers : 0;
 }
 
-bool configure_zstd_context(ZSTD_CCtx *ctx) {
+bool configure_zstd_context(ZSTD_CCtx *ctx, size_t size_bytes) {
+  ZSTD_CCtx_reset(ctx, ZSTD_reset_session_and_parameters);
+
   const size_t level_result =
       ZSTD_CCtx_setParameter(ctx, ZSTD_c_compressionLevel, get_zstd_level());
   if (ZSTD_isError(level_result)) {
@@ -146,21 +180,43 @@ bool configure_zstd_context(ZSTD_CCtx *ctx) {
     return false;
   }
 
-  const int workers = get_zstd_workers();
-  const size_t worker_result =
-      ZSTD_CCtx_setParameter(ctx, ZSTD_c_nbWorkers, workers);
-  if (ZSTD_isError(worker_result)) {
-    static bool warned_unsupported_workers = false;
-    if (!warned_unsupported_workers) {
-      std::cerr
-          << "Warning: ZSTD multithreaded compression is unavailable ("
-          << ZSTD_getErrorName(worker_result)
-          << "); falling back to single-threaded ZSTD." << std::endl;
-      warned_unsupported_workers = true;
+  const int workers = resolve_zstd_workers(size_bytes);
+  if (workers > 0) {
+    const size_t worker_result =
+        ZSTD_CCtx_setParameter(ctx, ZSTD_c_nbWorkers, workers);
+    if (ZSTD_isError(worker_result)) {
+      static bool warned_unsupported_workers = false;
+      if (!warned_unsupported_workers) {
+        std::cerr
+            << "Warning: ZSTD multithreaded compression is unavailable ("
+            << ZSTD_getErrorName(worker_result)
+            << "); falling back to single-threaded ZSTD." << std::endl;
+        warned_unsupported_workers = true;
+      }
+    } else {
+      ZSTD_CCtx_setParameter(ctx, ZSTD_c_jobSize,
+                             static_cast<int>(get_zstd_job_size()));
     }
   }
 
   return true;
+}
+
+// Reuse one context (and its worker pool) per calling thread; creating a
+// fresh multithreaded context per block costs a full pool spawn each call.
+ZSTD_CCtx *get_thread_cctx() {
+  struct CCtxHolder {
+    ZSTD_CCtx *ctx = nullptr;
+    ~CCtxHolder() {
+      if (ctx)
+        ZSTD_freeCCtx(ctx);
+    }
+  };
+  static thread_local CCtxHolder holder;
+  if (holder.ctx == nullptr) {
+    holder.ctx = ZSTD_createCCtx();
+  }
+  return holder.ctx;
 }
 
 ZstdCompressedBlock zstd_compress_bytes(const void *data, size_t size_bytes) {
@@ -171,15 +227,14 @@ ZstdCompressedBlock zstd_compress_bytes(const void *data, size_t size_bytes) {
     return block;
   }
 
-  ZSTD_CCtx *ctx = ZSTD_createCCtx();
+  ZSTD_CCtx *ctx = get_thread_cctx();
   if (ctx == nullptr) {
     std::cerr << "ZSTD compression failed: unable to create compression context"
               << std::endl;
     return block;
   }
 
-  if (!configure_zstd_context(ctx)) {
-    ZSTD_freeCCtx(ctx);
+  if (!configure_zstd_context(ctx, size_bytes)) {
     return block;
   }
 
@@ -188,7 +243,6 @@ ZstdCompressedBlock zstd_compress_bytes(const void *data, size_t size_bytes) {
   const size_t compressed_size =
       ZSTD_compress2(ctx, block.payload.data(), block.payload.size(), data,
                      size_bytes);
-  ZSTD_freeCCtx(ctx);
 
   if (ZSTD_isError(compressed_size)) {
     std::cerr << "ZSTD compression failed: "

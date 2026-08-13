@@ -3,6 +3,7 @@
 #include "robin_hood.h"
 #include "core/utils/threading_utils.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <vector>
@@ -164,6 +165,7 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
       actual_threads);
   const size_t total_sequences = paths.size() + walks.size();
 
+  const auto t_scan0 = std::chrono::high_resolution_clock::now();
 #pragma omp parallel
   {
     const int tid = omp_get_thread_num();
@@ -188,6 +190,8 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
     }
   }
 
+  const auto t_scan1 = std::chrono::high_resolution_clock::now();
+
   std::vector<size_t> offsets(static_cast<size_t>(actual_threads) + 1, 0);
   for (int t = 0; t < actual_threads; ++t) {
     offsets[static_cast<size_t>(t) + 1] =
@@ -208,26 +212,77 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
   }
   thread_seen.clear();
   thread_repeated.clear();
+  const auto t_collect = std::chrono::high_resolution_clock::now();
 
 #if defined(__GLIBCXX__)
   __gnu_parallel::sort(merge_keys.begin(), merge_keys.end());
 #else
   std::sort(merge_keys.begin(), merge_keys.end());
 #endif
+  const auto t_sort = std::chrono::high_resolution_clock::now();
 
-  size_t repeated_count = 0;
-  for (size_t i = 1; i < merge_keys.size();) {
-    if (merge_keys[i] != merge_keys[i - 1]) {
-      ++i;
-      continue;
-    }
-    const Packed2mer repeated = merge_keys[i];
-    merge_keys[repeated_count++] = repeated;
-    while (i < merge_keys.size() && merge_keys[i] == repeated)
-      ++i;
+  // Parallel duplicate extraction over the sorted keys. Chunk starts are
+  // advanced to run boundaries so every run of equal keys is scanned by
+  // exactly one chunk; sorted order is preserved in the output.
+  const size_t num_keys = merge_keys.size();
+  const size_t num_chunks =
+      std::max<size_t>(1, std::min<size_t>(static_cast<size_t>(actual_threads) * 4,
+                                           num_keys / 4096 + 1));
+  std::vector<size_t> chunk_begin(num_chunks + 1, num_keys);
+  for (size_t c = 0; c < num_chunks; ++c) {
+    size_t begin = c * num_keys / num_chunks;
+    while (begin > 0 && begin < num_keys &&
+           merge_keys[begin] == merge_keys[begin - 1])
+      ++begin;
+    chunk_begin[c] = begin;
   }
-  merge_keys.resize(repeated_count);
-  repeated_pairs.swap(merge_keys);
+
+  std::vector<size_t> chunk_count(num_chunks, 0);
+#pragma omp parallel for schedule(static)
+  for (size_t c = 0; c < num_chunks; ++c) {
+    size_t count = 0;
+    for (size_t i = chunk_begin[c]; i < chunk_begin[c + 1];) {
+      size_t j = i + 1;
+      while (j < chunk_begin[c + 1] && merge_keys[j] == merge_keys[i])
+        ++j;
+      if (j - i >= 2)
+        ++count;
+      i = j;
+    }
+    chunk_count[c] = count;
+  }
+
+  std::vector<size_t> chunk_offset(num_chunks + 1, 0);
+  for (size_t c = 0; c < num_chunks; ++c)
+    chunk_offset[c + 1] = chunk_offset[c] + chunk_count[c];
+
+  repeated_pairs.resize(chunk_offset.back());
+#pragma omp parallel for schedule(static)
+  for (size_t c = 0; c < num_chunks; ++c) {
+    size_t pos = chunk_offset[c];
+    for (size_t i = chunk_begin[c]; i < chunk_begin[c + 1];) {
+      size_t j = i + 1;
+      while (j < chunk_begin[c + 1] && merge_keys[j] == merge_keys[i])
+        ++j;
+      if (j - i >= 2)
+        repeated_pairs[pos++] = merge_keys[i];
+      i = j;
+    }
+  }
+  merge_keys.clear();
+  merge_keys.shrink_to_fit();
+  const auto t_dedup = std::chrono::high_resolution_clock::now();
+
+  if (gfaz_debug_enabled()) {
+    const auto ms = [](auto a, auto b) {
+      return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    std::cerr << "    [generate sub] scan=" << ms(t_scan0, t_scan1)
+              << " ms, collect=" << ms(t_scan1, t_collect)
+              << " ms (keys=" << offsets.back() << ")"
+              << ", sort=" << ms(t_collect, t_sort)
+              << " ms, dedup=" << ms(t_sort, t_dedup) << " ms" << std::endl;
+  }
 #else
   robin_hood::unordered_flat_set<Packed2mer> seen;
   robin_hood::unordered_flat_set<Packed2mer> repeated;
@@ -254,6 +309,16 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
               << std::endl;
   }
 
+#ifdef _OPENMP
+  // repeated_pairs is sorted, so rule IDs assigned by index reproduce the
+  // exact ID order the serial map build used to produce. The flat map is
+  // built in parallel; the robin_hood map stays empty on this path.
+  rules.rule_id_to_kmer = std::move(repeated_pairs);
+  rules.flat_map.build(rules.rule_id_to_kmer.data(),
+                       rules.rule_id_to_kmer.size(), rules.rules_start_id);
+  current_rule_id =
+      rules.rules_start_id + static_cast<uint32_t>(rules.rule_id_to_kmer.size());
+#else
   // Create rules from repeated 2-mers
   rules.kmer_to_rule_id.reserve(repeated_pairs.size());
   rules.rule_id_to_kmer.reserve(repeated_pairs.size());
@@ -263,6 +328,7 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
         kmer); // Vector index = rule_id - rules_start_id
     current_rule_id++;
   }
+#endif
 
   rules.next_available_id = current_rule_id;
 

@@ -2,6 +2,7 @@
 #define RULE_GENERATOR_HPP
 
 #include "compress/grammar/packed_2mer.hpp"
+#include "compress/grammar/rule_flat_map.hpp"
 #include "core/model/gfa_graph.hpp"
 #include "robin_hood.h"
 #include <vector>
@@ -11,8 +12,12 @@
 // Uses Packed2mer (int64_t) as key for faster hashing and operations
 // rule_id_to_kmer uses vector for O(1) indexed access (index = rule_id -
 // rules_start_id)
+// The main compression workflow fills flat_map (parallel-built lookup);
+// kmer_to_rule_id remains for callers that assemble rules incrementally
+// (add_haplotypes, legacy paths). Encoding prefers flat_map when non-empty.
 struct CompressionRules2Mer {
   robin_hood::unordered_flat_map<Packed2mer, uint32_t> kmer_to_rule_id;
+  RuleFlatMap flat_map;
   std::vector<Packed2mer> rule_id_to_kmer; // index = rule_id - rules_start_id
   uint32_t rules_start_id;
   uint32_t next_available_id;

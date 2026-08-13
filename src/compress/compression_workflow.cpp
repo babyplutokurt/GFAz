@@ -321,6 +321,10 @@ double run_grammar_stage(CompressionContext &ctx) {
   return elapsed_ms(start, end);
 }
 
+// The compress_* field-group functions below are designed to run as sibling
+// OpenMP tasks inside one parallel region, or on the static-fields helper
+// thread (see stages 2.5/3+4 in compress_gfa). Their internal block-level
+// parallelism therefore uses child tasks, never nested parallel regions.
 double compress_rule_columns(CompressionContext &ctx) {
   const auto start = std::chrono::high_resolution_clock::now();
   std::vector<int32_t> first, second;
@@ -330,13 +334,11 @@ double compress_rule_columns(CompressionContext &ctx) {
   ctx.rulebook.shrink_to_fit();
 
 #ifdef _OPENMP
-#pragma omp parallel sections
-  {
-#pragma omp section
-    ctx.out.rules_first_zstd = gfaz::Codec::zstd_compress_int32_vector(first);
-#pragma omp section
-    ctx.out.rules_second_zstd = gfaz::Codec::zstd_compress_int32_vector(second);
-  }
+#pragma omp task shared(ctx, first)
+  ctx.out.rules_first_zstd = gfaz::Codec::zstd_compress_int32_vector(first);
+#pragma omp task shared(ctx, second)
+  ctx.out.rules_second_zstd = gfaz::Codec::zstd_compress_int32_vector(second);
+#pragma omp taskwait
 #else
   ctx.out.rules_first_zstd = gfaz::Codec::zstd_compress_int32_vector(first);
   ctx.out.rules_second_zstd = gfaz::Codec::zstd_compress_int32_vector(second);
@@ -357,24 +359,22 @@ double compress_path_fields(CompressionContext &ctx) {
                         input.overlap_lengths);
 
 #ifdef _OPENMP
-#pragma omp parallel sections
+#pragma omp task shared(ctx, input)
+  ctx.out.paths_zstd = gfaz::Codec::zstd_compress_int32_vector(input.flat);
+#pragma omp task shared(ctx, input)
   {
-#pragma omp section
-    ctx.out.paths_zstd = gfaz::Codec::zstd_compress_int32_vector(input.flat);
-#pragma omp section
-    {
-      ctx.out.names_zstd = gfaz::Codec::zstd_compress_string(input.names_concat);
-      ctx.out.name_lengths_zstd =
-          gfaz::Codec::zstd_compress_uint32_vector(input.name_lengths);
-    }
-#pragma omp section
-    {
-      ctx.out.overlaps_zstd =
-          gfaz::Codec::zstd_compress_string(input.overlaps_concat);
-      ctx.out.overlap_lengths_zstd =
-          gfaz::Codec::zstd_compress_uint32_vector(input.overlap_lengths);
-    }
+    ctx.out.names_zstd = gfaz::Codec::zstd_compress_string(input.names_concat);
+    ctx.out.name_lengths_zstd =
+        gfaz::Codec::zstd_compress_uint32_vector(input.name_lengths);
   }
+#pragma omp task shared(ctx, input)
+  {
+    ctx.out.overlaps_zstd =
+        gfaz::Codec::zstd_compress_string(input.overlaps_concat);
+    ctx.out.overlap_lengths_zstd =
+        gfaz::Codec::zstd_compress_uint32_vector(input.overlap_lengths);
+  }
+#pragma omp taskwait
 #else
   ctx.out.paths_zstd = gfaz::Codec::zstd_compress_int32_vector(input.flat);
   ctx.out.names_zstd = gfaz::Codec::zstd_compress_string(input.names_concat);
@@ -395,6 +395,38 @@ double compress_walk_fields(CompressionContext &ctx) {
   const auto start = std::chrono::high_resolution_clock::now();
   if (!ctx.graph.walks.walks.empty()) {
     WalkCompressionInput input;
+#ifdef _OPENMP
+#pragma omp task shared(ctx, input)
+    {
+      flatten_traversal_sequences(ctx.graph.walks.walks, input.flat,
+                                  ctx.out.walk_lengths);
+      ctx.out.walks_zstd = gfaz::Codec::zstd_compress_int32_vector(input.flat);
+    }
+#pragma omp task shared(ctx, input)
+    {
+      flatten_walk_string_metadata(ctx.graph.walks, input.sample_ids_concat,
+                                   input.sample_id_lengths,
+                                   input.seq_ids_concat, input.seq_id_lengths);
+      ctx.out.walk_sample_ids_zstd =
+          gfaz::Codec::zstd_compress_string(input.sample_ids_concat);
+      ctx.out.walk_sample_id_lengths_zstd =
+          gfaz::Codec::zstd_compress_uint32_vector(input.sample_id_lengths);
+      ctx.out.walk_seq_ids_zstd =
+          gfaz::Codec::zstd_compress_string(input.seq_ids_concat);
+      ctx.out.walk_seq_id_lengths_zstd =
+          gfaz::Codec::zstd_compress_uint32_vector(input.seq_id_lengths);
+    }
+#pragma omp task shared(ctx)
+    ctx.out.walk_hap_indices_zstd =
+        gfaz::Codec::zstd_compress_uint32_vector(ctx.graph.walks.hap_indices);
+#pragma omp task shared(ctx)
+    ctx.out.walk_seq_starts_zstd =
+        gfaz::Codec::compress_varint_int64(ctx.graph.walks.seq_starts);
+#pragma omp task shared(ctx)
+    ctx.out.walk_seq_ends_zstd =
+        gfaz::Codec::compress_varint_int64(ctx.graph.walks.seq_ends);
+#pragma omp taskwait
+#else
     flatten_traversal_sequences(ctx.graph.walks.walks, input.flat,
                                 ctx.out.walk_lengths);
     ctx.out.walks_zstd = gfaz::Codec::zstd_compress_int32_vector(input.flat);
@@ -417,6 +449,7 @@ double compress_walk_fields(CompressionContext &ctx) {
         gfaz::Codec::compress_varint_int64(ctx.graph.walks.seq_starts);
     ctx.out.walk_seq_ends_zstd =
         gfaz::Codec::compress_varint_int64(ctx.graph.walks.seq_ends);
+#endif
   }
 
   release_walk_fields(ctx);
@@ -425,7 +458,8 @@ double compress_walk_fields(CompressionContext &ctx) {
   return elapsed_ms(start, end);
 }
 
-double compress_segment_link_fields(CompressionContext &ctx) {
+double compress_segment_link_fields(CompressionContext &ctx,
+                                    uint32_t max_segment_id) {
   SegmentCompressionInput segment_input;
   LinkCompressionInput link_input;
   if (!ctx.graph.segments.node_sequence_lengths.empty()) {
@@ -436,7 +470,7 @@ double compress_segment_link_fields(CompressionContext &ctx) {
   } else {
     flatten_segment_sequences(ctx.graph.segments.node_sequences,
                               segment_input.segment_concat,
-                              segment_input.segment_lengths, ctx.next_id);
+                              segment_input.segment_lengths, max_segment_id);
   }
   ctx.num_segments = segment_input.segment_lengths.size();
   link_input.links = &ctx.graph.links;
@@ -444,37 +478,33 @@ double compress_segment_link_fields(CompressionContext &ctx) {
 
   const auto start = std::chrono::high_resolution_clock::now();
 #ifdef _OPENMP
-#pragma omp parallel sections
+#pragma omp task shared(ctx, segment_input)
+  ctx.out.segment_sequences_zstd =
+      gfaz::Codec::zstd_compress_string(segment_input.segment_concat);
+#pragma omp task shared(ctx, segment_input)
+  ctx.out.segment_seq_lengths_zstd =
+      gfaz::Codec::zstd_compress_uint32_vector(segment_input.segment_lengths);
+#pragma omp task shared(ctx, link_input)
+  ctx.out.link_from_ids_zstd =
+      gfaz::Codec::compress_delta_varint_uint32(link_input.links->from_ids);
+#pragma omp task shared(ctx, link_input)
+  ctx.out.link_to_ids_zstd =
+      gfaz::Codec::compress_delta_varint_uint32(link_input.links->to_ids);
+#pragma omp task shared(ctx, link_input)
   {
-#pragma omp section
-    {
-      ctx.out.segment_sequences_zstd =
-          gfaz::Codec::zstd_compress_string(segment_input.segment_concat);
-      ctx.out.segment_seq_lengths_zstd =
-          gfaz::Codec::zstd_compress_uint32_vector(segment_input.segment_lengths);
-    }
-#pragma omp section
-    {
-      ctx.out.link_from_ids_zstd =
-          gfaz::Codec::compress_delta_varint_uint32(link_input.links->from_ids);
-      ctx.out.link_to_ids_zstd =
-          gfaz::Codec::compress_delta_varint_uint32(link_input.links->to_ids);
-    }
-#pragma omp section
-    {
-      ctx.out.link_from_orients_zstd =
-          gfaz::Codec::compress_orientations(link_input.links->from_orients);
-      ctx.out.link_to_orients_zstd =
-          gfaz::Codec::compress_orientations(link_input.links->to_orients);
-    }
-#pragma omp section
-    {
-      ctx.out.link_overlap_nums_zstd =
-          gfaz::Codec::zstd_compress_uint32_vector(link_input.links->overlap_nums);
-      ctx.out.link_overlap_ops_zstd =
-          gfaz::Codec::zstd_compress_char_vector(link_input.links->overlap_ops);
-    }
+    ctx.out.link_from_orients_zstd =
+        gfaz::Codec::compress_orientations(link_input.links->from_orients);
+    ctx.out.link_to_orients_zstd =
+        gfaz::Codec::compress_orientations(link_input.links->to_orients);
   }
+#pragma omp task shared(ctx, link_input)
+  {
+    ctx.out.link_overlap_nums_zstd =
+        gfaz::Codec::zstd_compress_uint32_vector(link_input.links->overlap_nums);
+    ctx.out.link_overlap_ops_zstd =
+        gfaz::Codec::zstd_compress_char_vector(link_input.links->overlap_ops);
+  }
+#pragma omp taskwait
 #else
   ctx.out.segment_sequences_zstd =
       gfaz::Codec::zstd_compress_string(segment_input.segment_concat);
@@ -502,11 +532,29 @@ double compress_segment_link_fields(CompressionContext &ctx) {
 
 double compress_optional_fields(CompressionContext &ctx) {
   const auto start = std::chrono::high_resolution_clock::now();
+#ifdef _OPENMP
+  const size_t num_segment_cols = ctx.graph.segments.optional_fields.size();
+  const size_t num_link_cols = ctx.graph.link_optional_fields.size();
+  ctx.out.segment_optional_fields_zstd.resize(num_segment_cols);
+  ctx.out.link_optional_fields_zstd.resize(num_link_cols);
+  for (size_t i = 0; i < num_segment_cols; ++i) {
+#pragma omp task shared(ctx) firstprivate(i)
+    ctx.out.segment_optional_fields_zstd[i] =
+        compress_optional_column(ctx.graph.segments.optional_fields[i]);
+  }
+  for (size_t i = 0; i < num_link_cols; ++i) {
+#pragma omp task shared(ctx) firstprivate(i)
+    ctx.out.link_optional_fields_zstd[i] =
+        compress_optional_column(ctx.graph.link_optional_fields[i]);
+  }
+#pragma omp taskwait
+#else
   for (const auto &col : ctx.graph.segments.optional_fields)
     ctx.out.segment_optional_fields_zstd.push_back(
         compress_optional_column(col));
   for (const auto &col : ctx.graph.link_optional_fields)
     ctx.out.link_optional_fields_zstd.push_back(compress_optional_column(col));
+#endif
 
   release_optional_fields(ctx);
 
@@ -640,6 +688,7 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
     t0 = std::chrono::high_resolution_clock::now();
 
     rules.kmer_to_rule_id.clear();
+    rules.flat_map.clear();
 
     // =========================================================================
     // FUSED Compact + Sort + Remap (single-pass optimization)
@@ -811,26 +860,49 @@ gfaz::CompressedData compress_gfa(const std::string &gfa_file_path, int num_roun
 
   const uint32_t rule_count = ctx.next_id - ctx.layer_start;
 
-  // Stage 3: compress the grammar rulebook into compressed rule columns.
-  const double time_rule_columns_ms = compress_rule_columns(ctx);
-  log_cpu_memory_checkpoint(
-      "[CPU Entropy][Memory] After rule columns compression");
-
-  // Stage 4: compress record-group payloads and metadata columns.
-  const double time_paths_ms = compress_path_fields(ctx);
-  const double time_walks_ms = compress_walk_fields(ctx);
-  log_cpu_memory_checkpoint(
-      "[CPU Entropy][Memory] After Path/Walk compression");
-  const double time_segments_links_ms = compress_segment_link_fields(ctx);
-  const double time_optional_fields_ms = compress_optional_fields(ctx);
-  log_cpu_memory_checkpoint(
-      "[CPU Entropy][Memory] After Segment/Link/Optional compression");
-  const double time_jumps_ms = compress_jump_fields(ctx);
-  const double time_containments_ms = compress_containment_fields(ctx);
-  const double time_entropy_ms = time_rule_columns_ms + time_paths_ms +
-                                 time_walks_ms + time_segments_links_ms +
-                                 time_optional_fields_ms + time_jumps_ms +
-                                 time_containments_ms;
+  // Stages 3+4: compress the rulebook columns and every record-group payload
+  // as sibling tasks in one parallel region. The groups touch disjoint graph
+  // and output fields, so they can all run concurrently; each group spawns
+  // child tasks per compressed block internally. The per-group times are wall
+  // times of overlapping tasks, so they don't sum to the stage wall time.
+  double time_rule_columns_ms = 0;
+  double time_paths_ms = 0;
+  double time_walks_ms = 0;
+  double time_segments_links_ms = 0;
+  double time_optional_fields_ms = 0;
+  double time_jumps_ms = 0;
+  double time_containments_ms = 0;
+  const auto entropy_start = std::chrono::high_resolution_clock::now();
+#ifdef _OPENMP
+#pragma omp parallel
+#pragma omp single
+  {
+#pragma omp task shared(ctx, time_rule_columns_ms)
+    time_rule_columns_ms = compress_rule_columns(ctx);
+#pragma omp task shared(ctx, time_paths_ms)
+    time_paths_ms = compress_path_fields(ctx);
+#pragma omp task shared(ctx, time_walks_ms)
+    time_walks_ms = compress_walk_fields(ctx);
+#pragma omp task shared(ctx, time_segments_links_ms)
+    time_segments_links_ms = compress_segment_link_fields(ctx, ctx.next_id);
+#pragma omp task shared(ctx, time_optional_fields_ms)
+    time_optional_fields_ms = compress_optional_fields(ctx);
+#pragma omp task shared(ctx, time_jumps_ms)
+    time_jumps_ms = compress_jump_fields(ctx);
+#pragma omp task shared(ctx, time_containments_ms)
+    time_containments_ms = compress_containment_fields(ctx);
+  }
+#else
+  time_rule_columns_ms = compress_rule_columns(ctx);
+  time_paths_ms = compress_path_fields(ctx);
+  time_walks_ms = compress_walk_fields(ctx);
+  time_segments_links_ms = compress_segment_link_fields(ctx, ctx.next_id);
+  time_optional_fields_ms = compress_optional_fields(ctx);
+  time_jumps_ms = compress_jump_fields(ctx);
+  time_containments_ms = compress_containment_fields(ctx);
+#endif
+  const auto entropy_end = std::chrono::high_resolution_clock::now();
+  const double time_entropy_ms = elapsed_ms(entropy_start, entropy_end);
   log_cpu_memory_checkpoint("[CPU Entropy][Memory] After total entropy coding");
 
   auto compress_total_end = std::chrono::high_resolution_clock::now();
