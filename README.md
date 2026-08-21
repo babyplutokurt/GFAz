@@ -5,7 +5,7 @@ decompressing Graphical Fragment Assembly (GFA) files.
 
 In our current benchmarks, GFAz reaches up to 20x higher compression ratio than
 Gzip and 13x higher compression ratio than Zstd. At 32 CPU threads it reaches
-up to 1,026 MiB/s compression and 5,426 MiB/s decompression; the
+up to 1,355 MiB/s compression and 5,426 MiB/s decompression; the
 experimental GPU backend reaches up to 4,843 MiB/s compression and
 9,435 MiB/s decompression.
 
@@ -22,34 +22,37 @@ changes how transforms are computed, not the on-disk format.
 | Dataset | Metrics | Gzip | Zstd | sqz | sqz+bgzip | GBZ | gfaz(CPU) | gfaz(GPU) |
 |:---|:---|---:|---:|---:|---:|---:|---:|---:|
 | chr1. | Ratio | 5.59 | 7.54 | 3.09 | 18.0 | 9.52 | **35.4** | **31.7** |
-| | Co. | 46.2 | 2178 | 3.95 | 3.97 | 12.1 | **1026** | **2754** |
+| | Co. | 46.2 | 2178 | 3.95 | 3.97 | 12.1 | **1320** | **2754** |
 | | De. | 359 | 1618 | 21.6 | 21.4 | 284 | **2307** | **8124** |
 | chr6. | Ratio | 5.04 | 6.99 | 5.51 | 20.8 | 19.2 | **35.4** | **28.18** |
-| | Co. | 41.0 | 1712 | 3.56 | 3.56 | 10.7 | **1012** | **3791** |
+| | Co. | 41.0 | 1712 | 3.56 | 3.56 | 10.7 | **1355** | **3791** |
 | | De. | 348 | 1515 | 20.1 | 20.4 | 281 | **2943** | **7230** |
 | E.coli | Ratio | 4.69 | 5.67 | 1.26 | 7.46 | 5.58 | **18.4** | **16.7** |
-| | Co. | 33.3 | 1356 | 4.57 | 4.53 | 20.2 | **162** | **678** |
+| | Co. | 33.3 | 1356 | 4.57 | 4.53 | 20.2 | **226** | **678** |
 | | De. | 310 | 1258 | 34.0 | 32.2 | 197 | **834** | **1430** |
 | HPRCv1.1 | Ratio | 4.02 | 5.32 | - | - | 14.0 | **22.4** | **20.4** |
-| | Co. | 36.4 | 1657 | - | - | 84.5 | **276** | **4843** |
+| | Co. | 36.4 | 1657 | - | - | 84.5 | **291** | **4843** |
 | | De. | 319 | 1234 | - | - | 650 | **2292** | **9435** |
 | HPRCv2.0 | Ratio | 4.19 | 6.49 | - | - | 66.8 | **83.8** | **76.4** |
-| | Co. | 49.1 | 1514 | - | - | 130 | **537** | **-** |
+| | Co. | 49.1 | 1514 | - | - | 130 | **555** | **-** |
 | | De. | 342 | 1240 | - | - | 648 | **5426** | **-** |
 | HPRCv2.1 | Ratio | 4.19 | 6.43 | - | - | 64.2 | **82.8** | **74.2** |
-| | Co. | 48.9 | 1540 | - | - | 136 | **544** | **-** |
+| | Co. | 48.9 | 1540 | - | - | 136 | **538** | **-** |
 | | De. | 343 | 1241 | - | - | 652 | **5325** | **-** |
 
 `Ratio` indicates compression ratio; `Co.` and `De.` indicate compression
-and decompression throughput in MiB/s. GFAz CPU values use 32 threads; GFA and
-GFAz inputs are preloaded into page cache, and decompression writes to
-`/dev/null` to isolate compute throughput. E. coli values are medians of nine
-runs, chr1 and chr6 values are medians of five runs, and HPRC v1.1 values and
-HPRC v2.0/v2.1 decompression values are medians of three runs. HPRC v2.0/v2.1
-compression values are single warmed runs due to their whole-genome runtime.
-Bold values indicate the best result in each row. System configuration: AMD
-Ryzen Threadripper PRO 9955WX (16 cores), NVIDIA RTX Pro 6000, and 512 GB
-DDR5-6400 memory.
+and decompression throughput in MiB/s. GFAz CPU values use 32 threads. CPU
+compression inputs are staged on a Samsung SSD 990 PRO NVMe drive and read
+sequentially immediately before each run; throughput uses end-to-end CLI wall
+time, including parsing, compression, and serialization. GFAz inputs are
+preloaded into page cache for decompression, which writes to `/dev/null` to
+isolate compute throughput. E. coli values are medians of nine runs, chr1 and
+chr6 values are medians of five runs, and HPRC v1.1 values and HPRC v2.0/v2.1
+decompression values are medians of three runs. HPRC v2.0/v2.1 compression
+values are single warmed runs due to their whole-genome runtime. Bold values
+indicate the best result in each row. System configuration: AMD Ryzen
+Threadripper PRO 9955WX (16 cores), NVIDIA RTX Pro 6000, Samsung SSD 990 PRO,
+and 512 GB DDR5-6400 memory.
 
 ## Compute Engine Performance
 
