@@ -1,0 +1,404 @@
+% =============================================================================
+%  GFAz poster -- T2T-F2F 2026, UC Santa Cruz
+%  42 in wide x 45 in tall  (106.68 cm x 114.30 cm)
+%  Build:  pdflatex poster.tex   (run twice, for QR codes)
+% =============================================================================
+\documentclass[final,t]{beamer}
+\usepackage[size=custom,width=106.68,height=114.30,scale=1.21,orientation=portrait]{beamerposter}
+\usetheme{default}
+\usecolortheme{default}
+\beamertemplatenavigationsymbolsempty
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{qrcode}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,calc}
+\usepackage{microtype}
+
+\graphicspath{{figures/}}
+
+% ---------------------------------------------------------------- palette ---
+\definecolor{cherry}{RGB}{157,34,53}
+\definecolor{slate}{RGB}{33,42,54}
+\definecolor{teal}{RGB}{0,112,118}
+\definecolor{paleg}{RGB}{243,244,246}
+\definecolor{palec}{RGB}{251,238,241}
+\definecolor{palet}{RGB}{232,244,244}
+\definecolor{rule}{RGB}{206,211,219}
+\definecolor{hdr}{RGB}{224,227,232}
+
+% ------------------------------------------------------------------ blocks --
+\setbeamercolor{block title}{bg=white,fg=cherry}
+\setbeamercolor{block body}{bg=white,fg=slate}
+\setbeamerfont{block title}{size=\large,series=\bfseries}
+\setbeamerfont{block body}{size=\normalsize}
+\setbeamercolor{structure}{fg=cherry}
+\setbeamertemplate{itemize item}{\color{cherry}\textbullet}
+\setbeamertemplate{blocks}[rounded][shadow=false]
+\setbeamersize{text margin left=0mm, text margin right=0mm}
+\setlength{\leftmargini}{1.8em}
+
+\makeatletter
+\renewcommand{\@listI}{\leftmargin\leftmargini
+  \parsep 0.2ex \topsep 0.3ex \itemsep 0.5ex}
+\makeatother
+
+% ----------------------------------------------------------- helper macros --
+\newcommand{\gz}{GFAz}
+\newcommand{\hd}[1]{\textcolor{cherry}{\textbf{#1}}}
+\newcommand{\code}[1]{{\ttfamily #1}}
+\newcommand{\best}{\cellcolor{palec}}
+
+\newcommand{\stat}[3]{%
+  \begin{minipage}[t]{#1}\centering
+    {\fontsize{92}{96}\selectfont\bfseries\color{cherry}#2}\\[0.26cm]
+    {\large\color{slate}#3}
+  \end{minipage}}
+
+% numbered part banner spanning a column
+\newcommand{\partbanner}[3]{%
+  \begin{tikzpicture}
+    \node[fill=slate,rounded corners=8pt,inner sep=0pt,minimum height=3.6cm,
+          text width=\linewidth] (b) {};
+    \node[circle,fill=cherry,text=white,font=\fontsize{54}{54}\selectfont\bfseries,
+          minimum size=2.5cm,anchor=west] (n) at ([xshift=10mm]b.west) {#1};
+    \node[anchor=west,text=white,font=\fontsize{46}{50}\selectfont\bfseries]
+      at ([xshift=7mm]n.east) {#2};
+    \node[anchor=east,text=hdr,font=\fontsize{27}{31}\selectfont\itshape]
+      at ([xshift=-14mm]b.east) {#3};
+  \end{tikzpicture}\\[0.45cm]}
+
+\newcommand{\cpt}[1]{\vspace{0.18cm}\par{\raggedright\small\color{slate}#1\par}}
+\newcommand{\gap}{\vspace{0.5cm}}
+
+\title{GFAz}
+\begin{document}
+\begin{frame}[t]
+
+% =============================================================================
+%  HEADER
+% =============================================================================
+\begin{tikzpicture}[remember picture,overlay]
+  \fill[cherry] (current page.north west) rectangle
+                ([yshift=-24.5cm]current page.north east);
+\end{tikzpicture}
+\vspace{-0.7cm}
+\begin{center}
+  \color{white}
+  {\fontsize{100}{108}\selectfont\bfseries GFAz: Order-of-Magnitude Pangenome\\[0.18cm]
+   Analytics by \emph{Computing over Compression}}\\[0.70cm]
+  {\fontsize{40}{46}\selectfont Taolue Yang \quad Youyuan Liu \quad Bo Jiang \quad Xinghua Shi \quad Sian Jin}\\[0.30cm]
+  {\fontsize{33}{38}\selectfont Department of Computer \& Information Sciences, Temple University}\\[0.40cm]
+  {\fontsize{28}{32}\selectfont\itshape T2T Face-to-Face 2026, UC Santa Cruz \ \ $\cdot$ \ \ to appear at ICS~'26}
+\end{center}
+\vspace{1.15cm}
+
+% ---------------------------------------------------------- headline stats --
+\begin{center}
+\begin{tikzpicture}
+  \node[fill=paleg,draw=rule,line width=2pt,rounded corners=10pt,inner sep=18pt]{
+    \begin{minipage}{0.945\paperwidth}\centering
+      \stat{0.225\linewidth}{84$\times$}{smaller\\[2pt]\normalsize 369\,GB $\rightarrow$ 4.5\,GB}
+      \hfill\textcolor{rule}{\rule{2pt}{4.6cm}}\hfill
+      \stat{0.225\linewidth}{5.3\,GB/s}{decompression\\[2pt]\normalsize CPU, 32 threads}
+      \hfill\textcolor{rule}{\rule{2pt}{4.6cm}}\hfill
+      \stat{0.225\linewidth}{369$\times$}{faster analytics\\[2pt]\normalsize Panacus 245\,min $\rightarrow$ 40\,s}
+      \hfill\textcolor{rule}{\rule{2pt}{4.6cm}}\hfill
+      \stat{0.225\linewidth}{99.99\%}{VCF concordance\\[2pt]\normalsize vs.\ \code{vg deconstruct}}
+    \end{minipage}};
+\end{tikzpicture}
+\end{center}
+
+\vspace{0.85cm}
+
+% =============================================================================
+%  TWO COLUMNS
+% =============================================================================
+\begin{columns}[t,totalwidth=0.985\paperwidth]
+
+% ============================== COLUMN 1 =====================================
+\begin{column}{0.487\paperwidth}
+
+\partbanner{1}{Compression engine}{lossless $\cdot$ full GFA semantics $\cdot$ CPU + GPU}
+
+\begin{block}{}
+  \centering
+  \begin{minipage}[t]{0.45\linewidth}\centering
+    {\large\bfseries\color{cherry} Compression}\\[0.25cm]
+    \includegraphics[width=\linewidth]{Compression_workflow.png}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.45\linewidth}\centering
+    {\large\bfseries\color{teal} Decompression}\\[0.25cm]
+    \includegraphics[width=\linewidth]{Decompression_workflow.png}\\[0.45cm]
+    \begin{tikzpicture}
+      \node[fill=palet,draw=teal,line width=2pt,rounded corners=6pt,inner sep=10pt,
+            text width=\dimexpr\linewidth-34pt\relax,align=left]
+        {\small\color{slate} Traversals ($>$90\% of a GFA) collapse under
+         \textbf{iterative 2-mer grammar compression}; every other record type ---
+         optional fields included --- gets \textbf{columnar, type-specific}
+         encoding. Both directions are linear-time and fully parallel.};
+    \end{tikzpicture}
+  \end{minipage}
+\end{block}
+
+\gap
+
+\begin{block}{}
+  \centering
+  {\small
+  \setlength{\tabcolsep}{5pt}\renewcommand{\arraystretch}{1.02}
+  \begin{tabular}{llrrrrrrr}
+    \toprule
+    \textbf{Dataset} & & \textbf{Gzip} & \textbf{Zstd} & \textbf{sqz} &
+    \textbf{sqz+bgz} & \textbf{GBZ} & \textbf{\gz\,CPU} & \textbf{\gz\,GPU} \\
+    \midrule
+    \multirow{3}{*}{chr1}      & Ratio & 5.59 & 7.54 & 3.09 & 18.0 & 9.52 & \best\textbf{35.4} & \best 31.7 \\
+                               & Co.   & 46.2 & 2178 & 3.95 & 3.97 & 12.1 & 1320 & \best\textbf{2754} \\
+                               & De.   & 359  & 1618 & 21.6 & 21.4 & 284  & 2307 & \best\textbf{8124} \\
+    \midrule
+    \multirow{3}{*}{chr6}      & Ratio & 5.04 & 6.99 & 5.51 & 20.8 & 19.2 & \best\textbf{35.4} & \best 28.2 \\
+                               & Co.   & 41.0 & 1712 & 3.56 & 3.56 & 10.7 & 1355 & \best\textbf{3791} \\
+                               & De.   & 348  & 1515 & 20.1 & 20.4 & 281  & 2943 & \best\textbf{7230} \\
+    \midrule
+    \multirow{3}{*}{\emph{E. coli}} & Ratio & 4.69 & 5.67 & 1.26 & 7.46 & 5.58 & \best\textbf{18.4} & \best 16.7 \\
+                               & Co.   & 33.3 & \textbf{1356} & 4.57 & 4.53 & 20.2 & 226  & 678 \\
+                               & De.   & 310  & 1258 & 34.0 & 32.2 & 197  & 834  & \best\textbf{1430} \\
+    \midrule
+    \multirow{3}{*}{HPRC v1.1} & Ratio & 4.02 & 5.32 & --   & --   & 14.0 & \best\textbf{22.4} & \best 20.4 \\
+                               & Co.   & 36.4 & 1657 & --   & --   & 84.5 & 291  & \best\textbf{4843} \\
+                               & De.   & 319  & 1234 & --   & --   & 650  & 2292 & \best\textbf{9435} \\
+    \midrule
+    \multirow{3}{*}{HPRC v2.0} & Ratio & 4.19 & 6.49 & --   & --   & 66.8 & \best\textbf{83.8} & \best 76.4 \\
+                               & Co.   & 49.1 & \textbf{1514} & --   & --   & 130  & 555  & -- \\
+                               & De.   & 342  & 1240 & --   & --   & 648  & \best\textbf{5426} & -- \\
+    \midrule
+    \multirow{3}{*}{HPRC v2.1} & Ratio & 4.19 & 6.43 & --   & --   & 64.2 & \best\textbf{82.8} & \best 74.2 \\
+                               & Co.   & 48.9 & \textbf{1540} & --   & --   & 136  & 538  & -- \\
+                               & De.   & 343  & 1241 & --   & --   & 652  & \best\textbf{5325} & -- \\
+    \bottomrule
+  \end{tabular}}
+
+  \cpt{Compression ratio, and compression (\textbf{Co.}) /
+  decompression (\textbf{De.}) throughput in MiB/s. \gz{} CPU at 32 threads; CPU compression is end-to-end CLI wall time.
+  \hd{Best ratio on every dataset}, and the fastest decompression wherever the
+  GPU backend fits in device memory. Threadripper PRO 9955WX, RTX Pro 6000,
+  512\,GB DDR5.}
+\end{block}
+
+\gap
+
+\begin{block}{}
+  \centering
+  \includegraphics[width=0.86\linewidth]{fig_pareto_combined.pdf}
+  \cpt{Ratio--speed Pareto front, normalized to Zstd $=1.0$. The
+  dashed diagonal is iso-efficiency: \hd{up and to the right beats the baseline}.
+  \gz{} sits above and right of every alternative on decompression, and the GPU
+  backend dominates outright.}
+\end{block}
+
+\end{column}
+
+% ============================== COLUMN 2 =====================================
+\begin{column}{0.487\paperwidth}
+
+\partbanner{2}{Compute engine}{run the analysis \emph{on} the compressed container}
+
+\begin{block}{}
+  \centering
+  \begin{tikzpicture}[
+      font=\small,
+      bx/.style={draw,rounded corners=6pt,line width=2.4pt,align=center,inner sep=9pt,
+                 minimum height=3.4cm},
+      ar/.style={-{Stealth[length=6mm,width=5mm]},line width=2.6pt,color=slate},
+    ]
+    \node[anchor=west,font=\normalsize\bfseries,color=slate] at (0,2.9)
+      {Today: materialize, then fold};
+    \node[bx,fill=paleg,draw=rule,text width=5.0cm,anchor=north west] (g1) at (0,2.0)
+      {GFA\\369\,GB};
+    \node[bx,fill=palec,draw=cherry,text width=13.2cm,right=15mm of g1] (m1)
+      {materialized graph + snarl / item index\\\textbf{330--400\,GB resident}};
+    \node[bx,fill=palet,draw=teal,text width=3.6cm,right=15mm of m1] (s1) {stat\\MB};
+    \draw[ar] (g1) -- (m1);  \draw[ar] (m1) -- (s1);
+
+    \node[anchor=west,font=\normalsize\bfseries,color=cherry] at (0,-2.8)
+      {GFAz: stream the compressed columns};
+    \node[bx,fill=palec,draw=cherry,text width=5.0cm,anchor=north west] (g2) at (0,-3.7)
+      {\code{.gfaz}\\4.5\,GB};
+    \node[bx,fill=paleg,draw=rule,text width=13.2cm,right=15mm of g2] (m2)
+      {grammar-compressed traversal stream\\+ compact accumulator};
+    \node[bx,fill=palet,draw=teal,text width=3.6cm,right=15mm of m2] (s2) {stat\\MB};
+    \draw[ar] (g2) -- (m2);  \draw[ar] (m2) -- (s2);
+    \node[anchor=north,font=\small\itshape,color=teal] at ([yshift=-7mm]m2.south)
+      {traversals are never expanded --- peak RSS stays \emph{below} the original GFA};
+  \end{tikzpicture}
+
+  \vspace{0.7cm}
+  \colorbox{paleg}{\parbox{0.74\linewidth}{\centering\vspace{7pt}
+    \Large\code{StreamDecodedNodes(HapSlice, Visit)}\vspace{7pt}}}
+  \cpt{One primitive backs every analysis. Rule lookup is an \hd{array index},
+  not a hash; a negative rule ID means \hd{reverse complement}, so one rulebook
+  serves both strands.}
+\end{block}
+
+\gap
+
+\begin{block}{}
+  \centering
+  {\small
+  \setlength{\tabcolsep}{9pt}\renewcommand{\arraystretch}{1.18}
+  \begin{tabular}{llcl}
+    \toprule
+    \textbf{\gz{} command} & \textbf{Reproduces} & \textbf{Passes} & \textbf{Accumulator} \\
+    \midrule
+    \code{deconstruct} & \code{vg deconstruct}  & 1\,(+topo) & per-site allele table \\
+    \code{growth}      & Panacus                & 1          & coverage $\to$ histogram \\
+    \code{depth}       & \code{odgi depth}      & 1          & per-node counters \\
+    \code{stats}       & \code{odgi stats}      & 0          & metadata totals \\
+    \code{pav}         & \code{odgi pav}        & 3          & node$\to$groups CSR \\
+    \code{similarity}  & \code{odgi similarity} & 2\,(+join) & node$\to$groups CSR \\
+    \bottomrule
+  \end{tabular}}
+  \cpt{Six analyses, one decoder --- they differ only in the accumulator. A new
+  analysis is a new visitor.}
+\end{block}
+
+\gap
+
+\begin{block}{}
+  \centering
+  {\large\bfseries\color{cherry}\code{deconstruct}: GFA\,$\rightarrow$\,VCF with no graph}\\[0.35cm]
+  \begin{tikzpicture}[
+      >={Stealth[length=4mm]},
+      seg/.style={draw,rounded corners=4pt,line width=1.8pt,minimum width=1.9cm,
+                  minimum height=1.9cm,inner sep=2pt,align=center,font=\small\ttfamily},
+      refp/.style={->,line width=2.4pt,color=cherry},
+      altp/.style={->,line width=2.4pt,dashed,color=teal},
+    ]
+    \node[seg,fill=paleg] (A) at (0,0)      {A\\GAT};
+    \node[seg,fill=palet] (B) at (3.4,2.0)  {B\\T};
+    \node[seg,fill=palec] (C) at (3.4,-2.0) {C\\C};
+    \node[seg,fill=paleg] (D) at (6.8,0)    {D\\GA};
+    \node[seg,fill=palec] (E) at (10.2,2.0) {E\\CC};
+    \node[seg,fill=paleg] (G) at (13.6,0)   {G\\TT};
+    \draw[refp] (A) -- (C); \draw[refp] (C) -- (D);
+    \draw[refp] (D) -- (E); \draw[refp] (E) -- (G);
+    \draw[altp] (A) -- (B); \draw[altp] (B) -- (D);
+    \draw[altp] (D) -- (G);
+    \begin{scope}[on background layer]
+      \node[draw=slate,dotted,line width=2pt,rounded corners,fit=(B)(C),inner sep=6mm] {};
+      \node[draw=slate,dotted,line width=2pt,rounded corners,fit=(E),inner sep=6mm] {};
+    \end{scope}
+    \node[font=\small,color=slate] at (3.4,4.4)  {snarl $[A,D]$};
+    \node[font=\small,color=slate] at (10.2,4.4) {snarl $[D,G]$};
+    \node[font=\small,color=cherry,anchor=west] at (0.2,-4.2) {\textbf{---} reference / $h_1$};
+    \node[font=\small,color=teal,anchor=west]   at (8.6,-4.2) {\textbf{-\,-} $h_2$};
+  \end{tikzpicture}
+
+  \vspace{0.5cm}
+  {\small\ttfamily
+  \setlength{\tabcolsep}{8pt}\renewcommand{\arraystretch}{1.16}
+  \begin{tabular}{llllll}
+    \toprule
+    \#CHROM & POS & REF & ALT & INFO & h1\ \ h2 \\
+    \midrule
+    chr1 & 4 & C   & T & AC=1;AN=2;AF=0.5 & 0\ \ \ \ 1 \\
+    chr1 & 6 & ACC & A & AC=1;AN=2;AF=0.5 & 0\ \ \ \ 1 \\
+    \bottomrule
+  \end{tabular}}
+
+  \cpt{\hd{Phase 1} recovers snarls from \emph{topology alone}
+  (biconnected decomposition, $O(V{+}E)$, decodes zero haplotypes). \hd{Phase 2}
+  streams each haplotype once through a boundary state machine; a reverse boundary
+  pair normalizes inversions. No graph, no general snarl index.}
+\end{block}
+
+\gap
+
+\begin{block}{}
+  \centering
+  {\small
+  \setlength{\tabcolsep}{6pt}\renewcommand{\arraystretch}{1.20}
+  \begin{tabular}{llrrcc}
+    \toprule
+    \textbf{Analysis} & \textbf{Graph} & \textbf{Baseline} & \textbf{\gz} &
+    \textbf{Speedup} & \textbf{Mem.} \\
+    \midrule
+    \multirow{2}{*}{\code{deconstruct}} & chr1   & 805\,s / 30.3\,GB    & 11.3\,s / 8.3\,GB   & \best\textbf{71$\times$}  & \best\textbf{3.7$\times$} \\
+    \emph{vs.} \code{vg}                & HGSVC3 & 132.9\,min / 397\,GB & 8.7\,min / 51.9\,GB & \best\textbf{15$\times$}  & \best\textbf{7.6$\times$} \\
+    \midrule
+    \multirow{2}{*}{\code{growth}}      & chr1 & 18.3\,s / 6.16\,GB & 0.74\,s / 0.66\,GB & \best\textbf{25$\times$}  & \best\textbf{9.3$\times$} \\
+    \emph{vs.} Panacus                  & v2.0 & 245\,min / 327\,GB & 39.8\,s / 12.9\,GB & \best\textbf{369$\times$} & \best\textbf{25$\times$} \\
+    \midrule
+    \multirow{2}{*}{\code{pav}}         & chr1 & 3499\,s / 31.9\,GB & 11.7\,s / 9.5\,GB & \best\textbf{299$\times$} & \best\textbf{3.4$\times$} \\
+    \emph{vs.} \code{odgi}              & chr6 & 4759\,s / 19.4\,GB & 7.8\,s / 6.4\,GB  & \best\textbf{613$\times$} & \best\textbf{3.0$\times$} \\
+    \bottomrule
+  \end{tabular}}
+  \cpt{Wall-clock / peak RSS at 16 threads. \hd{Outputs match the
+  baselines:} \code{growth} reproduces Panacus' curve exactly, \code{deconstruct}
+  agrees with \code{vg} to within 0.2\% of records, \code{pav} matrices are
+  structurally identical to \code{odgi}'s. On the 358/369\,GB HPRC graphs
+  \code{vg} and \code{odgi} \emph{cannot load the input at all} --- \gz{} runs
+  from a 4.5\,GB container.}
+\end{block}
+
+\gap
+
+\begin{block}{}
+  \begin{tikzpicture}
+    \node[fill=palet,draw=teal,line width=2.5pt,rounded corners=8pt,inner sep=14pt,
+          text width=\dimexpr\linewidth-42pt\relax,align=left]{%
+      \color{slate}
+      \textbf{\large A pangenome graph does not have to be unpacked to be queried.}\\[0.28cm]
+      One container gives \hd{best-in-class compression}, \hd{GB/s decompression},
+      \emph{and} a \hd{compute substrate} that runs six analyses one to three orders
+      of magnitude faster than the standard tools.\\[0.28cm]
+      {\small\itshape Open: whole-genome \code{pav} still exceeds memory on the two
+      largest HPRC graphs --- its node-set index is not yet compressed.}};
+  \end{tikzpicture}
+\end{block}
+
+\end{column}
+\end{columns}
+
+% =============================================================================
+%  FOOTER
+% =============================================================================
+\vfill
+\begin{center}
+\begin{tikzpicture}
+  \node[fill=slate,rounded corners=10pt,inner sep=18pt]{
+  \begin{minipage}{0.945\paperwidth}
+    \color{white}\small
+    \begin{minipage}[c]{0.115\linewidth}
+      \centering\colorbox{white}{\color{black}\qrcode[height=5.0cm]{https://github.com/babyplutokurt/GFAz}}\\[3pt]
+      {\footnotesize code}
+    \end{minipage}\hfill
+    \begin{minipage}[c]{0.65\linewidth}
+      \textbf{Open source:} \code{github.com/babyplutokurt/GFAz} \ \ $\cdot$ \ \
+      \textbf{Contact:} \code{taolue.yang@temple.edu}\\[0.3cm]
+      \textbf{Paper:} Yang, Liu, Jiang, Shi, Jin. \emph{\gz{}: Order-of-Magnitude
+      Pangenome Analytics by Computing over Compression.} ICS~'26.
+      \code{doi:10.1145/3797905.3807870}\\[0.3cm]
+      {\footnotesize \textbf{Acknowledgments:} We thank the Human Pangenome Reference
+      Consortium (BioProject PRJNA730823) and its funder, NHGRI. Supported in part by
+      NIH award R01GM157443.}
+    \end{minipage}\hfill
+    \begin{minipage}[c]{0.115\linewidth}
+      \centering\colorbox{white}{\color{black}\qrcode[height=5.0cm]{https://doi.org/10.1145/3797905.3807870}}\\[3pt]
+      {\footnotesize paper}
+    \end{minipage}
+  \end{minipage}};
+\end{tikzpicture}
+\end{center}
+
+\end{frame}
+\end{document}
