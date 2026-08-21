@@ -4,10 +4,9 @@ GFAz is a C++/CUDA library and command-line tool for compressing and
 decompressing Graphical Fragment Assembly (GFA) files.
 
 In our current benchmarks, GFAz reaches up to 20x higher compression ratio than
-Gzip and 13x higher compression ratio than Zstd. At 32 CPU threads it reaches
-up to 1,026 MiB/s compression and 5,426 MiB/s decompression; the
-experimental GPU backend reaches up to 4,843 MiB/s compression and
-9,435 MiB/s decompression.
+Gzip and 13x higher compression ratio than Zstd. At 16 CPU threads it reaches
+up to 1.4 GB/s compression and 5.4 GB/s decompression; the experimental GPU
+backend reaches up to 4.8 GB/s compression and 9.4 GB/s decompression.
 
 It has two execution backends:
 
@@ -19,62 +18,35 @@ changes how transforms are computed, not the on-disk format.
 
 ## Performance
 
-| Dataset | Metrics | Gzip | Zstd | sqz | sqz+bgzip | GBZ | gfaz(CPU) | gfaz(GPU) |
-|:---|:---|---:|---:|---:|---:|---:|---:|---:|
-| chr1. | Ratio | 5.59 | 7.54 | 3.09 | 18.0 | 9.52 | **35.4** | **31.7** |
-| | Co. | 46.2 | 2178 | 3.95 | 3.97 | 12.1 | **1026** | **2754** |
-| | De. | 359 | 1618 | 21.6 | 21.4 | 284 | **2307** | **8124** |
-| chr6. | Ratio | 5.04 | 6.99 | 5.51 | 20.8 | 19.2 | **35.4** | **28.18** |
-| | Co. | 41.0 | 1712 | 3.56 | 3.56 | 10.7 | **1012** | **3791** |
-| | De. | 348 | 1515 | 20.1 | 20.4 | 281 | **2943** | **7230** |
-| E.coli | Ratio | 4.69 | 5.67 | 1.26 | 7.46 | 5.58 | **18.4** | **16.7** |
-| | Co. | 33.3 | 1356 | 4.57 | 4.53 | 20.2 | **162** | **678** |
-| | De. | 310 | 1258 | 34.0 | 32.2 | 197 | **834** | **1430** |
-| HPRCv1.1 | Ratio | 4.02 | 5.32 | - | - | 14.0 | **22.4** | **20.4** |
-| | Co. | 36.4 | 1657 | - | - | 84.5 | **276** | **4843** |
-| | De. | 319 | 1234 | - | - | 650 | **2292** | **9435** |
-| HPRCv2.0 | Ratio | 4.19 | 6.49 | - | - | 66.8 | **83.8** | **76.4** |
-| | Co. | 49.1 | 1514 | - | - | 130 | **537** | **-** |
-| | De. | 342 | 1240 | - | - | 648 | **5426** | **-** |
-| HPRCv2.1 | Ratio | 4.19 | 6.43 | - | - | 64.2 | **82.8** | **74.2** |
-| | Co. | 48.9 | 1540 | - | - | 136 | **544** | **-** |
-| | De. | 343 | 1241 | - | - | 652 | **5325** | **-** |
+Measured on an AMD Ryzen Threadripper PRO 9955WX (16 cores), 512 GB DDR5-6400
+memory, a Samsung SSD 990 PRO NVMe drive, and an NVIDIA RTX Pro 6000. GFAz CPU
+runs use 16 threads. Compression throughput is end-to-end CLI wall time
+(parsing, compression, serialization) over the input GFA size; decompression
+writes to `/dev/null`.
 
-`Ratio` indicates compression ratio; `Co.` and `De.` indicate compression
-and decompression throughput in MiB/s. GFAz CPU values use 32 threads; GFA and
-GFAz inputs are preloaded into page cache, and decompression writes to
-`/dev/null` to isolate compute throughput. E. coli values are medians of nine
-runs, chr1 and chr6 values are medians of five runs, and HPRC v1.1 values and
-HPRC v2.0/v2.1 decompression values are medians of three runs. HPRC v2.0/v2.1
-compression values are single warmed runs due to their whole-genome runtime.
-Bold values indicate the best result in each row. System configuration: AMD
-Ryzen Threadripper PRO 9955WX (16 cores), NVIDIA RTX Pro 6000, and 512 GB
-DDR5-6400 memory.
+- Compression ratio: up to 84x on whole-genome HPRC graphs, up to 20x higher
+  than Gzip and 13x higher than Zstd.
+- CPU throughput: up to 1.4 GB/s compression and 5.4 GB/s decompression.
+- GPU backend (experimental): up to 4.8 GB/s compression and 9.4 GB/s
+  decompression.
+
+Per-dataset results and the comparison against Gzip, Zstd, sqz, and GBZ are
+reported in the paper (see [Citation](#citation)).
 
 ## Compute Engine Performance
 
 Beyond compression, `gfaz` runs pangenome analyses **directly on the compressed
-`.gfaz` container** — with no decompression back to GFA. Each analysis reproduces
-the reference tool's output while running one to three orders of magnitude faster
-and using far less memory. Measured at 16 threads (wall-clock time / peak RSS);
-baselines read the uncompressed GFA, `gfaz` reads the `.gfaz`.
+`.gfaz` container**, with no decompression back to GFA. Measured at 16 threads
+against tools that read the uncompressed GFA (`vg deconstruct`, Panacus,
+`odgi`), `gfaz` runs up to 614x faster with up to 27x lower peak memory where
+both complete, and it finishes whole-genome analyses on the HPRC v2.x graphs
+(about 400 GB of GFA) from a container under 5 GB, where `vg` and `odgi` cannot
+load the input on a 512 GB node.
 
-| Analysis (vs. baseline) | Graph | Baseline | gfaz | Speedup | Mem. saving |
-|:---|:---|---:|---:|---:|---:|
-| `deconstruct` vs. `vg deconstruct` | chr1 | 805 s / 30.3 GB | 11.3 s / 8.3 GB | **71×** | **3.7×** |
-| | HGSVC3 (80 GB GFA) | 132.9 min / 397 GB | 8.7 min / 51.9 GB | **15×** | **7.6×** |
-| `growth` vs. Panacus | chr1 | 18.3 s / 6.16 GB | 0.74 s / 0.66 GB | **25×** | **9.3×** |
-| | HPRC v2.0 (358 GB GFA) | 245 min / 327 GB | 39.8 s / 12.9 GB | **369×** | **25×** |
-| `pav` vs. `odgi pav` | chr1 | 3499 s / 31.9 GB | 11.7 s / 9.5 GB | **299×** | **3.4×** |
-| | chr6 | 4759 s / 19.4 GB | 7.8 s / 6.4 GB | **613×** | **3.0×** |
-
-Outputs match the baselines: `deconstruct` VCF record counts agree with `vg` to
-within ~0.2% (~99.99% position concordance), `growth` reproduces Panacus's growth
-curve exactly at every point, and `pav` matrices are structurally identical to
-`odgi`'s. On the largest whole-genome graphs (HPRC v2.0/v2.1, 358–369 GB GFA)
-`vg` and `odgi` cannot load the input within memory, while `gfaz` runs from a
-~4.5 GB container; for `deconstruct` and `growth`, peak RSS stays below the size
-of the uncompressed GFA. System configuration as above.
+Outputs match the baselines: `growth` reproduces Panacus's curve exactly at
+every point, `pav` matrices are identical to `odgi`'s, and `deconstruct`
+reproduces more than 99.99% of `vg`'s sites at the same position with the same
+reference allele. Per-analysis timings and memory are reported in the paper.
 
 ## What It Does
 
@@ -203,9 +175,9 @@ operate on `.gfaz` without materializing the original GFA.
 top-level snarl** via a global biconnected decomposition, matching
 `vg deconstruct`'s default granularity — producing output identical to `vg` is
 the goal of this workflow. On full human chromosomes it reproduces vg's calls at
-**99.99% position concordance** and within **±0.13%** record count, while running
-**17–24× faster** with **1.4–1.7× less memory** (chr1: 1,593,899 vs vg 1,593,956
-records, 28.5 s vs 696 s). The two legacy modes — `--snarl` (leaf-superbubble
+more than 99.99% position concordance while running an order of magnitude faster
+with less memory (see [Compute Engine Performance](#compute-engine-performance)).
+The two legacy modes — `--snarl` (leaf-superbubble
 superset) and `--linear` (the flat reference-anchor heuristic) — are deprecated
 and will be removed in a future release.
 
