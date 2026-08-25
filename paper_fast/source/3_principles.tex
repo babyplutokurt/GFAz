@@ -1,0 +1,118 @@
+\section{What Makes a Compressed Format Computable}
+\label{sec:principles}
+
+Most compressed formats cannot be computed on, and the reasons are not accidents
+of implementation. A format designed purely to minimize bytes will reach for
+whichever coupling buys the most redundancy, and coupling is exactly what a query
+engine cannot afford. This section states the five properties that separate the
+two cases. They are drawn from building \sys, but none of them is specific to
+genomics, and we state them in general terms.
+
+\paragraph{P1. Local expansion.}
+Producing the $i$th element must not require having reconstructed the preceding
+ones, beyond a bounded running state. This is the property that distinguishes a
+representation a fold can walk from a stream that must be replayed from the start.
+Long-window LZ77 violates it: a match may reference any byte within a window of
+megabytes, so the decoder must keep that history materialized. Adaptive
+arithmetic coding violates it more strongly, since the model state at position
+$i$ depends on the entire prefix. Grammar compression satisfies it: a rule
+expands from a static rulebook, independent of where it appears, and expansion
+depth is bounded by the number of grammar rounds rather than by data size. A
+fixed-width delta transform satisfies it with a single accumulator.
+
+\paragraph{P2. Side-table-free symbol classification.}
+The decoder's inner loop must distinguish a literal from a reference in constant
+time, without consulting a data structure. This sounds minor and is not: it is
+the difference between a comparison and a hash probe on the hottest instruction
+path in the system, executed once per emitted element, tens of billions of times
+per whole-genome query. The mechanism is namespace partitioning. If reference IDs
+are allocated strictly above every literal value, classification is a range check
+on the symbol itself. Formats that assign dictionary IDs from a shared namespace,
+or that tag symbols out of band, forfeit this.
+
+\paragraph{P3. Column independence.}
+A query must be able to read the fields it needs without paying for the fields it
+does not. This is the standard argument for columnar layout in analytical
+databases~\cite{abadi2006integrating,boncz2005monetdb}, and it applies with more
+force to scientific interchange formats, which are almost universally row-major
+text. It is what lets one of our analyses answer a question by reading metadata
+columns and decoding \emph{no} traversals at all, and what lets the others skip
+the segment DNA payload, which is the largest non-traversal component of the file,
+whenever they do not need to spell sequence.
+
+\paragraph{P4. Record independence.}
+Records must be individually addressable and independently decodable, which in
+practice means an explicit length or offset column alongside the payload. This
+buys two things at once. It makes the format partitionable, so $N$ threads can
+decode $N$ records with no coordination on the decode path, which is what turns
+the fold into a parallel loop. And it bounds memory, because a query can hold one
+record's expansion at a time rather than the collection's.
+
+\paragraph{P5. Closure under the domain's symmetries.}
+Whatever cheap transformations the domain's queries apply, the compressed
+representation should express directly rather than force through an expansion. In
+our setting the transformation is reverse complement: reading a segment on the
+opposite DNA strand emits its elements in reverse order with every orientation
+flipped, and roughly half of all traversal steps in a pangenome are on the reverse
+strand. A representation that could not reverse a rule in place would have to
+store a mirrored copy of the rulebook, or expand and reverse at query time, and
+either would negate the benefit. Encoding a negated reference as ``the reverse
+complement of this rule'' makes the symmetry free. The general form of the
+property is that the operations a query composes should be closed over the
+compressed representation, not only over the expanded one.
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{4.2pt}
+\caption{Formats against the five properties. \checkmark{} holds, $\circ$ holds
+partially or only within a block, \texttimes{} does not hold. The row that matters
+is not that our container scores well, but that scoring well is a design choice
+with a cost (see text): every property traded away some compression ratio.}
+\label{tab:principles}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Format & P1 & P2 & P3 & P4 & P5 \\
+       & local & class. & col. & rec. & sym. \\
+\midrule
+GFA text                       & \checkmark & \texttimes & \texttimes & $\circ$ & \texttimes \\
+gzip / bgzip~\cite{li2011tabix} & \texttimes & \texttimes & \texttimes & $\circ$ & \texttimes \\
+Zstd frame~\cite{collet2021rfc} & \texttimes & \texttimes & \texttimes & $\circ$ & \texttimes \\
+Parquet\,+\,Zstd               & $\circ$ & \texttimes & \checkmark & $\circ$ & \texttimes \\
+HDF5 / Zarr (chunked)          & $\circ$ & \texttimes & \checkmark & $\circ$ & \texttimes \\
+GBZ / GBWT~\cite{siren2022gbz} & \checkmark & \checkmark & \texttimes & \texttimes & \checkmark \\
+This container~\cite{gfaz2026} & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:principles} places common formats against the five properties. Two
+readings of it are worth separating. The block-compressed formats in the middle
+rows are not disqualified from analytics in general; Parquet and Zarr are built
+for it and satisfy P3 well. What they do not offer is P1 and P2 \emph{within} a
+block: the decompressor's output is the expanded data, so a query over a Parquet
+column materializes that column. That is entirely reasonable when the expanded
+column is small relative to memory, and it is the assumption that fails here,
+where the expanded traversal column is the $369$\,GB object we are trying to
+avoid. GBZ satisfies P1, P2, and P5 and is the closest existing design, but its
+index is global rather than per-record, which is what P4 asks for.
+
+\paragraph{Computability is bought, not found.}
+The properties are not free, and a paper that presented them as pure wins would be
+misleading. Namespace partitioning (P2) reserves a range of the symbol space that
+a tighter encoding could have used, and forgoes the shorter codes a fully shared
+dictionary would permit. Column independence (P3) forgoes cross-field correlation:
+fields that predict one another compress better together, and splitting them
+sacrifices that. Record independence (P4) is the most expensive of the five,
+because it prevents redundancy from being exploited across record boundaries, and
+in a dataset whose entire redundancy structure is cross-record, that is precisely
+the redundancy one most wants. The container recovers it by making the grammar
+rulebook global while keeping the encoded records independent, so rules are shared
+across every traversal but each traversal decodes alone; this is the single
+design decision that makes the rest of the engine possible, and we return to it in
+Section~\ref{sec:container}.
+
+The upshot is a claim we can state generally. Formats intended for datasets that
+will outgrow memory should be designed against these five properties from the
+start, accepting a few percent of ratio to keep the data computable, because the
+alternative is that every consumer pays full materialization forever.

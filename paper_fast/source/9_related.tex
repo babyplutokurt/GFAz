@@ -1,0 +1,57 @@
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Querying compressed data.}
+Executing directly on compressed representations is a long-running theme in data
+management. Column stores compress each column with a lightweight scheme and,
+crucially, evaluate predicates on the encoded form rather than decoding
+first~\cite{abadi2006integrating,boncz2005monetdb,zukowski2006super}; the same
+argument drives modern lakehouse formats~\cite{melnik2010dremel,kuschewski2023btrblocks}
+and fast integer codecs~\cite{lemire2015decoding}. Succinct~\cite{agarwal2015succinct}
+pushes further, storing a compressed representation that supports search and random
+access without expansion, building on compressed self-indexes~\cite{ferragina2000opportunistic,gagie2020fully}
+and the broader compact-data-structures program~\cite{jacobson1989space,navarro2016compact}.
+Our contribution is not the idea of computing on compressed data but a
+characterization of \emph{which} compressed formats admit it
+(\S\ref{sec:principles}), and a demonstration on a scientific interchange format
+whose expanded form is the thing that no longer fits. Where column stores decode a
+column to operate on it and self-indexes optimize for locate-style queries, we keep
+a grammar-compressed representation resident and fold over it in place, which suits
+dense scans that touch every element exactly once.
+
+\paragraph{Grammar compression.}
+Replacing repeated substrings with grammar rules is
+classical~\cite{ziv1977universal,nevill1997identifying,larsson2000offline}, and the
+observation that a straight-line grammar can be traversed without full expansion
+underlies work on compressed pattern matching. The container we build
+on~\cite{gfaz2026} applies an iterative 2-mer grammar to pangenome traversals;
+sqz~\cite{heringer2025human} applies heap-based byte-pair encoding to the same
+records. What this paper adds is that the grammar is a usable execution substrate
+for whole analyses, not only for string queries, once it is paired with namespace
+partitioning, record independence, and orientation closure.
+
+\paragraph{Genomic storage formats.}
+Genomics has repeatedly solved storage by designing a format rather than by
+applying a general compressor: BAM and CRAM for aligned
+reads~\cite{li2009sequence,bonfield2022cram}, block-gzip with an index for random
+access into flat records~\cite{li2011tabix}, and specialized codecs for
+sequence collections~\cite{yang2024gpufastqlz}. These are archival and
+retrieval formats: they optimize for storing and fetching regions, and an analysis
+still runs on decoded records. GBZ~\cite{siren2022gbz}, built on the
+GBWT~\cite{siren2020haplotype,siren2021pangenomics}, is the exception and the
+closest relative of this work, in that it supports navigation on the compressed
+haplotype collection directly; \S\ref{subsec:bg-alternatives} explains why an index
+tuned for locate-style navigation is a different structure from the one a dense
+fold wants, and \S\ref{subsec:eval-gbz} measures the difference.
+
+\paragraph{Pangenome analysis tools.}
+The tools we compare against are the field's standard implementations, and each is
+materialization-based by design: \cmd{vg} loads a graph and a snarl
+decomposition~\cite{garrison2018variation,hickey2020genotyping,paten2018superbubbles},
+\cmd{odgi} builds a succinct whole-graph object~\cite{guarracino2022odgi}, and
+Panacus parses records into item tables~\cite{parmigiani2024panacus}. Graph
+construction pipelines~\cite{hickey2024pangenome,garrison2024building} sit upstream
+of all of this and are unaffected by our work. Our \cmd{deconstruct} algorithm is,
+to our knowledge, the first to derive a reference-relative VCF without a
+materialized graph or a general snarl index, by separating topology-only site
+discovery from a streaming allele fold (\S\ref{sec:deconstruct}).

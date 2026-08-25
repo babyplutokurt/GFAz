@@ -1,0 +1,65 @@
+\section{Discussion and Limitations}
+\label{sec:discussion}
+
+\paragraph{What the engine is not.}
+\sys targets a specific access pattern: an ordered scan of traversals folded into
+a compact accumulator. Operations outside it are not served well and we do not
+claim otherwise. Arbitrary node-to-step queries (``which haplotypes pass through
+node $v$, and where in each?'') need an index we deliberately do not build; the
+answer under our design is a full scan, which is the wrong structure for a point
+query. Graph editing and topology rewriting are out of scope entirely, since the
+container is immutable at query time. Interactive, latency-sensitive lookups are
+better served by a succinct index such as GBZ. The right way to read this paper is
+not that materialized graph toolkits should be replaced, but that a large class of
+analyses currently paying for one does not need it.
+
+\paragraph{The accumulator is the real limit.}
+The \cmd{pav} result (\S\ref{subsec:eval-limits}) draws the boundary of the
+approach more sharply than any of the positive results. Computing over compression
+bounds what the query \emph{reads}; it places no bound at all on what the query
+\emph{writes}. An engine of this kind is therefore only as scalable as its least
+compressed data structure, and for us that is a node-to-group join index. Two
+directions look promising: encoding the CSR index in a compressed form that
+supports the join directly, which is the same computability argument applied one
+level up, and partitioning the join by reference region so that only a slice of the
+matrix is resident at once, trading passes for memory. The second is
+straightforward and the first is the interesting one.
+
+\paragraph{Cold start and the rulebook.}
+Every query loads the full grammar rulebook, because rules are global to the file
+(\S\ref{sec:container}). This is the price of capturing cross-record redundancy
+while keeping records independent, and it means the engine has a fixed startup
+cost that a query touching only a few haplotypes cannot amortize. For the
+whole-cohort folds this paper targets the cost is negligible, but it makes the
+design a poor fit for selective, few-haplotype queries, where a per-block rulebook
+would be the better trade.
+
+\paragraph{Determinism and reproducibility.}
+Parallel folds with atomic accumulation can make output depend on thread
+interleaving, which is unacceptable for a tool feeding a clinical or scientific
+pipeline. \sys addresses this per analysis rather than globally: \cmd{deconstruct}
+sorts each site's observations by source slice and produces byte-identical VCFs at
+any thread count, and the counting folds are order-independent by construction.
+This is a deliberate design constraint rather than a property that happened to
+hold, and we think any engine of this kind should adopt it.
+
+\paragraph{Generality beyond pangenomes.}
+The five properties of \S\ref{sec:principles} are stated for compressed formats in
+general, and the workload shape they serve, a dense ordered fold over records that
+are individually decodable and share a global dictionary, is not unique to
+genomics. Columnar time-series archives, compressed trace and telemetry stores, and
+tokenized corpora for machine learning all have the same structure: enormous,
+highly redundant, written once, and read by scans that reduce to something small.
+We have not built those systems, so we claim the properties transfer and not that
+the engine does. The one transferable lesson we would state without hedging is the
+last one from \S\ref{sec:principles}: a format that will outlive the memory of the
+machines reading it should be designed to be computable, and a few percent of
+compression ratio is a cheap price for that.
+
+\paragraph{Write path.}
+The container is built once and read many times, and this paper says nothing about
+updating it. The compressor supports appending haplotypes without a full
+rebuild~\cite{gfaz2026}, but we have not studied how an engine of this kind should
+behave when a query runs concurrently with an append, nor what consistency model
+would be appropriate. For the read-mostly release cadence of pangenome
+consortia this has not been pressing; for other domains it would be.

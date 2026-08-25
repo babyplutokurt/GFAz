@@ -1,0 +1,138 @@
+\section{Background and Motivation}
+\label{sec:background}
+
+\subsection{Pangenome Graphs as a Storage Problem}
+\label{subsec:bg-format}
+
+GFA is a line-oriented text format~\cite{gfaspec}. Each line is a record of one
+type: \textbf{S} carries a segment identifier and its DNA sequence; \textbf{L},
+\textbf{J}, and \textbf{C} carry edges; \textbf{H} carries file-level metadata;
+and optional \texttt{TAG:TYPE:VALUE} fields extend any record. Traversals are
+\textbf{P} (a named path) and \textbf{W} (a haplotype walk with sample,
+haplotype, and coordinate metadata). A traversal is an ordered sequence of
+oriented node IDs, where the sign records which DNA strand the segment is read
+on, and it is the concatenation of those segments' sequences that reconstructs an
+individual's chromosome.
+
+From a storage standpoint the format has three properties that matter. It is
+row-major: fields of the same type are scattered across lines rather than
+collected into columns. It is textual: a node ID that fits in four bytes is
+written as up to nine ASCII characters plus a separator. And, most importantly,
+it is \emph{explicitly redundant across records}, because two haplotypes that
+agree over a megabase still write out that megabase of node IDs twice.
+
+The third property is the one that drives growth. Adding a haplotype to a
+pangenome adds sublinearly to topology, since shared sequence merges into existing
+nodes, but adds a full new traversal record. Traversals therefore come to dominate
+the file: over $90\%$ in general, and $98.7\%$ of a $14$\,GB chromosome~19 graph
+at $1{,}000$ haplotypes~\cite{heringer2025human}. It is also the property that
+makes the file so compressible, since the redundancy is long-range and highly
+structured. General-purpose compressors capture little of it, because their match
+windows are megabytes while the repeats span whole chromosome-length walks: gzip
+leaves a $9{,}535$\,GiB $1000$-genomes graph at $2{,}231$\,GiB~\cite{siren2022gbz}.
+Domain-specific compressors capture much more, reaching $18$--$84\times$ by
+modeling traversal structure directly~\cite{siren2022gbz,gfaz2026}.
+
+\subsection{The Materialize-to-Analyze Tax}
+\label{subsec:bg-tax}
+
+Compression has therefore already succeeded at the storage layer, and the
+bottleneck has moved. What a practitioner does with a pangenome is derive things
+from it, repeatedly: a reference-relative variant table to feed the standard
+genomics toolchain, a growth curve to decide whether the cohort is saturated, a
+presence/absence matrix for an association study, a coverage profile, a pairwise
+similarity matrix. Each derivation today runs a separate single-purpose tool, and
+each such tool begins by building a representation larger than the answer it
+computes.
+
+Table~\ref{tab:motivation} makes the size of that tax concrete on the largest
+public human pangenome. The entire biological output of a growth analysis is a
+curve of a few thousand numbers. Producing it with the standard tool costs four
+hours and $336$\,GB of resident memory, because the tool must first parse
+$369$\,GB of text into item tables. The compressed container for the same graph is
+$4.5$\,GB and sits on disk untouched for the whole run.
+
+\begin{table}[t]
+\centering
+\small
+\caption{The cost of one analysis on the HPRC v2.1 pangenome graph, at 16 threads.
+The answer is a few thousand integers; the established tool reaches it by
+rebuilding a representation $75\times$ larger than the compressed form of the same
+data. Setup in Section~\ref{subsec:eval-setup}.}
+\label{tab:motivation}
+\begin{tabular}{@{}lr@{}}
+\toprule
+Uncompressed GFA text                  & $369$\,GB \\
+Compressed container~\cite{gfaz2026}   & $4.5$\,GB \\
+\midrule
+Panacus \cmd{growth}: time / peak RSS  & $251$\,min / $336$\,GB \\
+\sys \cmd{growth}: time / peak RSS     & $41.2$\,s / $13.7$\,GB \\
+\midrule
+Output size (growth curve)             & $<$$100$\,KB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+We call this the \emph{materialize-to-analyze tax}, and it has three components,
+which matter because they respond to different fixes. There is an \textbf{I/O}
+component: the uncompressed bytes must be read from storage. There is a
+\textbf{parse and build} component: text must be converted into an in-memory
+structure, which is CPU-bound and usually single-pass but rarely parallel. And
+there is a \textbf{residency} component: the built structure must stay in memory
+for the duration, which is what sets the machine you need and what makes the two
+largest graphs simply infeasible for two of the three baselines.
+
+\subsection{Why the Obvious Fixes Are Not Enough}
+\label{subsec:bg-alternatives}
+
+Three responses suggest themselves before ours, and it is worth saying why each
+falls short, because reviewers of a storage paper will reach for them first.
+
+\paragraph{Decompress to fast local storage.}
+The cheapest fix is to keep the archive compressed, expand it to NVMe on demand,
+and run the existing tool. This attacks only the I/O component. It leaves parse,
+build, and residency untouched, and it adds a full write of the expanded data plus
+the capacity to hold it. For the graphs where the problem is acute, residency is
+the binding constraint, not bandwidth: \cmd{vg} and \cmd{odgi} fail on the
+$358$/$369$\,GB graphs because the built object does not fit, and no storage tier
+changes that. We measure this alternative directly in
+Section~\ref{subsec:eval-expand} rather than argue about it.
+
+\paragraph{Buy more memory.}
+Residency can be bought, up to a point, and the point is closer than it looks.
+Baseline peak RSS on these workloads runs $4$--$5\times$ the GFA size for the
+graph-resident tools; at the current $369$\,GB that is already beyond a
+$503$\,GiB node, and cohort sizes are growing faster than per-node memory. The
+approach also does nothing for the analyses' time cost, which is what a scientist
+actually waits on when sweeping parameters or reprocessing a new release.
+
+\paragraph{Use a succinct graph index.}
+The strongest existing answer is to store the graph in a compressed
+\emph{queryable} index rather than as text. GBZ~\cite{siren2022gbz}, built on the
+GBWT~\cite{siren2020haplotype,siren2021pangenomics}, does exactly this and is the
+closest intellectual relative of our work: it keeps haplotype paths in a
+BWT-derived structure that supports navigation without expansion. It is genuinely
+good at what it targets, and tools such as \cmd{vg giraffe} depend on it.
+
+The difference is what the structure is optimized for. GBZ is built for
+\emph{navigational} queries: locate a pattern, extend a search, enumerate the
+haplotypes through a position. Those require an index with rank/select support
+over the whole collection, which is global to build, does not admit incremental
+extension without rebuilding, and does not preserve full GFA record semantics such
+as optional fields. Our workloads are the opposite shape. They are dense sequential
+folds that touch every step of every traversal exactly once and need no locate at
+all. For that access pattern an ordered stream is the right structure, and the
+machinery that makes locate fast is overhead that a fold cannot amortize. The two
+designs are complementary rather than competing, and we compare against GBZ-backed
+tooling where a common analysis exists (Section~\ref{subsec:eval-gbz}).
+
+\subsection{What Would Have to Be True}
+\label{subsec:bg-requirements}
+
+If a query is going to run on the compressed bytes, then the format has to hold up
+under a set of demands it was never designed for: a decoder that emits elements
+without expanding the whole record, a way to touch one field of the data without
+paying for the others, and enough independence between records that many threads
+can decode at once. Section~\ref{sec:principles} states these as five properties
+and checks them against formats in common use; Section~\ref{sec:container}
+describes the container we build on in exactly those terms.

@@ -1,0 +1,162 @@
+\section{Variant Projection Without a Graph}
+\label{sec:deconstruct}
+
+The analyses of \S\ref{subsec:eng-instances} are folds in an obvious sense: they
+visit nodes and accumulate. This section develops the one that is not obvious.
+
+Deriving a reference-relative variant table is the most consequential thing done
+with a pangenome, because it is the bridge to everything downstream. A pangenome
+encodes variation only implicitly, as the alternative routes haplotypes take
+through the graph's bubbles, and essentially none of the established genomics
+toolchain can read that. Variant annotation, association testing, imputation, and
+clinical reporting all consume the Variant Call Format (VCF), so a pangenome
+becomes usable to the field at large only after it has been projected into one.
+
+It is also the analysis least suited to streaming, which is why we treat it in
+depth. The other five ask questions about node visits. This one asks a question
+about \emph{topology}: at which positions does the graph branch, and what does
+each haplotype spell as it crosses each branch? The standard tool,
+\cmd{vg deconstruct}~\cite{garrison2018variation}, answers it by loading the whole
+graph, computing a snarl (superbubble)
+decomposition~\cite{onodera2013superbubbles,paten2018superbubbles}, and then, for
+each snarl, enumerating the traversals its embedded paths take and emitting those
+that differ from the reference. Both the materialized graph and the snarl index
+stay resident for the entire run, which is what makes the projection cost
+$397$\,GB on an $80$\,GB graph (Section~\ref{sec:eval}).
+
+\subsection{Separating Discovery from Observation}
+\label{subsec:dec-idea}
+
+Our design rests on one decomposition: \emph{site discovery and allele observation
+need not happen together}.
+
+Where the graph branches is a function of topology alone. It does not depend on
+which haplotypes exist, how many there are, or what they spell. What each
+haplotype spells at a site, on the other hand, depends only on that haplotype and
+on the site's boundaries, and not on any other haplotype. The standard formulation
+interleaves the two, which forces both the graph and the decomposition to be
+resident at once. Split them, and each half falls into a form the container
+already supports.
+
+\begin{itemize}[noitemsep,topsep=3pt,leftmargin=*]
+  \item \textbf{Phase 1} reads only the topology columns and runs in $O(V{+}E)$,
+        decoding no haplotype. Its output is a list of site boundaries, which is
+        small.
+  \item \textbf{Phase 2} is an ordinary compressed-traversal fold: each haplotype
+        streams past exactly once, through a state machine that carries a few
+        words of state.
+\end{itemize}
+
+Neither phase materializes the graph, and neither builds a general-purpose
+whole-graph snarl index. Before either runs, each reference contig is decoded once
+into a node stream, and a prefix sum over the segment length column maps reference
+node positions to genomic coordinates.
+
+\subsection{Phase 1: Topology-Only Site Discovery}
+\label{subsec:dec-phase1}
+
+\sys defines sites as top-level snarls, matching the record granularity of
+\cmd{vg deconstruct}, and recovers them from a biconnected-components
+decomposition of the stored edge columns.
+
+The decomposition runs over a \emph{node-end} graph rather than the segment graph.
+Each segment $s$ contributes two vertices, its $5'$ and $3'$ ends, joined by a
+\emph{black} edge; each GFA link contributes a \emph{grey} edge between the source
+departure end and the target arrival end. This is the bidirected interval graph of
+snarl theory, in which snarls correspond to biconnected
+blocks~\cite{paten2018superbubbles}. The black edges are not bookkeeping: they are
+what makes inversions work. A single-node inversion closes through that segment's
+two ends and is recovered as one biconnected block, whereas on a collapsed segment
+graph the inverted segment would be an articulation point and the site would split
+in two.
+
+\sys runs an iterative Hopcroft--Tarjan decomposition over this
+graph~\cite{hopcroft1973algorithm}, maintaining discovery times, low-link values,
+and an edge stack; on return from child $w$ to parent $u$, the condition
+$\mathit{low}(w)\ge\mathit{disc}(u)$ pops one maximal biconnected block. The pass
+is iterative rather than recursive because chromosome-scale graphs overflow the
+call stack, and it runs in $O(V{+}E)$ time and linear auxiliary space.
+
+Each non-trivial block is then projected onto the reference node stream. If the
+first and last reference positions the block touches define a span whose positions
+all belong to the block and which repeats no segment, that span is emitted as a
+candidate top-level snarl. The filter rejects cyclic and ambiguous reference
+traversals, while nested child bubbles and chains of leaf bubbles collapse into
+their enclosing top-level snarl, which is the granularity the reference tool
+reports. A final reduction leaves a non-overlapping chain ordered by position.
+
+\subsection{Phase 2: Streaming Allele Observation}
+\label{subsec:dec-phase2}
+
+With the sites fixed, the projection becomes a fold. Each haplotype streams
+through \textsc{StreamNodes} into a state machine that is either closed or
+associated with exactly one open site (Algorithm~\ref{alg:snarl}). A boundary
+node-side opens a site; ordinary nodes accumulate into a small interior buffer;
+the matching exit emits that interior, tagged with its source traversal. An exit
+may immediately open the next site, which is what handles chained snarls without
+retaining any of the surrounding path.
+
+\begin{algorithm}[t]
+\small
+\caption{Allele observation for one haplotype}
+\label{alg:snarl}
+\begin{algorithmic}[1]
+  \REQUIRE slice $E$; boundary maps \textsc{Entrance} (node-side $\to$ site,
+           forward or reverse) and per-site exits
+  \STATE $\textit{open}\gets\bot$;\quad $\textit{interior}\gets[\,]$
+  \STATE \textbf{for each} node $u$ decoded from $E$ (Alg.~\ref{alg:stream}):
+  \STATE \quad $v\gets$ node-side vertex of $u$
+  \STATE \quad \textbf{if} $\textit{open}=\bot$: \textsc{TryOpen}($v$)
+         \COMMENT{sets \textit{open}, \textit{inverted}, \textit{exit}}
+  \STATE \quad \textbf{else if} $v=\textit{exit}$:
+  \STATE \qquad emit \textit{interior} for site \textit{open}
+         (reverse-complemented if \textit{inverted}), tagged with $E$
+  \STATE \qquad $\textit{open}\gets\bot$; \textsc{TryOpen}($v$)
+         \COMMENT{exit may open a chained site}
+  \STATE \quad \textbf{else}: append $u$ to \textit{interior}
+\end{algorithmic}
+\end{algorithm}
+
+Observation runs in parallel over haplotypes, each thread appending tagged
+interiors to a private buffer. The buffers are concatenated once, and the
+inherently serial per-site assembly and VCF formatting then run as a single pass,
+with each site's observations sorted by source slice so that the emitted VCF is
+invariant to thread count.
+
+\paragraph{Inversions.}
+A haplotype need not cross a site on the reference strand. When it crosses on the
+opposite strand, both the boundary node-sides and the interior nodes appear
+reverse-complemented, and yet the engine must recognize the same site and recover
+the same allele. Phase~1 has already done its part through the black edges. Phase~2
+does the rest by giving every site a second, reverse boundary pair: besides the
+forward entrance at the reference source exiting at the sink, \sys stores a
+reverse entrance at the reverse complement of the sink, exiting at the reverse
+complement of the source. A haplotype entering through the reverse entrance is
+marked inverted, and at its exit the interior is reverse-complemented before the
+allele is spelled, normalizing the observation into the reference frame so that a
+forward and an inverted traversal of the same sequence collapse to a single
+allele. Note that this normalization is again the compressed representation's own
+symmetry (P5) surfacing at the query level: reverse complement is expressible on
+the buffer as it is on the rulebook.
+
+\paragraph{VCF conventions.}
+Per site, the reference interior spells allele $0$; each observed interior is
+spelled by concatenating segment DNA, with a reverse-orientation node
+contributing the reverse complement of its sequence, and deduplicated to an allele
+index. Sites with no alternate allele are dropped. Equal-length alleles emit as
+substitutions; otherwise the record is left-anchored with the last base of the
+source anchor, following the standard indel convention. \texttt{INFO} carries
+allele counts and frequencies, and an optional guard collapses very large spans to
+a symbolic record. Haplotypes collapse into VCF sample columns by the chosen
+grouping mode, with one genotype slot per haplotype index, so reference-tiling
+contigs resolve to a sample's true ploidy rather than inflating it. Records emit
+in sorted genomic order per contig.
+
+\paragraph{Correctness.}
+The algorithm is new, but its output is meant to be a drop-in replacement.
+Against \cmd{vg deconstruct} on the HPRC chromosome graphs, \sys agrees at
+approximately $99.99\%$ of reference positions, producing the same sites and the
+same alternate-allele sets except for a handful of records in tangled
+pericentromeric regions where the reference traversal itself is ambiguous. We
+quantify record-level agreement, alongside time and memory, in
+Section~\ref{subsec:eval-deconstruct}.

@@ -1,0 +1,212 @@
+\section{The Execution Engine}
+\label{sec:engine}
+
+\sys turns an analysis into a fold over compressed traversal columns. This
+section describes the substrate every analysis shares: the decode primitive
+(\S\ref{subsec:eng-stream}), what stays resident while a query runs
+(\S\ref{subsec:eng-memory}), how the work is parallelized
+(\S\ref{subsec:eng-parallel}), and the interface an analysis is written against
+(\S\ref{subsec:eng-api}). Section~\ref{sec:deconstruct} then develops the hardest
+analysis in full, and \S\ref{subsec:eng-instances} sketches the rest.
+
+\subsection{The Streaming Primitive}
+\label{subsec:eng-stream}
+
+Everything reduces to one operation:
+\[
+  \textsc{StreamNodes}(\textit{slice},\ \textsc{Visit}),
+\]
+which emits the orientation-signed node IDs of one traversal, in order, to a
+caller-supplied visitor. A \textit{slice} is a zero-copy view into the
+Zstd-decompressed traversal column, described by a pointer, an encoded length, and
+the original expanded length: no copy is made and no traversal is materialized to
+create one.
+
+Algorithm~\ref{alg:stream} gives the decoder. For each encoded symbol it performs
+the range check of Section~\ref{sec:container}. A symbol outside the rule range is
+a literal and is emitted. A symbol inside it indexes the rule arrays at
+$|e| - \textit{min\_rule}$ and expands its two children, recursively, carrying a
+\emph{reverse} flag that is folded with each child's sign, so that a negative rule
+reference visits its children in reverse order with orientations flipped. The
+inverse delta transform is fused into the emit step rather than run as a separate
+pass: for the common single-round case the decoder carries a running prefix sum
+and calls the visitor immediately, so a node ID is reconstructed and consumed
+without ever being written to memory.
+
+\begin{algorithm}[t]
+\small
+\caption{Streaming traversal expansion}
+\label{alg:stream}
+\begin{algorithmic}[1]
+  \REQUIRE slice $E$; rule range $[m,M)$; rule arrays $R_1,R_2$;
+           delta round $D\in\{0,1\}$; visitor \textsc{Visit}
+  \STATE $\textit{prev}\gets 0$
+  \STATE \textbf{define} \textsc{Emit}($v$):
+         \textbf{if} $D{=}1$ \textbf{then} $\textit{prev}\mathrel{+}=v$;
+         \textsc{Visit}(\textit{prev}) \textbf{else} \textsc{Visit}($v$)
+  \STATE \textbf{define} \textsc{Expand}($r$, \textit{rev}):
+  \STATE \quad $(a,b)\gets(R_1[r{-}m],R_2[r{-}m])$
+  \STATE \quad $(c_1,c_2)\gets \textit{rev}\ ?\ (b,a):(a,b)$
+         \COMMENT{reverse swaps child order}
+  \STATE \quad \textbf{for} $c \in (c_1,c_2)$:
+  \STATE \qquad \textbf{if} $|c|\in[m,M)$ \textbf{then}
+         \textsc{Expand}($|c|$, $\textit{rev}\oplus(c{<}0)$)
+  \STATE \qquad \textbf{else} \textsc{Emit}($\textit{rev}\ ?\ {-}c:c$)
+  \STATE \textbf{for} $e \in E$ in order:
+  \STATE \quad \textbf{if} $|e|\in[m,M)$ \textbf{then} \textsc{Expand}($|e|$, $e{<}0$)
+         \textbf{else} \textsc{Emit}($e$)
+\end{algorithmic}
+\end{algorithm}
+
+Three properties of this loop are what make the rest of the system work. Its cost
+is linear in the number of emitted elements, with no dependence on file size or on
+how many other traversals exist. Rule resolution is an array index, not a hash
+probe, and recursion depth is bounded by the number of grammar rounds, which is a
+small constant. And the visitor is a template parameter, so the per-node fold is
+inlined into the decode loop and the compiler sees a single fused loop rather than
+a decoder handing elements to an opaque callback. In effect the query's operator
+is compiled into the decompressor.
+
+Higher delta rounds are rare and are handled by a fallback that materializes a
+single traversal, applies the required inverse passes, and visits the result. This
+preserves correctness for every container while keeping the fast path free of
+branches for cases that do not occur in practice.
+
+\subsection{Memory Model}
+\label{subsec:eng-memory}
+
+The claim that distinguishes this design from a fast decompressor is a claim about
+residency. While a query runs, at most four things are in memory:
+
+\begin{enumerate}[noitemsep,topsep=3pt,leftmargin=*]
+  \item \textbf{The compressed traversal store.} Zstd-decompressed but
+        \emph{still grammar-compressed} P/W symbol streams, their length columns,
+        and the rule arrays. This is the key point: entropy decoding is undone,
+        the grammar is not.
+  \item \textbf{An optional rule-leaf cache}, bounded by an explicit byte budget.
+  \item \textbf{The query's accumulator}, whose shape depends on the analysis.
+  \item \textbf{The segment DNA payload}, only for analyses that must spell
+        sequence.
+\end{enumerate}
+
+Memory therefore scales with the compressed columns and with the accumulator, and
+not with the expanded step list, which is the object every baseline builds. For
+the analyses whose accumulator is $O(\text{nodes})$ or $O(\text{windows})$, both
+terms are small fractions of the input and peak RSS lands well below the
+uncompressed GFA. For the analyses whose accumulator is a join index, it does not,
+and Section~\ref{sec:discussion} treats that case honestly.
+
+\paragraph{Rule-leaf cache.}
+Lazy expansion avoids materialization but can repeat work, since a rule that
+appears in many haplotypes is re-expanded at each occurrence. \sys therefore
+offers a bounded \texttt{RuleLeafCache} that stores the fully expanded forward
+leaf sequence of any rule whose expansion fits a user-specified budget. Reverse
+expansion is derived by scanning the cached leaves backward and negating signs, so
+no reverse copy is stored (P5 again). Construction is bottom-up over rule IDs: a
+rule is admitted only if its children are already expanded or representable
+lazily, and only if its projected leaf sequence fits the remaining budget; rules
+that do not fit fall back to recursion, so correctness holds at every budget
+including zero. The cache is built once and shared read-only across threads.
+
+The budget is the one explicit space-time dial in the engine, and it is the
+mechanism by which a user chooses where to sit on the materialization spectrum.
+Zero recovers fully lazy expansion; an unbounded budget approaches full
+materialization. Only the multi-pass analyses default to a non-trivial budget,
+since analyses that stream each traversal once have nothing to reuse. We measure
+the dial's sensitivity in Section~\ref{subsec:eval-cache}.
+
+\subsection{Parallel Execution}
+\label{subsec:eng-parallel}
+
+Record independence (P4) makes the decode path embarrassingly parallel. The
+traversal arrays, rulebook, DNA payload, and rule-leaf cache are all read-only
+after setup, so threads decoding distinct traversals never synchronize. Because
+expanded traversal lengths vary by orders of magnitude across haplotypes, the
+parallel loops use dynamic scheduling.
+
+All synchronization is thus pushed into the fold, never the decode, and each
+analysis picks one of three merge strategies according to its accumulator: a
+shared accumulator updated with fine-grained atomics, private per-thread state
+concatenated after the parallel region, or a parallel join over a node-major
+index. Where a merge strategy could make output depend on thread interleaving, the
+analysis restores determinism explicitly; \cmd{deconstruct}, for instance, sorts
+each site's observations by source slice so its VCF is byte-identical at any
+thread count.
+
+\subsection{Writing an Analysis}
+\label{subsec:eng-api}
+
+\sys is meant to be extended, so the substrate is exposed as a small library
+rather than baked into each command. It provides container loading that
+decompresses the requested blocks and exposes traversals as zero-copy slices; the
+templated \textsc{StreamNodes} decoder; the optional rule-leaf cache; and a single
+grouping facility that maps each traversal to a key at one of four granularities
+(per record, per sample, per sample-haplotype, or per sample-haplotype-sequence)
+with shared key functions for P and W lines, so that every analysis aggregates
+haplotypes identically.
+
+An analysis is then a fold following one skeleton: open the container, assign each
+traversal a group key, stream slices into an analysis-specific visitor under a
+parallel loop, merge per-thread accumulators, emit. Every command in
+Table~\ref{tab:commands} is written this way and differs from the others only in
+its accumulator and its output, not in how traversals are decoded. In our
+experience adding an analysis is a few hundred lines, most of which is output
+formatting.
+
+\subsection{The Analyses}
+\label{subsec:eng-instances}
+
+\sys implements six analyses, each reproducing the output of an established tool.
+They fall into two regimes, which differ in what the accumulator costs.
+
+\emph{Path-iterative} folds stream each traversal once into an accumulator that
+does not grow with the number of haplotypes. \cmd{growth} computes a
+Panacus-style union growth curve: threads reduce into a shared coverage vector
+under a per-thread last-seen stamp that counts each node at most once per group,
+and the vector is folded into a histogram from which the expected number of nodes
+observed in a random cohort of size $k$ follows in closed form, evaluated as a
+stable running product rather than by forming binomial coefficients that would
+overflow at pangenome scale. \cmd{depth} reproduces \cmd{odgi depth} in one pass
+with per-node atomic counters. \cmd{stats} is the degenerate case: it answers
+from the metadata columns alone and decodes no traversals at all, which is
+possible only because of column independence (P3).
+
+\emph{Node-join} workloads instead record which groups cover each node and join
+along shared nodes. \cmd{pav} computes a window-by-group presence/absence matrix
+over BED intervals on reference paths, in three passes: decode every traversal
+into a per-slice node set while capturing reference node order as a side effect;
+union those sets per group and flatten them into a node-to-groups index in
+compressed-sparse-row form, chosen over a per-node container to eliminate
+per-node header overhead at hundreds of millions of nodes; then sweep each
+reference contig, mapping nodes to genomic intervals through the segment length
+column and intersecting against pre-sorted BED ranges. \cmd{similarity}
+generalizes the same join from reference windows to all group pairs, accumulating
+an upper-triangular intersection matrix, and computes in double precision to avoid
+the integer overflow the reference tool incurs at genome-scale group lengths.
+
+The node-join regime is where the memory story changes, because the CSR index and
+output matrix are ordinary uncompressed structures whose size tracks the graph
+rather than the query. That is the origin of the limitation in
+Section~\ref{sec:discussion}.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\caption{The six analyses, all built on one decode substrate. ``Resident state''
+excludes the compressed traversal store common to every analysis. Node counts
+dominate group and window counts at pangenome scale.}
+\label{tab:commands}
+\begin{tabular}{@{}llccl@{}}
+\toprule
+Analysis & Reference tool & Pass & Resident state & Regime \\
+\midrule
+\cmd{deconstruct} & \cmd{vg deconstr.} & 1{+}1 & $O(\text{sites}){+}$DNA & path-iter. \\
+\cmd{growth}      & Panacus              & 1 & $O(\text{nodes})$ & path-iter. \\
+\cmd{depth}       & \cmd{odgi depth}     & 1 & $O(\text{nodes})$ & path-iter. \\
+\cmd{stats}       & \cmd{odgi stats}     & 0 & $O(1)$ & path-iter. \\
+\cmd{pav}         & \cmd{odgi pav}       & 3 & $O(n{+}w{\times}g)$ & node-join \\
+\cmd{similarity}  & \cmd{odgi similar.} & 2{+}1 & $O(n{+}g^2)$ & node-join \\
+\bottomrule
+\end{tabular}
+\end{table}

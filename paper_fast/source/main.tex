@@ -1,0 +1,90 @@
+%%
+%% FAST '27 submission -- 25th USENIX Conference on File and Storage Technologies
+%% Fall deadline: Tuesday, September 15, 2026, 23:59 AoE
+%%
+%% Format (per CFP): U.S. letter, two columns, 10pt Times Roman on 12pt leading,
+%% text block 7in x 9in.  Long paper: <= 12 pages EXCLUDING references.
+%% DOUBLE BLIND: no author names, no affiliations, no de-anonymizing URLs.
+%%
+\documentclass[letterpaper,twocolumn,10pt]{article}
+\usepackage{usenix-2020-09}
+
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{textcomp}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{enumitem}
+\usepackage{xspace}
+\usepackage{balance}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, fit, backgrounds, calc}
+
+%% ---------------------------------------------------------------------------
+%% SYSTEM NAME.  Anonymized for double-blind review.
+%%
+%% The container format and compressor are prior, separately published work by
+%% (among others) us; under the FAST double-blind policy they are cited in the
+%% third person as \cite{gfaz2026}.  Reusing that system's public name for the
+%% engine described here would identify the authors by implication, so the
+%% engine carries its own name.  Change this one macro to rename the system.
+%% ---------------------------------------------------------------------------
+\newcommand{\sys}{Loom\xspace}
+\newcommand{\cont}{\texttt{.pgz}\xspace}   % anonymized container extension
+
+\newcommand{\eg}{e.g.,\xspace}
+\newcommand{\ie}{i.e.,\xspace}
+\newcommand{\cmd}[1]{\texttt{#1}}
+
+%% ---------------------------------------------------------------------------
+%% DRAFT MARKERS.  \needsexp{...} flags a number or claim that requires an
+%% experiment we have not run yet.  Set \draftmodefalse before submitting; the
+%% build then FAILS loudly on any remaining marker rather than shipping one.
+%% ---------------------------------------------------------------------------
+\newif\ifdraftmode\draftmodetrue
+\ifdraftmode
+  \newcommand{\needsexp}[1]{\textcolor{red}{\textbf{[EXP: #1]}}}
+  \newcommand{\note}[1]{\textcolor{blue}{\textbf{[NOTE: #1]}}}
+\else
+  \newcommand{\needsexp}[1]{\GenericError{}{UNRESOLVED EXPERIMENT: #1}{}{}}
+  \newcommand{\note}[1]{}
+\fi
+
+%% Reviewers appreciate page numbers on submissions.
+\pagestyle{plain}
+
+\begin{document}
+
+\date{}
+
+\title{\Large \bf Computing over Compression: Pangenome Analytics\\
+Directly on a Grammar-Compressed Container}
+
+%% Double-blind: keep this block anonymous until camera-ready.
+\author{}
+
+\maketitle
+
+\begin{abstract}
+\input{0_abstract}
+\end{abstract}
+
+\input{1_introduction}
+\input{2_background}
+\input{3_principles}
+\input{4_container}
+\input{5_engine}
+\input{6_deconstruct}
+\input{7_evaluation}
+\input{8_discussion}
+\input{9_related}
+\input{10_conclusion}
+
+\balance
+\bibliographystyle{plain}
+\bibliography{ref}
+
+\end{document}

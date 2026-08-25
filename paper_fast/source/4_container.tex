@@ -1,0 +1,72 @@
+\section{The Container}
+\label{sec:container}
+
+This section describes the on-disk format the engine executes over. The format
+and its compressor are prior work~\cite{gfaz2026}; we summarize only what the
+engine relies on, in the terms of Section~\ref{sec:principles}, and we treat its
+compression ratio and compressor throughput as given rather than as results.
+Readers interested in how the grammar is constructed, in the GPU compression
+backend, or in the encoding of the non-traversal record types should consult that
+work.
+
+\paragraph{Layout.}
+The container is columnar (P3). Each GFA record type is split into typed columns,
+which are transformed with a type-appropriate encoding and then entropy-coded with
+Zstd~\cite{collet2021rfc} as independent blocks. A query decompresses only the
+blocks it names. The columns that matter for this paper are the P and W traversal
+payloads, their per-record encoded-length columns, the grammar rulebook, the
+segment length column, the segment DNA payload, the link (edge) columns, and the
+PanSN-style metadata columns that identify each traversal's sample and haplotype.
+
+\paragraph{Traversal encoding.}
+A traversal is a sequence of orientation-signed node IDs. Two transforms are
+applied before entropy coding. The first is delta encoding, which exploits the
+fact that consecutive steps in a pangenome walk usually land on nearby node IDs.
+The second, which does the real work, is an iterative 2-mer grammar: repeated
+adjacent symbol pairs are replaced by rule symbols over several rounds, so a
+haplotype's walk collapses into a short string of rules that stand for long
+shared substrings. Because human haplotypes agree over long stretches, the rules
+are shared across samples, and this cross-record sharing is where the bulk of the
+compression comes from.
+
+The rulebook is stored as two parallel \texttt{int32} arrays, \texttt{first} and
+\texttt{second}, giving each rule's two children. It is global to the file. The
+encoded traversals are not: each is a self-contained string of literals and rule
+references, delimited by the encoded-length column. This split is the design
+decision Section~\ref{sec:principles} flagged as the expensive one. It preserves
+record independence (P4) while still capturing cross-record redundancy, at the
+cost of a rulebook that every query must load, and it is what allows an arbitrary
+subset of haplotypes to be decoded by an arbitrary number of threads without
+touching one another.
+
+\paragraph{Namespace partitioning.}
+Rule IDs are allocated sequentially from a \texttt{start\_id} that lies strictly
+above every literal node ID in the file, and the layer metadata records the first
+rule ID and the rule count. A decoder therefore classifies a symbol $e$ by testing
+whether $|e|$ falls in the half-open rule range: in range means rule, out of range
+means literal node ID (P2). No side table is consulted, and the test compiles to
+two comparisons.
+
+\paragraph{Orientation as sign.}
+The sign of a symbol carries DNA strand. A negative literal is the segment read on
+the reverse strand. A negative \emph{rule} reference denotes the reverse complement
+of that rule: its children are visited in reverse order with their orientations
+flipped, recursively. One rulebook therefore serves both strands, and no mirrored
+copy is stored (P5).
+
+\paragraph{What the engine assumes.}
+The engine depends on four things and nothing else: that the rule range is
+contiguous and disjoint from the literal range; that the rulebook is a static
+array indexable by rule ID; that each traversal's encoded extent is recoverable
+from a length column; and that rule negation means reverse complement. Any format
+with those four properties can host the engine of Section~\ref{sec:engine}
+unchanged. The engine does not depend on how the grammar was built, on the number
+of grammar rounds, or on which entropy coder wraps the blocks.
+
+\paragraph{Scale.}
+For calibration, the container compresses the evaluation graphs by
+$18$--$84\times$~\cite{gfaz2026}: the $369$\,GB HPRC v2.1 graph becomes
+$4.5$\,GB, the $80$\,GB HGSVC3 graph $2.85$\,GB, and the $7.6$\,GB chr1 graph
+$214$\,MB. Compression runs at up to $1.4$\,GB/s and decompression at up to
+$5.4$\,GB/s on the CPU backend used here. Those numbers set the scale of what the
+engine reads; they are not claims of this paper.

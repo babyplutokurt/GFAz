@@ -1,0 +1,149 @@
+\section{Introduction}
+\label{sec:intro}
+
+Every compressed dataset carries an implicit contract: space is saved now, and
+paid back later, at the moment somebody wants to use the data. The payment is
+usually invisible because it is small relative to everything else. When a dataset
+is a few gigabytes, expanding it costs a few seconds and the expanded form fits in
+memory, so compression is purely a win and the decompress step is an
+implementation detail.
+
+That contract breaks when the expanded form no longer fits. At that point the
+decompression step stops being a preamble to the computation and becomes the
+dominant term: the system must stream hundreds of gigabytes off storage, rebuild
+an in-memory representation larger than the input, and only then begin the work
+that the user actually asked for. The compressed archive, meanwhile, sits unused
+during the entire computation. It was treated as a shipping container, opened once
+and discarded, rather than as a representation anything could run on.
+
+This paper takes one workload where that break has already happened and asks what
+changes if the compressed container is treated as the substrate the queries
+execute on. The workload is pangenome analytics.
+
+\paragraph{The workload.}
+A pangenome graph represents the genomes of many individuals in one structure:
+nodes are DNA segments, edges are admissible adjacencies, and each haplotype is
+recorded as an ordered, orientation-signed walk through the
+nodes~\cite{eizenga2020pangenome,liao2023draft}. Pangenomes are replacing the
+single linear reference genome across human genomics because they remove reference
+bias~\cite{lin2024measuring}, and they are exchanged as Graphical Fragment
+Assembly (GFA) text~\cite{gfaspec}, the format that graph builders such as
+Minigraph--Cactus~\cite{hickey2024pangenome} and PGGB~\cite{garrison2024building}
+emit and that downstream tools consume.
+
+The format scales badly, and it scales badly in a specific, structural way. Graph
+topology grows sublinearly as haplotypes are added, because shared sequence
+collapses onto shared nodes. Traversals do not: each haplotype's walk is written
+out explicitly, so the traversal records grow nearly linearly with cohort size and
+come to dominate everything else, exceeding $90\%$ of the file and, on some
+chromosome graphs, $98\%$~\cite{heringer2025human}. Successive releases of the
+Human Pangenome Reference Consortium graph illustrate the trajectory: $48$\,GB,
+then $358$\,GB, then $369$\,GB of GFA text, with cohort sizes still an order of
+magnitude below where population studies are heading~\cite{wang2022human}.
+
+Traversal records are also the most compressible part of the file, precisely
+because human haplotypes are nearly identical: the same node-ID substrings recur
+across samples at every scale. Domain-specific compressors exploit
+this~\cite{siren2022gbz,heringer2025human,gfaz2026}, and the best of them reduce a
+$369$\,GB graph to roughly $4.5$\,GB. Storage, in other words, is a solved problem
+for this workload.
+
+Using the data is not. Every analysis a biologist runs on a pangenome today begins
+by rebuilding something at least as large as the GFA. \cmd{vg deconstruct} loads
+the graph and a snarl decomposition to emit
+variants~\cite{garrison2018variation,hickey2020genotyping}; \cmd{odgi} builds a
+succinct whole-graph index before any of its operations~\cite{guarracino2022odgi};
+Panacus parses path and walk records into item tables before computing a growth
+curve~\cite{parmigiani2024panacus}. On the two largest HPRC graphs, two of these
+three cannot load the input at all on a $503$\,GiB machine, and the third needs
+four hours and $330$\,GB of resident memory to answer a question whose entire
+output is a few thousand integers. The $4.5$\,GB container is never in the loop.
+
+\paragraph{The observation.}
+Two properties of this workload make the materialization avoidable. First, the
+dominant component of the file, the traversals, is already stored in a form that
+can be walked: a grammar-compressed integer stream in which rule expansion is a
+local, bounded-depth array lookup. Second, the analyses that consume pangenomes
+are overwhelmingly \emph{path-centric folds}. They do not mutate the graph and
+they do not need random node-to-step access. They scan traversals in order and
+reduce node visits into an accumulator that is small: a coverage histogram, a
+window-by-sample matrix, an allele table anchored to a reference path.
+
+A fold over a stream does not need the stream materialized. It needs the elements
+delivered in order, and a decoder that can produce them without global state. That
+is exactly what a grammar-compressed traversal column can supply, which means the
+compressed container is not merely storable but \emph{computable}, and the
+expansion step everyone pays for is not required by the computation. It is
+required only by the interface the existing tools present.
+
+\paragraph{This paper.}
+We build \sys, an execution engine that evaluates pangenome analyses directly on a
+grammar-compressed container. A query decompresses the entropy-coded blocks it
+needs, streams the still-grammar-compressed traversal columns through a templated
+visitor, and merges per-thread accumulators. Nothing expands into a materialized
+list of path steps, and no whole-graph object is ever constructed.
+
+The consequence is a reversal of the usual storage trade-off. In the conventional
+arrangement, a higher compression ratio means a longer wait before the computation
+starts, so ratio trades against access latency. Here the compressed columns are
+what the query reads and what its inner loop walks, so a higher ratio means fewer
+bytes touched per unit of biological work. Compression stops being a tax on access
+and becomes a multiplier on it: on the $369$\,GB HPRC graph, an $83\times$
+reduction in bytes is what makes an analysis that took four hours take
+$41$ seconds.
+
+We do not claim this for graph workloads in general, and we are explicit about the
+boundary. Operations requiring arbitrary node-to-step queries, graph editing, or
+topology rewriting are better served by materialized graph toolkits, and we say so
+in Section~\ref{sec:discussion}. What we claim is that a large, ubiquitous, and
+growing class of pangenome analytics falls on the streaming side of that line, and
+that for this class the compressed container is the right thing to compute on.
+
+\paragraph{Relationship to prior work on the container.}
+The container format and its compressor are prior work, published
+separately~\cite{gfaz2026}, and are \emph{not} a contribution of this paper. We
+recap only the properties the engine depends on (Section~\ref{sec:container}) and
+we do not re-evaluate compression ratio or compressor throughput as results.
+Section~\ref{sec:principles} instead distills, from that format and from the
+engine we built on it, the properties a compressed format must have for queries to
+run on it at all, which is the part of this work we expect to transfer to other
+domains.
+
+\paragraph{Contributions.}
+\begin{itemize}[noitemsep,topsep=3pt,leftmargin=*]
+  \item \textbf{A characterization of computable compression.} Five properties
+        (Section~\ref{sec:principles}) that separate a compressed format a query
+        engine can execute on from one that must be expanded first, together with
+        an account of where common storage formats sit against them.
+  \item \textbf{A streaming execution engine over compressed traversals}
+        (Section~\ref{sec:engine}): a decode primitive whose cost is linear in
+        emitted elements and requires no side table, a memory model that bounds
+        residency to the compressed columns plus a query accumulator, a bounded
+        rule-leaf cache that trades memory for repeated expansion under an
+        explicit budget, and a parallel schedule in which synchronization never
+        touches the decode path.
+  \item \textbf{\cmd{deconstruct}: variant projection without a graph}
+        (Section~\ref{sec:deconstruct}). Reference-relative variant calling is
+        the most consequential and the most topology-sensitive pangenome
+        derivation, and the one apparently least suited to streaming. We give a
+        two-phase algorithm that separates an $O(V{+}E)$ topology-only site
+        discovery pass from a compressed-traversal allele fold, handles
+        inversions in both phases, and reproduces the established tool's output
+        at $\sim$$99.99\%$ position concordance without a materialized graph or a
+        general snarl index.
+  \item \textbf{An evaluation that measures the storage argument, not only the
+        speedup} (Section~\ref{sec:eval}): end-to-end cost including I/O and from
+        cold cache, a direct comparison against the obvious alternative of
+        expanding to fast local storage first, sensitivity of query time to
+        compression ratio, and thread scaling. Against \cmd{vg deconstruct},
+        Panacus, and \cmd{odgi pav}, \sys is $15$--$613\times$ faster with
+        $3$--$25\times$ less memory, and it answers questions on $358$--$369$\,GB
+        graphs that the baselines cannot load.
+  \item \textbf{A negative result we report rather than omit.} One of the six
+        analyses, presence/absence variation, builds an uncompressed node-to-group
+        join index. That accumulator, not the traversal store, exceeds machine
+        memory at whole-genome scale, which locates the real limit of the design:
+        computing over compression bounds the \emph{data} you hold, and says
+        nothing about the state your query chooses to build
+        (Section~\ref{sec:discussion}).
+\end{itemize}

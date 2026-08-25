@@ -1,0 +1,27 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+Pangenome graphs have already outgrown the memory of the machines that analyze
+them, and compression has already solved their storage problem: a $369$\,GB
+interchange file fits in $4.5$\,GB. What has not changed is that every tool
+consuming the data still begins by undoing that work, and pays more to rebuild the
+expanded form than to compute the answer it was asked for.
+
+We showed that this step is not required by the computation. A compressed
+container built against five properties, local expansion, side-table-free symbol
+classification, column independence, record independence, and closure under the
+domain's symmetries, can serve as the substrate the analyses run on. \sys
+evaluates six pangenome analyses as folds over grammar-compressed traversal
+columns, including a reference-relative variant projection that we recast as a
+topology-only discovery pass followed by a streaming allele fold, and so never
+builds the graph that the standard tool holds resident. It is $15$--$613\times$
+faster than the established tools with $3$--$25\times$ less memory, and it answers
+questions on whole-genome graphs those tools cannot load.
+
+The result we would most like to see generalized is not the speedup but the
+inversion behind it. When the compressed form is what the query reads, compression
+ratio stops being a tax on access and becomes a multiplier on it, and the incentive
+to compress harder aligns with the incentive to compute faster. Getting there costs
+a few percent of ratio, spent on keeping the format computable. For any dataset
+that will outlive the memory of the machines that read it, that looks like a good
+trade.

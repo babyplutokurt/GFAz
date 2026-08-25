@@ -1,0 +1,28 @@
+Compression is normally a storage decision. It buys capacity and bandwidth, and
+the bill arrives at read time: before anything can be computed, the data must be
+expanded back into the form the application expects. For datasets that have
+outgrown memory, it is this materialization step, not the compression itself,
+that sets the cost of using the data.
+
+We revisit that trade-off for pangenome graphs, the reference data structure of
+modern human genomics, whose interchange format now ships hundreds of gigabytes
+per release and is growing faster than the cohorts it encodes. We show that a
+grammar-compressed pangenome container can serve as the execution substrate for
+the analyses that consume it, with no expansion to text and no whole-graph object
+in memory. \sys evaluates six analyses as streaming folds over compressed
+traversal columns, paying only for the columns a query touches plus a compact
+accumulator. Among them is a reference-relative variant projection, the entry
+point to the entire downstream genomics toolchain, which we recast as a two-phase
+algorithm that separates a topology-only site-discovery pass from a
+compressed-traversal allele fold and so never builds the graph.
+
+The result inverts the usual relationship between compression and access cost:
+because the compressed form is what the query reads, a better ratio makes queries
+faster rather than slower. Against the established tools \sys is $15$--$613\times$
+faster while using $3$--$25\times$ less memory, and it holds peak resident set
+below the size of the uncompressed input for four of six analyses. It completes
+whole-genome analyses on $358$--$369$\,GB graphs, from a $4.5$\,GB container, that
+the graph-resident baselines cannot load at all. We also report where the model
+breaks down: one analysis builds an uncompressed join index whose footprint,
+unlike the traversal store, does grow with the graph, and it is that accumulator,
+not the compressed data, that exhausts memory first.

@@ -1,0 +1,11 @@
+# LaTeX build products
+source/*.aux
+source/*.log
+source/*.out
+source/*.bbl
+source/*.blg
+source/*.fdb_latexmk
+source/*.fls
+source/*.synctex.gz
+source/build.log
+source/main.pdf
