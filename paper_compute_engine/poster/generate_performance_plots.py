@@ -21,12 +21,16 @@ NAN = np.nan
 METHODS = ["GFAz", "GBZ", "sqz+bgzip", "sqz", "Zstd", "gzip"]
 
 COLORS = {
-    "gzip": "#b6bec8",
-    "Zstd": "#6b7a8a",
-    "sqz": "#e0a33f",
-    "sqz+bgzip": "#8e6bb5",
-    "GBZ": "#0e8f95",
-    "GFAz": "#9d2235",
+    # Validated with the dataviz palette checker (all-pairs, light surface):
+    # lightness band, chroma floor, CVD separation and normal-vision floor all
+    # pass. sqz and sqz+bgzip share the amber hue as one tool family, split by
+    # lightness. Do not hand-tweak without re-running the validator.
+    "gzip": "#56B4E9",
+    "Zstd": "#0072B2",
+    "sqz": "#E69F00",
+    "sqz+bgzip": "#8A6A00",
+    "GBZ": "#009E73",
+    "GFAz": "#9D2235",
 }
 INK = "#212a36"
 MUTED = "#5b6673"

@@ -69,8 +69,9 @@
 % --- headline stat on the dark band -------------------------------------
 \newcommand{\stat}[4]{%
   \begin{minipage}[t]{#1}\centering
-    {\fontsize{60}{64}\selectfont\bfseries\color{white}#2\,\textcolor{rose}{#3}}\\[0.22cm]
-    {\normalsize\color{hdr}#4}
+    {\fontsize{62}{64}\selectfont\bfseries\color{cherry}#2\,%
+     {\fontsize{38}{40}\selectfont\bfseries#3}}\\[0.20cm]
+    {\normalsize\color{slate}#4}
   \end{minipage}}
 
 % --- numbered section banner --------------------------------------------
@@ -107,9 +108,9 @@
 \begin{center}
   \begin{minipage}[t]{0.945\paperwidth}
     \begin{minipage}[t]{0.645\linewidth}\raggedright
-      {\fontsize{56}{62}\selectfont\bfseries\color{slate}
+      {\fontsize{76}{84}\selectfont\bfseries\color{slate}
        \textcolor{cherry}{GFAz}: Order-of-Magnitude Pangenome\\Analytics by Computing over Compression}\\[0.36cm]
-      {\fontsize{26}{32}\selectfont\color{muted}
+      {\fontsize{28}{34}\selectfont\color{muted}
        Compress the pangenome \textcolor{slate}{\textbf{84$\times$ smaller}} at
        \textcolor{slate}{\textbf{GiB/s}} throughput. Then run the analyses
        \textcolor{slate}{\textbf{up to 619$\times$ faster}}, in
@@ -121,7 +122,7 @@
        Bo Jiang \quad Xinghua Shi \quad Sian Jin}\\[0.28cm]
       {\fontsize{20}{24}\selectfont\color{muted}
        Department of Computer \& Information Sciences\\Temple University}\\[0.26cm]
-      {\fontsize{20}{24}\selectfont\bfseries\color{teal}
+      {\fontsize{20}{24}\selectfont\bfseries\color{muted}
        T2T Face-to-Face 2026 \ \ $\cdot$ \ \ ICS~'26}
     \end{minipage}\hfill
     \begin{minipage}[t]{0.042\linewidth}\raggedleft
@@ -162,21 +163,18 @@
 
 % ---------------------------------------------------------- headline stats --
 \begin{center}
-\begin{tikzpicture}
-\node[fill=slate,rounded corners=12pt,inner xsep=0pt,inner ysep=0.44cm]{%
-  \begin{minipage}{0.925\paperwidth}\centering
-  \begin{tabular}{@{}c!{\hspace{0.30cm}\color{muted}\vrule width 2pt\hspace{0.30cm}}
-                        c!{\hspace{0.30cm}\color{muted}\vrule width 2pt\hspace{0.30cm}}
-                        c!{\hspace{0.30cm}\color{muted}\vrule width 2pt\hspace{0.30cm}}
-                        c!{\hspace{0.30cm}\color{muted}\vrule width 2pt\hspace{0.30cm}}c@{}}
-    \stat{0.163\linewidth}{84}{$\times$}{\textbf{smaller on disk}\\[2pt]\small 369\,GB $\rightarrow$ 4.5\,GB} &
-    \stat{0.163\linewidth}{1.36}{GiB/s}{\textbf{compression}\\[2pt]\small CPU $\cdot$ 32 threads} &
-    \stat{0.163\linewidth}{5.43}{GiB/s}{\textbf{decompression}\\[2pt]\small CPU $\cdot$ 32 threads} &
-    \stat{0.163\linewidth}{619}{$\times$}{\textbf{faster analysis}\\[2pt]\small vs.\ \code{odgi} / \code{vg} / Panacus} &
-    \stat{0.163\linewidth}{25}{$\times$}{\textbf{less memory}\\[2pt]\small peak RSS, up to}
-  \end{tabular}
-  \end{minipage}};
-\end{tikzpicture}
+\begin{minipage}{0.945\paperwidth}
+  \noindent{\color{cherry}\rule{\linewidth}{4pt}}\par\vspace{0.46cm}
+  \centering
+  \begin{tabular}{@{}c@{\hspace{0.34cm}}c@{\hspace{0.34cm}}c@{\hspace{0.34cm}}c@{\hspace{0.34cm}}c@{}}
+    \stat{0.186\linewidth}{84}{$\times$}{\textbf{smaller on disk}\\[2pt]\small 369\,GB $\rightarrow$ 4.5\,GB} &
+    \stat{0.186\linewidth}{1.36}{GiB/s}{\textbf{compression}\\[2pt]\small CPU $\cdot$ 32 threads} &
+    \stat{0.186\linewidth}{5.43}{GiB/s}{\textbf{decompression}\\[2pt]\small CPU $\cdot$ 32 threads} &
+    \stat{0.186\linewidth}{619}{$\times$}{\textbf{faster analysis}\\[2pt]\small vs.\ \code{odgi} / \code{vg} / Panacus} &
+    \stat{0.186\linewidth}{25}{$\times$}{\textbf{less memory}\\[2pt]\small peak RSS, up to}
+  \end{tabular}\par\vspace{0.44cm}
+  \noindent{\color{rule}\rule{\linewidth}{2pt}}
+\end{minipage}
 \end{center}
 
 \vspace{0.36cm}
@@ -252,7 +250,7 @@
       \textcolor{slate}{Input} & \textcolor{muted}{no rules yet} & \code{12 7 12 7 12 7 12 7 31} \\
       \textcolor{cherry}{Round 1} & $R_1 \leftarrow (12,7)$ & \code{$R_1$ $R_1$ $R_1$ $R_1$ 31} \\
       \textcolor{cherry}{Round 2} & $R_2 \leftarrow (R_1,R_1)$ & \code{$R_2$ $R_2$ 31} \\
-      \textcolor{teal}{Round 3} & $R_3 \leftarrow (R_2,R_2)$ & \code{$R_3$ 31} \\
+      \textcolor{cherry}{Round 3} & $R_3 \leftarrow (R_2,R_2)$ & \code{$R_3$ 31} \\
     \end{tabular}
     \vspace{0.26cm}}}
   \cpt{Each round is one count-and-rewrite scan: \hd{$O(N)$ per round, fixed round
@@ -310,8 +308,9 @@
     \draw[ar] (extract) -- (compute);
     \draw[ar] (compute) -- (result);
 
-    \node[fill=slate,text=white,rounded corners=8pt,minimum height=1.8cm,
-          text width=42.6cm,align=center,font=\normalsize\bfseries,
+    \node[fill=palet,draw=teal,line width=3pt,text=slate,rounded corners=8pt,
+          minimum height=1.8cm,text width=42.2cm,align=center,
+          font=\normalsize\bfseries,
           below=7mm of $(extract.south)!0.5!(compute.south)$] (memory)
       {one selected stream \ $+$ \ bounded decoder scratch \ $+$ \ a compact
        accumulator};
