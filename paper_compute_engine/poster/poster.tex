@@ -2,6 +2,7 @@
 %  GFAz poster -- T2T-F2F 2026, UC Santa Cruz
 %  42 in wide x 45 in tall  (106.68 cm x 114.30 cm)
 %  Build:  pdflatex poster.tex   (run twice, for QR codes)
+%  Figures: python3 generate_performance_plots.py
 % =============================================================================
 \documentclass[final,t]{beamer}
 \usepackage[size=custom,width=106.68,height=114.30,scale=1.21,orientation=portrait]{beamerposter}
@@ -28,57 +29,72 @@
 
 % ---------------------------------------------------------------- palette ---
 \definecolor{cherry}{RGB}{157,34,53}
-\definecolor{slate}{RGB}{33,42,54}
+\definecolor{slate}{RGB}{28,36,48}
 \definecolor{teal}{RGB}{0,112,118}
-\definecolor{paleg}{RGB}{243,244,246}
+\definecolor{rose}{RGB}{240,152,165}
+\definecolor{paleg}{RGB}{244,245,247}
 \definecolor{palec}{RGB}{251,238,241}
 \definecolor{palet}{RGB}{232,244,244}
-\definecolor{rule}{RGB}{206,211,219}
-\definecolor{hdr}{RGB}{224,227,232}
+\definecolor{rule}{RGB}{203,209,217}
+\definecolor{muted}{RGB}{92,103,116}
+\definecolor{hdr}{RGB}{197,204,213}
 
-% ------------------------------------------------------------------ blocks --
-\setbeamercolor{block title}{bg=white,fg=cherry}
-\setbeamercolor{block body}{bg=white,fg=slate}
-\setbeamerfont{block title}{size=\large,series=\bfseries}
-\setbeamerfont{block body}{size=\normalsize}
 \setbeamercolor{structure}{fg=cherry}
-\setbeamertemplate{itemize item}{\color{cherry}\textbullet}
-\setbeamertemplate{blocks}[rounded][shadow=false]
 \setbeamersize{text margin left=0mm, text margin right=0mm}
-\setlength{\leftmargini}{1.8em}
 
-\makeatletter
-\renewcommand{\@listI}{\leftmargin\leftmargini
-  \parsep 0.2ex \topsep 0.3ex \itemsep 0.5ex}
-\makeatother
-
-% ----------------------------------------------------------- helper macros --
 \newcommand{\gz}{GFAz}
 \newcommand{\hd}[1]{\textcolor{cherry}{\textbf{#1}}}
 \newcommand{\code}[1]{{\ttfamily #1}}
 \newcommand{\best}{\cellcolor{palec}}
 
-\newcommand{\stat}[3]{%
+% --- bordered card with a titled head -----------------------------------
+\newsavebox{\pnlbox}
+\newcommand{\panelhead}[1]{%
+  {\raggedright\fontsize{29}{34}\selectfont\bfseries\color{slate}%
+   \textcolor{cherry}{\rule[-0.04em]{0.28em}{0.84em}}\hspace{0.32em}#1\par}%
+  \vspace{0.18cm}{\color{rule}\rule{\linewidth}{2pt}}\par\vspace{0.34cm}}
+
+\newenvironment{panel}[1]{%
+  \begin{lrbox}{\pnlbox}%
+  \begin{minipage}{\dimexpr\linewidth-1.5cm\relax}%
+  \panelhead{#1}%
+}{%
+  \end{minipage}%
+  \end{lrbox}%
+  \noindent\begin{tikzpicture}
+    \node[draw=rule,line width=2pt,rounded corners=11pt,fill=white,
+          inner xsep=0.62cm,inner ysep=0.50cm]{\usebox{\pnlbox}};
+  \end{tikzpicture}\par\vspace{0.38cm}}
+
+% --- headline stat on the dark band -------------------------------------
+\newcommand{\stat}[4]{%
   \begin{minipage}[t]{#1}\centering
-    {\fontsize{60}{64}\selectfont\bfseries\color{cherry}#2}\\[0.20cm]
-    {\normalsize\color{slate}#3}
+    {\fontsize{60}{64}\selectfont\bfseries\color{white}#2\,\textcolor{rose}{#3}}\\[0.22cm]
+    {\normalsize\color{hdr}#4}
   \end{minipage}}
 
-% numbered part banner spanning a column
+% --- numbered section banner --------------------------------------------
 \newcommand{\partbanner}[3]{%
-  \begin{tikzpicture}
-    \node[fill=slate,rounded corners=8pt,inner sep=0pt,minimum height=3.6cm,
-          text width=\linewidth] (b) {};
-    \node[circle,fill=cherry,text=white,font=\fontsize{54}{54}\selectfont\bfseries,
-          minimum size=2.5cm,anchor=west] (n) at ([xshift=10mm]b.west) {#1};
-    \node[anchor=west,text=white,font=\fontsize{46}{50}\selectfont\bfseries]
-      at ([xshift=7mm]n.east) {#2};
-    \node[anchor=east,text=hdr,font=\fontsize{27}{31}\selectfont\itshape]
-      at ([xshift=-14mm]b.east) {#3};
-  \end{tikzpicture}\\[0.45cm]}
+  \noindent\begin{tikzpicture}
+    \node[circle,fill=cherry,text=white,font=\fontsize{42}{42}\selectfont\bfseries,
+          minimum size=2.15cm,inner sep=0pt,anchor=west] (n) at (0,0) {#1};
+    \node[anchor=west,text=slate,font=\fontsize{42}{46}\selectfont\bfseries]
+      at ([xshift=8mm]n.east) {#2};
+    \node[anchor=east,text=muted,font=\fontsize{24}{28}\selectfont\itshape]
+      at (\linewidth,0) {#3};
+  \end{tikzpicture}\par\vspace{0.14cm}
+  \noindent{\color{cherry}\rule{\linewidth}{5pt}}\par\vspace{0.40cm}}
 
-\newcommand{\cpt}[1]{\vspace{0.18cm}\par{\raggedright\small\color{slate}#1\par}}
-\newcommand{\gap}{\vspace{0.5cm}}
+% Drop the official vector logo at figures/temple-logo.pdf (or .eps/.png) to use
+% it; otherwise a typographic lockup in Temple cherry stands in.
+\newcommand{\templebadge}{%
+  \IfFileExists{figures/temple-logo.pdf}
+    {\includegraphics[height=4.3cm]{temple-logo}}
+    {\raggedleft
+     {\fontsize{22}{24}\selectfont\bfseries\color{cherry}TEMPLE}\\[0.06cm]
+     {\fontsize{11}{13}\selectfont\bfseries\color{slate}UNIVERSITY}\par}}
+
+\newcommand{\cpt}[1]{\vspace{0.20cm}\par{\raggedright\small\color{muted}#1\par}}
 
 \title{GFAz}
 \begin{document}
@@ -87,209 +103,231 @@
 % =============================================================================
 %  HEADER
 % =============================================================================
-\vspace{-0.4cm}
+\vspace{-0.5cm}
 \begin{center}
-  \begin{minipage}[c]{0.94\paperwidth}
-    \begin{minipage}[c]{0.72\linewidth}\raggedright
-      {\fontsize{52}{58}\selectfont\bfseries\color{slate}
-       \textcolor{cherry}{GFAz}: Order-of-Magnitude Pangenome Analytics by Computing over Compression}
+  \begin{minipage}[t]{0.945\paperwidth}
+    \begin{minipage}[t]{0.645\linewidth}\raggedright
+      {\fontsize{56}{62}\selectfont\bfseries\color{slate}
+       \textcolor{cherry}{GFAz}: Order-of-Magnitude Pangenome\\Analytics by Computing over Compression}\\[0.36cm]
+      {\fontsize{26}{32}\selectfont\color{muted}
+       Compress the pangenome \textcolor{slate}{\textbf{84$\times$ smaller}} at
+       \textcolor{slate}{\textbf{GiB/s}} throughput. Then run the analyses
+       \textcolor{slate}{\textbf{up to 619$\times$ faster}}, in
+       \textcolor{slate}{\textbf{up to 25$\times$ less memory}}.}
     \end{minipage}\hfill
-    \textcolor{rule}{\rule{2pt}{6.0cm}}\hfill
-    \begin{minipage}[c]{0.235\linewidth}\raggedleft
+    \begin{minipage}[t]{0.272\linewidth}\raggedleft
       {\fontsize{25}{30}\selectfont\bfseries\color{slate}
        Taolue Yang \quad Youyuan Liu\\[0.12cm]
-       Bo Jiang \quad Xinghua Shi \quad Sian Jin}\\[0.34cm]
-      {\fontsize{20}{24}\selectfont\color{slate}
-       Department of Computer \& Information Sciences\\Temple University}\\[0.32cm]
-      {\fontsize{19}{23}\selectfont\itshape\color{teal}
-       T2T Face-to-Face 2026 \quad $\cdot$ \quad ICS~'26}
+       Bo Jiang \quad Xinghua Shi \quad Sian Jin}\\[0.28cm]
+      {\fontsize{20}{24}\selectfont\color{muted}
+       Department of Computer \& Information Sciences\\Temple University}\\[0.26cm]
+      {\fontsize{20}{24}\selectfont\bfseries\color{teal}
+       T2T Face-to-Face 2026 \ \ $\cdot$ \ \ ICS~'26}
+    \end{minipage}\hfill
+    \begin{minipage}[t]{0.042\linewidth}\raggedleft
+      \vspace{0pt}\templebadge
     \end{minipage}
   \end{minipage}
 \end{center}
-\vspace{0.55cm}
-\begin{center}\color{cherry}\rule{0.94\paperwidth}{4pt}\end{center}
-\vspace{0.28cm}
+\vspace{0.36cm}
+\begin{center}\color{cherry}\rule{0.945\paperwidth}{5pt}\end{center}
+\vspace{0.42cm}
+
+% ------------------------------------------------------------- why it hurts --
+\begin{center}
+\begin{minipage}{0.945\paperwidth}
+  \begin{minipage}[t]{0.315\linewidth}
+    {\large\bfseries\color{cherry}The files are enormous}\\[0.18cm]
+    {\normalsize\color{slate}\raggedright
+     Traversals are over \textbf{90\%} of a GFA file. HPRC v2 whole-genome graphs
+     reach \textbf{369\,GB} of text; cohort-scale graphs are already in the
+     terabytes.\par}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.315\linewidth}
+    {\large\bfseries\color{cherry}Generic codecs miss the structure}\\[0.18cm]
+    {\normalsize\color{slate}\raggedright
+     gzip and Zstd match over local byte windows, so cross-haplotype repeats go
+     unexploited. Specialized tools drop optional fields or run at a few MB/s.\par}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.315\linewidth}
+    {\large\bfseries\color{cherry}Analysis pays the cost twice}\\[0.18cm]
+    {\normalsize\color{slate}\raggedright
+     \code{vg}, \code{odgi} and Panacus must decompress \emph{and} rebuild the whole
+     graph before answering one query. That costs hundreds of GB of RAM.\par}
+  \end{minipage}
+\end{minipage}
+\end{center}
+
+\vspace{0.48cm}
 
 % ---------------------------------------------------------- headline stats --
 \begin{center}
-\colorbox{paleg}{\parbox{0.94\paperwidth}{\centering
-  \vspace{0.30cm}
-  \begin{tabular}{@{}c!{\hspace{0.38cm}\color{rule}\vrule width 2pt\hspace{0.38cm}}
-                        c!{\hspace{0.38cm}\color{rule}\vrule width 2pt\hspace{0.38cm}}
-                        c!{\hspace{0.38cm}\color{rule}\vrule width 2pt\hspace{0.38cm}}
-                        c!{\hspace{0.38cm}\color{rule}\vrule width 2pt\hspace{0.38cm}}c@{}}
-    \stat{0.16\linewidth}{84$\times$}{\textbf{Compression ratio}\\[2pt]\small 369\,GB $\rightarrow$ 4.5\,GB} &
-    \stat{0.16\linewidth}{1.36\,GiB/s}{\textbf{Compression throughput}\\[2pt]\small CPU $\cdot$ 32 threads} &
-    \stat{0.16\linewidth}{5.43\,GiB/s}{\textbf{Decompression throughput}\\[2pt]\small CPU $\cdot$ 32 threads} &
-    \stat{0.16\linewidth}{619$\times$}{\textbf{Compute speedup}\\[2pt]\small up to} &
-    \stat{0.16\linewidth}{25$\times$}{\textbf{Lower compute memory}\\[2pt]\small up to}
+\begin{tikzpicture}
+\node[fill=slate,rounded corners=12pt,inner xsep=0pt,inner ysep=0.44cm]{%
+  \begin{minipage}{0.925\paperwidth}\centering
+  \begin{tabular}{@{}c!{\hspace{0.30cm}\color{muted}\vrule width 2pt\hspace{0.30cm}}
+                        c!{\hspace{0.30cm}\color{muted}\vrule width 2pt\hspace{0.30cm}}
+                        c!{\hspace{0.30cm}\color{muted}\vrule width 2pt\hspace{0.30cm}}
+                        c!{\hspace{0.30cm}\color{muted}\vrule width 2pt\hspace{0.30cm}}c@{}}
+    \stat{0.163\linewidth}{84}{$\times$}{\textbf{smaller on disk}\\[2pt]\small 369\,GB $\rightarrow$ 4.5\,GB} &
+    \stat{0.163\linewidth}{1.36}{GiB/s}{\textbf{compression}\\[2pt]\small CPU $\cdot$ 32 threads} &
+    \stat{0.163\linewidth}{5.43}{GiB/s}{\textbf{decompression}\\[2pt]\small CPU $\cdot$ 32 threads} &
+    \stat{0.163\linewidth}{619}{$\times$}{\textbf{faster analysis}\\[2pt]\small vs.\ \code{odgi} / \code{vg} / Panacus} &
+    \stat{0.163\linewidth}{25}{$\times$}{\textbf{less memory}\\[2pt]\small peak RSS, up to}
   \end{tabular}
-  \vspace{0.30cm}}}
+  \end{minipage}};
+\end{tikzpicture}
 \end{center}
 
-\vspace{0.55cm}
+\vspace{0.36cm}
 
 % =============================================================================
 %  TWO COLUMNS
 % =============================================================================
-\hspace*{0.03\paperwidth}%
-\begin{minipage}[t]{0.94\paperwidth}
+\hspace*{0.0275\paperwidth}%
+\begin{minipage}[t]{0.945\paperwidth}
 \begin{columns}[t,totalwidth=\linewidth]
 
 % ============================== COLUMN 1 =====================================
-\begin{column}{0.489\linewidth}
+\begin{column}{0.487\linewidth}
 
-\partbanner{1}{Compression engine}{lossless $\cdot$ full GFA semantics $\cdot$ 32-core CPU path}
+\partbanner{1}{Compression engine}{lossless $\cdot$ every GFA record type $\cdot$ linear time}
 
-\begin{block}{}
+\begin{panel}{A lossless round trip through one container}
   \centering
-  \begin{minipage}[t]{0.485\linewidth}\centering
-    {\Large\bfseries\color{cherry} Compression}\\[-0.05cm]
-    {\small\color{slate}\code{compress\_gfa()} --- current CPU path}\\[0.30cm]
-    \begin{tikzpicture}[
-      font=\small,
-      stage/.style={draw=rule,line width=2pt,rounded corners=7pt,fill=paleg,
-                    text width=17.0cm,minimum height=2.45cm,align=center,inner sep=8pt},
-      hot/.style={stage,draw=cherry,fill=palec},
-      side/.style={stage,draw=teal,fill=palet},
-      ar/.style={-{Stealth[length=4.5mm,width=4mm]},line width=2.5pt,color=slate},
-      tag/.style={fill=slate,text=white,rounded corners=4pt,font=\scriptsize\bfseries,
-                  inner xsep=7pt,inner ysep=3pt}]
-      \node[stage] (gfa) {\textbf{GFA text}\\S, L, P, W, J, C + optional fields};
-      \node[stage,below=8mm of gfa] (parse) {\textbf{Parallel parse}\\typed, column-oriented \code{GfaGraph}};
-      \node[hot,below=8mm of parse] (trav) {\textbf{Traversal transform}\\delta encode paths + walks\\iterative 2-mer grammar: count $\rightarrow$ replace $\rightarrow$ compact};
-      \node[side,below=8mm of trav] (fields) {\textbf{Parallel field codecs}\\rule columns + P/W/S/L/J/C payloads\\varint, bit-pack, typed optional fields, Zstd};
-      \node[hot,below=8mm of fields] (data) {\textbf{\code{CompressedData}}\\one shared CPU/GPU schema};
-      \node[stage,below=8mm of data] (file) {\textbf{Serialize} $\rightarrow$ \textbf{.gfaz container}};
-      \draw[ar] (gfa) -- (parse); \draw[ar] (parse) -- (trav);
-      \draw[ar] (trav) -- (fields); \draw[ar] (fields) -- (data); \draw[ar] (data) -- (file);
-    \end{tikzpicture}
-  \end{minipage}\hfill
-  \begin{minipage}[t]{0.485\linewidth}\centering
-    {\Large\bfseries\color{teal} Decompression}\\[-0.05cm]
-    {\small\color{slate}\code{decompress\_gfa()} --- current CPU path}\\[0.30cm]
-    \begin{tikzpicture}[
-      font=\small,
-      stage/.style={draw=rule,line width=2pt,rounded corners=7pt,fill=paleg,
-                    text width=17.0cm,minimum height=2.45cm,align=center,inner sep=8pt},
-      hot/.style={stage,draw=cherry,fill=palec},
-      side/.style={stage,draw=teal,fill=palet},
-      ar/.style={-{Stealth[length=4.5mm,width=4mm]},line width=2.5pt,color=slate},
-      tag/.style={fill=slate,text=white,rounded corners=4pt,font=\scriptsize\bfseries,
-                  inner xsep=7pt,inner ysep=3pt}]
-      \node[stage] (file) {\textbf{.gfaz container} $\rightarrow$ \textbf{deserialize}};
-      \node[hot,below=8mm of file] (data) {\textbf{\code{CompressedData}}\\rules, traversals, typed record columns};
-      \node[side,below=8mm of data] (decode) {\textbf{Parallel column decode}\\Zstd / varint / orientations / optional-field types};
-      \node[hot,below=8mm of decode] (trav) {\textbf{Rebuild traversals}\\unflatten $\rightarrow$ expand grammar rules\\inverse delta transform};
-      \node[stage,below=8mm of trav] (graph) {\textbf{Reconstruct \code{GfaGraph}}\\paths + walks + segments + links + J/C records};
-      \node[stage,below=8mm of graph] (gfa) {\textbf{GFA writer} $\rightarrow$ \textbf{lossless GFA text}};
-      \draw[ar] (file) -- (data); \draw[ar] (data) -- (decode);
-      \draw[ar] (decode) -- (trav); \draw[ar] (trav) -- (graph); \draw[ar] (graph) -- (gfa);
-    \end{tikzpicture}
-  \end{minipage}
+  \begin{tikzpicture}[
+      font=\normalsize,
+      end/.style={draw=slate,line width=3pt,rounded corners=9pt,fill=paleg,
+                  text width=6.4cm,minimum height=8.4cm,align=center,inner sep=6pt},
+      st/.style={draw=rule,line width=2.5pt,rounded corners=8pt,fill=white,
+                 text width=8.1cm,minimum height=3.0cm,align=center,inner sep=7pt},
+      hot/.style={st,draw=cherry,line width=3pt,fill=palec},
+      ar/.style={-{Stealth[length=5mm,width=4mm]},line width=3pt,color=slate},
+      tag/.style={font=\small\bfseries,inner sep=2pt}]
 
-  \vspace{0.30cm}
-  {\raggedright\normalsize\bfseries\color{slate}
-   Key design: a recursive grammar built from native 2-mer rules\par}
-  \vspace{0.15cm}
-  \colorbox{paleg}{\parbox{0.965\linewidth}{
-    \centering\vspace{0.14cm}
-    \renewcommand{\arraystretch}{1.20}
-    \begin{tabular}{>{\bfseries}p{6.0cm} p{12.0cm} p{23.0cm}}
-      \textcolor{slate}{Input} & --- & \code{12 7 12 7 12 7 12 7 31} \\
-      \textcolor{cherry}{Round 1} & \code{$R_1 \leftarrow (12,7)$} & \code{$R_1$ $R_1$ $R_1$ $R_1$ 31} \\
-      \textcolor{cherry}{Round 2} & \code{$R_2 \leftarrow (R_1,R_1)$} & \code{$R_2$ $R_2$ 31} \\
-      \textcolor{teal}{Round 3} & \code{$R_3 \leftarrow (R_2,R_2)$} & \code{$R_3$ 31} \\
+    \node[end] (gfa) at (3.4,0)
+      {{\bfseries\large GFA text}\\[0.18cm]
+       {\small S \textperiodcentered\ L \textperiodcentered\ P\\
+        W \textperiodcentered\ J \textperiodcentered\ C\\[2pt]optional fields}};
+    \node[end,draw=cherry,fill=palec] (gz) at (42.6,0)
+      {{\bfseries\large\color{cherry}\code{.gfaz}}\\[0.18cm]
+       {\small one container\\for CPU + GPU}};
+
+    \node[st]  (t1) at (12.8,2.25) {\textbf{Parallel parse}\\[1pt]{\small typed column store}};
+    \node[hot] (t2) at (23.0,2.25) {\textbf{2-mer grammar}\\[1pt]{\small on paths + walks}};
+    \node[st]  (t3) at (33.2,2.25) {\textbf{Field codecs}\\[1pt]{\small varint + Zstd}};
+
+    \node[st]  (b1) at (12.8,-2.25) {\textbf{Rebuild + write}\\[1pt]{\small byte-identical GFA}};
+    \node[hot] (b2) at (23.0,-2.25) {\textbf{Expand rules}\\[1pt]{\small + inverse delta}};
+    \node[st]  (b3) at (33.2,-2.25) {\textbf{Column decode}\\[1pt]{\small streamed, parallel}};
+
+    \draw[ar] (gfa.east|-t1) -- (t1.west);
+    \draw[ar] (t1) -- (t2);  \draw[ar] (t2) -- (t3);
+    \draw[ar] (t3.east) -- (gz.west|-t3);
+    \draw[ar] (gz.west|-b3) -- (b3.east);
+    \draw[ar] (b3) -- (b2);  \draw[ar] (b2) -- (b1);
+    \draw[ar] (b1.west) -- (gfa.east|-b1);
+
+    \node[tag,color=cherry,anchor=south] at (23.0,4.0) {COMPRESS $\rightarrow$};
+    \node[tag,color=teal,anchor=north]   at (23.0,-4.0) {$\leftarrow$ DECOMPRESS};
+  \end{tikzpicture}
+
+  \cpt{Both directions are \hd{fully parallel} (OpenMP; a CUDA backend shares the
+  same format). Columns are varint- and bit-packed before Zstd. Optional fields and
+  record order survive intact, so \code{.gfaz} \emph{replaces} the GFA rather than
+  shadowing it.}
+\end{panel}
+
+\begin{panel}{The idea: a recursive grammar of 2-mers}
+  {\normalsize\color{slate}\raggedright
+   Haplotypes repeat each other. \gz{} replaces the most frequent \emph{adjacent
+   pair} of symbols with a rule, then repeats. Later rounds reuse earlier rules, so
+   each round captures longer repeats.\par}
+  \vspace{0.26cm}
+  \centering
+  \colorbox{paleg}{\parbox{0.96\linewidth}{
+    \centering\vspace{0.26cm}
+    \renewcommand{\arraystretch}{1.18}
+    \begin{tabular}{>{\bfseries}p{5.2cm} p{10.4cm} l}
+      \textcolor{slate}{Input} & \textcolor{muted}{no rules yet} & \code{12 7 12 7 12 7 12 7 31} \\
+      \textcolor{cherry}{Round 1} & $R_1 \leftarrow (12,7)$ & \code{$R_1$ $R_1$ $R_1$ $R_1$ 31} \\
+      \textcolor{cherry}{Round 2} & $R_2 \leftarrow (R_1,R_1)$ & \code{$R_2$ $R_2$ 31} \\
+      \textcolor{teal}{Round 3} & $R_3 \leftarrow (R_2,R_2)$ & \code{$R_3$ 31} \\
     \end{tabular}
-    \vspace{0.14cm}}}
-  \cpt{Every rule combines exactly \hd{two current symbols}, while later rounds
-  reuse earlier rules to capture longer repeats. Paths and walks share the rulebook.
-  Each round is a count-and-rewrite scan: \hd{$O(N)$ per round; fixed rounds are linear.}}
+    \vspace{0.26cm}}}
+  \cpt{Each round is one count-and-rewrite scan: \hd{$O(N)$ per round, fixed round
+  count}, so compression is linear and parallel across chunks. Paths and walks share
+  one rulebook. Orientations are canonicalized, so a forward repeat also matches its
+  reverse complement.}
+\end{panel}
 
-\end{block}
-
-\gap
-
-\begin{block}{}
+\begin{panel}{CPU performance against five baselines}
   \centering
-  {\large\bfseries\color{slate} Compression ratio}\\[-0.05cm]
-  \includegraphics[width=0.63\linewidth]{cpu_ratio.pdf}\\[-0.02cm]
-
-  \begin{minipage}[t]{0.49\linewidth}\centering
-    {\large\bfseries\color{slate} Compression throughput}\\[-0.04cm]
-    \includegraphics[width=\linewidth]{cpu_compression.pdf}
-  \end{minipage}\hfill
-  \begin{minipage}[t]{0.49\linewidth}\centering
-    {\large\bfseries\color{slate} Decompression throughput}\\[-0.04cm]
-    \includegraphics[width=\linewidth]{cpu_decompression.pdf}
-  \end{minipage}
-
-  \cpt{Current README results, CPU only. Ratio is uncompressed size / compressed
-  size; higher is better. GFAz uses 32 threads, and compression is end-to-end CLI
-  wall time. \hd{GFAz reaches 1.36\,GiB/s compression and 5.4\,GiB/s streaming
-  decompression while retaining the best ratio on every graph.}}
-\end{block}
+  \includegraphics[width=\linewidth]{cpu_ratio.pdf}
+  \cpt{\hd{\gz{} compresses better than every baseline on all six graphs}, reaching
+  84$\times$ on HPRC v2.0: 20$\times$ past gzip, 13$\times$ past Zstd.}
+  \vspace{0.22cm}
+  \includegraphics[width=\linewidth]{cpu_throughput.pdf}
+  \cpt{End-to-end CLI wall time, 32 threads; same legend as above. \hd{\gz{}
+  decompresses fastest on every graph} (up to 5.4\,GiB/s) and compresses 30--90$\times$
+  faster than gzip, GBZ and sqz. Only Zstd compresses faster, at 5--13$\times$ worse
+  ratio.}
+\end{panel}
 
 \end{column}
 
 % ============================== COLUMN 2 =====================================
-\begin{column}{0.489\linewidth}
+\begin{column}{0.487\linewidth}
 
 \partbanner{2}{Compute engine}{run the analysis \emph{on} the compressed container}
 
-\begin{block}{}
+\begin{panel}{The graph is never rebuilt}
   \centering
-  {\Large\bfseries\color{slate} From compressed paths to analysis results}\\[0.38cm]
   \begin{tikzpicture}[
-      font=\small,node distance=7mm,
-      stage/.style={draw=rule,line width=2pt,rounded corners=9pt,fill=white,
-                    text width=9.65cm,minimum height=7.15cm,align=center,inner sep=5mm},
-      ar/.style={-{Stealth[length=5mm,width=4mm]},line width=2.7pt,color=slate},
+      font=\normalsize,node distance=7mm,
+      stage/.style={draw=rule,line width=2.5pt,rounded corners=9pt,fill=white,
+                    text width=8.9cm,minimum height=5.4cm,align=center,inner sep=4mm},
+      ar/.style={-{Stealth[length=5mm,width=4mm]},line width=3pt,color=slate},
     ]
-    \node[stage,draw=cherry,fill=palec] (packed)
-      {{\scriptsize\bfseries\color{cherry}COMPRESSED}\\[0.45cm]
-       {\Large\bfseries\color{cherry}\code{.gfaz}}\\[0.35cm]
-       grammar-coded paths\\typed columns};
-    \node[stage,draw=teal,fill=palet,right=of packed] (extract)
-      {{\scriptsize\bfseries\color{teal}FAST PATH EXTRACT}\\[0.45cm]
-       {\normalsize\bfseries compact offsets}\\[0.35cm]
-       chosen slice\\$12\;\;{-7}\;\;31\;\;8\;\;\cdots$};
-    \node[stage,draw=teal,fill=palet,right=of extract] (compute)
-      {{\scriptsize\bfseries\color{teal}INDEXED COMPUTE}\\[0.42cm]
-       {\scriptsize\bfseries NAME \;|\; GROUP \;|\; OFFSET}\\[0.38cm]
-       {\small\bfseries stream visitor}\\compact state};
-    \node[stage,draw=cherry,fill=palec,right=of compute] (result)
-      {{\scriptsize\bfseries\color{cherry}RESULT}\\[0.48cm]
-       {\normalsize\bfseries VCF variants}\\[0.18cm]
-       {\normalsize\bfseries TSV matrices}\\[0.18cm]
-       curves + statistics};
+    \node[stage,draw=cherry,line width=3pt,fill=palec] (packed)
+      {{\small\bfseries\color{cherry}COMPRESSED}\\[0.34cm]
+       {\Large\bfseries\color{cherry}\code{.gfaz}}\\[0.24cm]
+       {\small grammar-coded paths,\\typed columns}};
+    \node[stage,draw=teal,line width=3pt,fill=palet,right=of packed] (extract)
+      {{\small\bfseries\color{teal}SELECT}\\[0.34cm]
+       {\bfseries compact offsets}\\[0.24cm]
+       {\small only what the\\query touches}};
+    \node[stage,draw=teal,line width=3pt,fill=palet,right=of extract] (compute)
+      {{\small\bfseries\color{teal}STREAM}\\[0.34cm]
+       {\bfseries visitor per node}\\[0.24cm]
+       {\small expand, fold, discard;\\never retained}};
+    \node[stage,draw=cherry,line width=3pt,fill=palec,right=of compute] (result)
+      {{\small\bfseries\color{cherry}RESULT}\\[0.34cm]
+       {\bfseries VCF \textperiodcentered\ TSV}\\[0.24cm]
+       {\small allele tables, matrices,\\growth curves}};
 
     \draw[ar] (packed) -- (extract);
     \draw[ar] (extract) -- (compute);
     \draw[ar] (compute) -- (result);
 
-    \coordinate (flowcenter) at ($(extract.south)!0.5!(compute.south)$);
-    \node[fill=teal,text=white,rounded corners=6pt,minimum height=1.65cm,
-          text width=45.8cm,align=center,font=\small\bfseries,
-          below=8mm of flowcenter] (memory)
-      {LOW MEMORY \quad one selected stream $+$ bounded decoder scratch $+$ compact analysis state};
-    \node[anchor=north,font=\scriptsize\bfseries,text=cherry,
-          below=2mm of memory] (never)
-      {UNUSED STREAMS REMAIN COMPRESSED \quad $\cdot$ \quad THE FULL GFA IS NEVER MATERIALIZED};
+    \node[fill=slate,text=white,rounded corners=8pt,minimum height=1.8cm,
+          text width=42.6cm,align=center,font=\normalsize\bfseries,
+          below=7mm of $(extract.south)!0.5!(compute.south)$] (memory)
+      {one selected stream \ $+$ \ bounded decoder scratch \ $+$ \ a compact
+       accumulator};
+    \node[anchor=north,font=\small\bfseries,text=cherry,below=3mm of memory]
+      {UNUSED STREAMS STAY COMPRESSED \ \ $\cdot$ \ \ THE FULL GFA IS NEVER MATERIALIZED};
   \end{tikzpicture}
 
-  \vspace{0.35cm}
-  \cpt{\code{StreamDecodedNodes} expands a chosen slice and immediately invokes
-  the analysis visitor for each signed node. \hd{Only streams used by the query
-  are expanded}; they are consumed online rather than retained as decoded paths.}
-\end{block}
+  \cpt{Most analyses only \emph{read} traversals, folding node visits into a small
+  accumulator. \gz{} runs that fold on the grammar-compressed columns, so \hd{peak
+  memory stays below the original GFA}.}
+\end{panel}
 
-\gap
-
-\begin{block}{}
+\begin{panel}{Six analyses, one decoder}
   \centering
-  {\small
-  \setlength{\tabcolsep}{9pt}\renewcommand{\arraystretch}{1.18}
+  {\normalsize
+  \setlength{\tabcolsep}{10pt}\renewcommand{\arraystretch}{1.14}
   \begin{tabular}{llcl}
     \toprule
     \textbf{\gz{} command} & \textbf{Reproduces} & \textbf{Passes} & \textbf{Accumulator} \\
@@ -302,45 +340,45 @@
     \code{similarity}  & \code{odgi similarity} & 2\,(+join) & node$\to$groups CSR \\
     \bottomrule
   \end{tabular}}
-  \cpt{Six analyses, one decoder --- they differ only in the accumulator. A new
-  analysis is a new visitor.}
-\end{block}
+  \cpt{Only the accumulator column changes. \hd{Adding an analysis means writing one
+  fold function}, not a new engine: all six reuse the same decoder, memory model and
+  parallel schedule.}
+\end{panel}
 
-\gap
-
-\begin{block}{}
+\begin{panel}{\code{deconstruct}: GFA $\rightarrow$ VCF with no graph}
   \centering
-  {\large\bfseries\color{cherry}\code{deconstruct}: GFA\,$\rightarrow$\,VCF with no graph}\\[0.35cm]
   \begin{tikzpicture}[
-      >={Stealth[length=4mm]},
-      seg/.style={draw,rounded corners=4pt,line width=1.8pt,minimum width=1.9cm,
-                  minimum height=1.9cm,inner sep=2pt,align=center,font=\small\ttfamily},
-      refp/.style={->,line width=2.4pt,color=cherry},
-      altp/.style={->,line width=2.4pt,dashed,color=teal},
+      >={Stealth[length=4.5mm]},
+      seg/.style={draw,rounded corners=6pt,line width=2.5pt,minimum width=3.2cm,
+                  minimum height=3.2cm,inner sep=2pt,align=center,font=\normalsize\ttfamily},
+      refp/.style={->,line width=3pt,color=cherry},
+      altp/.style={->,line width=3pt,dashed,color=teal},
     ]
-    \node[seg,fill=paleg] (A) at (0,0)      {A\\GAT};
-    \node[seg,fill=palet] (B) at (3.4,2.0)  {B\\T};
-    \node[seg,fill=palec] (C) at (3.4,-2.0) {C\\C};
-    \node[seg,fill=paleg] (D) at (6.8,0)    {D\\GA};
-    \node[seg,fill=palec] (E) at (10.2,2.0) {E\\CC};
-    \node[seg,fill=paleg] (G) at (13.6,0)   {G\\TT};
+    \node[seg,fill=paleg] (A) at (0,0)     {A\\GAT};
+    \node[seg,fill=palet] (B) at (8.8,3.1) {B\\T};
+    \node[seg,fill=palec] (C) at (8.8,-3.1){C\\C};
+    \node[seg,fill=paleg] (D) at (17.6,0)  {D\\GA};
+    \node[seg,fill=palec] (E) at (26.4,3.1){E\\CC};
+    \node[seg,fill=paleg] (G) at (35.2,0)  {G\\TT};
     \draw[refp] (A) -- (C); \draw[refp] (C) -- (D);
     \draw[refp] (D) -- (E); \draw[refp] (E) -- (G);
     \draw[altp] (A) -- (B); \draw[altp] (B) -- (D);
     \draw[altp] (D) -- (G);
     \begin{scope}[on background layer]
-      \node[draw=slate,dotted,line width=2pt,rounded corners,fit=(B)(C),inner sep=6mm] {};
-      \node[draw=slate,dotted,line width=2pt,rounded corners,fit=(E),inner sep=6mm] {};
+      \node[draw=slate,dotted,line width=2.5pt,rounded corners,fit=(B)(C),inner sep=6mm] {};
+      \node[draw=slate,dotted,line width=2.5pt,rounded corners,fit=(E),inner sep=6mm] {};
     \end{scope}
-    \node[font=\small,color=slate] at (3.4,4.4)  {snarl $[A,D]$};
-    \node[font=\small,color=slate] at (10.2,4.4) {snarl $[D,G]$};
-    \node[font=\small,color=cherry,anchor=west] at (0.2,-4.2) {\textbf{---} reference / $h_1$};
-    \node[font=\small,color=teal,anchor=west]   at (8.6,-4.2) {\textbf{-\,-} $h_2$};
+    \node[font=\normalsize,color=slate] at (8.8,6.3)  {snarl $[A,D]$};
+    \node[font=\normalsize,color=slate] at (26.4,6.3) {snarl $[D,G]$};
+    \node[font=\normalsize\bfseries,color=cherry,anchor=west] at (-1.4,-5.9)
+      {\textcolor{cherry}{\rule[0.28em]{1.1cm}{3pt}}\ \ reference path $h_1$};
+    \node[font=\normalsize\bfseries,color=teal,anchor=west] at (19.0,-5.9)
+      {\textcolor{teal}{\rule[0.28em]{0.3cm}{3pt}\,\rule[0.28em]{0.3cm}{3pt}\,\rule[0.28em]{0.3cm}{3pt}}\ \ alternate haplotype $h_2$};
   \end{tikzpicture}
 
-  \vspace{0.5cm}
-  {\small\ttfamily
-  \setlength{\tabcolsep}{8pt}\renewcommand{\arraystretch}{1.16}
+  \vspace{0.30cm}
+  {\normalsize\ttfamily
+  \setlength{\tabcolsep}{10pt}\renewcommand{\arraystretch}{1.12}
   \begin{tabular}{llllll}
     \toprule
     \#CHROM & POS & REF & ALT & INFO & h1\ \ h2 \\
@@ -350,18 +388,16 @@
     \bottomrule
   \end{tabular}}
 
-  \cpt{\hd{Phase 1} recovers snarls from \emph{topology alone}
-  (biconnected decomposition, $O(V{+}E)$, decodes zero haplotypes). \hd{Phase 2}
-  streams each haplotype once through a boundary state machine; a reverse boundary
-  pair normalizes inversions. No graph, no general snarl index.}
-\end{block}
+  \cpt{\hd{Phase 1} recovers the snarls from \emph{topology alone}: a biconnected
+  decomposition in $O(V{+}E)$ that decodes zero haplotypes. \hd{Phase 2} streams each
+  haplotype once through a boundary state machine; a reverse boundary pair normalizes
+  inversions. No graph object, no general snarl index.}
+\end{panel}
 
-\gap
-
-\begin{block}{}
+\begin{panel}{Same answers, orders of magnitude cheaper}
   \centering
-  {\small
-  \setlength{\tabcolsep}{6pt}\renewcommand{\arraystretch}{1.20}
+  {\normalsize
+  \setlength{\tabcolsep}{7pt}\renewcommand{\arraystretch}{1.14}
   \begin{tabular}{llrrcc}
     \toprule
     \textbf{Analysis} & \textbf{Graph} & \textbf{Baseline} & \textbf{\gz} &
@@ -377,32 +413,12 @@
     \emph{vs.} \code{odgi}              & chr6 & 4759\,s / 19.4\,GB & 7.8\,s / 6.4\,GB  & \best\textbf{619$\times$} & \best\textbf{3.0$\times$} \\
     \bottomrule
   \end{tabular}}
-  \cpt{Wall-clock / peak RSS at 16 threads. \hd{Outputs match the
-  baselines:} \code{growth} reproduces Panacus' curve exactly, \code{deconstruct}
-  agrees with \code{vg} to within 0.2\% of records, \code{pav} matrices are
-  structurally identical to \code{odgi}'s. On the 358/369\,GB HPRC graphs
-  \code{vg} and \code{odgi} \emph{cannot load the input at all} --- \gz{} runs
-  from a 4.5\,GB container.}
-\end{block}
-
-\gap
-
-\begin{block}{}
-  \begin{tikzpicture}
-    \node[fill=palet,draw=teal,line width=2.5pt,rounded corners=8pt,inner sep=14pt,
-          text width=\dimexpr\linewidth-42pt\relax,align=left]{%
-      \color{slate}
-      \textbf{\large What we built with \gz{}}\\[0.28cm]
-      \begin{itemize}
-        \item A \hd{state-of-the-art lossless GFA compressor}: 84$\times$ smaller,
-              with 1.36/5.43\,GiB/s CPU compression/decompression.
-        \item A \hd{compressed-graph compute engine} that uses compact indices and
-              expands only selected path streams---never the full GFA.
-        \item \hd{Six exact pangenome analyses} running up to
-              \textbf{619$\times$ faster} with up to \textbf{25$\times$ less memory}.
-      \end{itemize}};
-  \end{tikzpicture}
-\end{block}
+  \cpt{Wall clock / peak RSS at 16 threads. \hd{The outputs match the baselines:}
+  \code{growth} reproduces Panacus' curve exactly, \code{deconstruct} agrees with
+  \code{vg} to within 0.2\% of records, \code{pav} matrices are structurally identical
+  to \code{odgi}'s. On the 358/369\,GB HPRC graphs \code{vg} and \code{odgi}
+  \emph{cannot load the input at all}; \hd{\gz{} answers from a 4.5\,GB container}.}
+\end{panel}
 
 \end{column}
 \end{columns}
@@ -414,26 +430,29 @@
 \vfill
 \begin{center}
 \begin{tikzpicture}
-  \node[fill=slate,rounded corners=10pt,inner sep=18pt]{
-  \begin{minipage}{0.945\paperwidth}
+  \node[fill=slate,rounded corners=12pt,inner sep=18pt]{
+  \begin{minipage}{0.925\paperwidth}
     \color{white}\small
-    \begin{minipage}[c]{0.115\linewidth}
-      \centering\colorbox{white}{\color{black}\qrcode[height=5.0cm]{https://github.com/babyplutokurt/GFAz}}\\[3pt]
+    \begin{minipage}[c]{0.113\linewidth}
+      \centering\colorbox{white}{\color{black}\qrcode[height=4.8cm]{https://github.com/babyplutokurt/GFAz}}\\[4pt]
       {\footnotesize code}
     \end{minipage}\hfill
-    \begin{minipage}[c]{0.65\linewidth}
+    \begin{minipage}[c]{0.655\linewidth}
       \textbf{Open source:} \code{github.com/babyplutokurt/GFAz} \ \ $\cdot$ \ \
-      \textbf{Contact:} \code{taolue.yang@temple.edu}\\[0.3cm]
-      \textbf{Paper:} Yang, Liu, Jiang, Shi, Jin. \emph{\gz{}: Order-of-Magnitude
-      Pangenome Analytics by Computing over Compression.} ICS~'26.
-      \code{doi:10.1145/3797905.3807870}\\[0.3cm]
-      {\footnotesize \textbf{Acknowledgments:} We thank the Human Pangenome Reference
+      \textbf{Contact:} \code{taolue.yang@temple.edu}\\[0.22cm]
+      \textbf{Compression engine:} Yang, Liu, Jiang, Shi, Jin. \emph{\gz{}:
+      State-of-the-Art Graphical Fragment Assembly Compression.} ICS~'26.
+      \code{doi:10.1145/3797905.3807870}\\[0.22cm]
+      \textbf{Compute engine:} Yang, Liu, Jiang, Shi, Jin. \emph{\gz{}:
+      Order-of-Magnitude Pangenome Analytics by Computing over Compression.}
+      In submission, 2026.\\[0.22cm]
+      {\footnotesize\color{hdr} \textbf{Acknowledgments:} We thank the Human Pangenome Reference
       Consortium (BioProject PRJNA730823) and its funder, NHGRI. Supported in part by
       NIH award R01GM157443.}
     \end{minipage}\hfill
-    \begin{minipage}[c]{0.115\linewidth}
-      \centering\colorbox{white}{\color{black}\qrcode[height=5.0cm]{https://doi.org/10.1145/3797905.3807870}}\\[3pt]
-      {\footnotesize paper}
+    \begin{minipage}[c]{0.113\linewidth}
+      \centering\colorbox{white}{\color{black}\qrcode[height=4.8cm]{https://doi.org/10.1145/3797905.3807870}}\\[4pt]
+      {\footnotesize ICS paper}
     \end{minipage}
   \end{minipage}};
 \end{tikzpicture}
