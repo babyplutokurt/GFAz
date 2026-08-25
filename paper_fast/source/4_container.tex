@@ -67,6 +67,28 @@ of grammar rounds, or on which entropy coder wraps the blocks.
 For calibration, the container compresses the evaluation graphs by
 $18$--$84\times$~\cite{gfaz2026}: the $369$\,GB HPRC v2.1 graph becomes
 $4.5$\,GB, the $80$\,GB HGSVC3 graph $2.85$\,GB, and the $7.6$\,GB chr1 graph
-$214$\,MB. Compression runs at up to $1.4$\,GB/s and decompression at up to
-$5.4$\,GB/s on the CPU backend used here. Those numbers set the scale of what the
-engine reads; they are not claims of this paper.
+$214$\,MB. These ratios are not claims of this paper; they set the scale of what
+the engine reads.
+
+\paragraph{An improved CPU backend.}
+One change to the container is ours and is reported here for the first time. We
+re-engineered the CPU compression and decompression paths, which now reach
+\needsexp{X}\,GB/s and \needsexp{Y}\,GB/s respectively, against the
+$385$\,MB/s and $1.8$\,GB/s reported for the same backend
+in~\cite{gfaz2026}\needsexp{re-measure both configurations at a matched thread
+count and under one methodology before printing any factor. The published
+figures were taken at 16 threads with the page cache primed and averaged over
+five runs; our current numbers are 32-thread end-to-end CLI wall times including
+parse and serialization, so roughly half of the apparent gain is SMT rather than
+optimization. Report the matched-thread factor, and report it per dataset:
+whole-genome decompression improves far more than v1.1 compression does}.
+
+We do not treat this as a contribution of the paper, and it does no work in the
+results of Section~\ref{sec:eval}, where every \sys measurement is a query and
+not a compression run. It matters here for one reason. The argument of
+Section~\ref{subsec:bg-alternatives} is that expanding to fast local storage does
+not rescue the baselines, and decompression throughput is what makes that
+concrete: at these rates the container can be read from storage and
+entropy-decoded faster than an NVMe device can stream the expanded GFA text,
+so the expanded form is not cheaper to reach even when it is already on the
+fastest tier available.

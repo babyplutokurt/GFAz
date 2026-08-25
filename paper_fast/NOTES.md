@@ -45,6 +45,12 @@ rather than slower.* §7.6 is the experiment that tests it.
 
 - System renamed to **Loom** — one macro, `\sys` in `main.tex`. Reusing the
   public name of the prior system would identify the authors by implication.
+- We are **not** claiming the container is someone else's work. `ref.bib` carries
+  its real author list. The CFP's "consider it as written by a third party"
+  governs phrasing, not authorship: avoid "our previous work [12]", write "a
+  state-of-the-art container [12]". Reviewers guessing is expected and fine.
+- Double-blind does **not** forbid "we". It forbids identifying who "we" are, so
+  "we re-engineered the CPU backend" is allowed; "our earlier paper [12]" is not.
 - Container extension anonymized to `\cont` (`.pgz`).
 - The GitHub URL from the ICS intro is **removed**. If we want an artifact link,
   use an anonymous mirror (anonymous.4open.science or a scrubbed Zenodo DOI).
@@ -73,6 +79,39 @@ stray placeholder cannot ship. Ranked by how much a reviewer will miss it:
    `growth` matters as much as the knee for `pav`.
 5. **Full thread-scaling curves (§7.4).** Currently only 1- and 16-thread
    endpoints. A 1/2/4/8/16/32 figure is easy and looks much stronger.
+6. **Matched re-measurement of the CPU backend (§4).** Needed only for the one
+   sentence claiming the backend improvement, but needed before that sentence
+   can print a number. See below.
+
+### The backend-improvement claim
+
+The improvement is real and unpublished, so it is ours to claim, but the
+headline factor currently available is confounded and must not be printed
+as-is:
+
+| | ICS '26 | README today | Apparent |
+|:--|--:|--:|--:|
+| Peak compression | 385 MB/s | 1355 MiB/s | 3.5x |
+| Peak decompression | 1.8 GB/s | 5426 MiB/s | 3.0x |
+| v1.1 compression | 231 MB/s | 291 MiB/s | 1.26x |
+| v2.1 decompression | 1559 MB/s | 5325 MiB/s | 3.4x |
+
+`paper_compute_engine/source/4_evaluation.tex:95` states the published runs used
+**16 threads**; the README numbers use **32** on the same 16-core/32-thread
+part, so roughly half the apparent gain is SMT rather than optimization. The
+methodologies also differ: the published figures primed the page cache and
+averaged five runs, the README uses end-to-end CLI wall time including parse and
+serialization, medians of 3-9. Re-run both configurations at one thread count
+under one methodology and report the matched factor per dataset. Expect
+something nearer 2-3x, with whole-genome decompression improving far more than
+v1.1 compression.
+
+Where the claim goes: §4 only, plus the load-bearing use in §7.5 (at these rates
+the container is read and entropy-decoded faster than NVMe can stream the
+expanded GFA, which is the sharpest answer to "why not just expand to fast local
+storage"). **Not** a contribution bullet and **not** in the abstract: as a
+headline it is an engineering speedup with no new idea described in this paper,
+and it pulls the framing back toward the ICS story.
 
 ## Length
 
