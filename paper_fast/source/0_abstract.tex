@@ -1,33 +1,29 @@
 Pangenome graphs have replaced the single reference genome across human genomics,
 and their interchange format has grown with them: the current human pangenome
-ships $369$\,GB of Graphical Fragment Assembly (GFA) text, over $90\%$ of it
-haplotype traversals. Compression has already solved the storage half of this
-problem. A state-of-the-art container reduces that file more than $80\times$, to
-$4.5$\,GB~\cite{gfaz2026}, and the re-engineered CPU backend we contribute here
-lifts its throughput from the hundreds of MB/s reported there to
-\needsexp{X}\,GB/s compressing and \needsexp{Y}\,GB/s
-decompressing. Analysis has not. Every tool that
-consumes a pangenome first expands the file back into an in-memory graph.
-Producing a growth curve of a few thousand integers therefore costs four hours
-and $336$\,GB of RAM, and two of our three baselines cannot load the largest
-public graphs at all. The compressed container sits unread for the entire run.
+ships $369$\,GB of Graphical Fragment Assembly (GFA) text, most of it haplotype
+traversals. Compression has already solved the storage half of this problem. A
+state-of-the-art container reduces that file to $4.5$\,GB~\cite{gfaz2026}, and the
+re-engineered CPU backend we contribute here compresses and decompresses it at
+\needsexp{X} and \needsexp{Y}\,GB/s. Analysis has not. Every tool that consumes a
+pangenome first expands the file back into an in-memory graph, so producing a
+growth curve of a few thousand integers costs four hours and $336$\,GB of RAM. The
+compressed container sits unread for the entire run.
 
 That expansion is not required by the computation. Pangenome analyses are
 overwhelmingly path-centric folds: they scan traversals in order and reduce node
 visits into a compact accumulator. A fold needs its elements delivered in order,
 not materialized, which is what a grammar-compressed traversal column already
-supplies. \sys evaluates six analyses directly on the compressed container,
-paying only for the columns a query touches plus its accumulator. Among them is
+supplies. \sys evaluates six analyses directly on the compressed container, paying
+only for the columns a query touches plus its accumulator. Among them is
 reference-relative variant projection, the bridge to the downstream genomics
-toolchain, which we recast as a topology-only site-discovery pass plus a
-streaming allele fold that never builds the graph.
+toolchain, which we recast as a topology-only site-discovery pass plus a streaming
+allele fold that never builds the graph.
 
-\sys is $15$--$613\times$ faster than the established tools at $3$--$25\times$
-less memory: the growth curve above completes in $41$ seconds and $13.7$\,GB.
-Peak memory stays more than $10\times$ below the uncompressed input for the
-streaming analyses, and \sys answers questions on $358$--$369$\,GB graphs the
-baselines cannot load. The design also inverts the usual storage trade-off, since
-the compressed form is what the query reads: a better compression ratio makes
-queries faster rather than slower. We report where it fails too: one analysis
-builds an uncompressed join index whose size tracks the graph, and it is that
-accumulator, not the compressed data, that runs out of memory first.
+The growth curve above finishes in $41$ seconds and $13.7$\,GB. Across the six
+analyses \sys is $15$--$613\times$ faster than the established tools at
+$3$--$25\times$ less memory, and it answers questions on graphs those tools cannot
+load at all. The design also inverts the usual storage trade-off, since the
+compressed form is what the query reads: a better compression ratio makes queries
+faster rather than slower. We report where it fails too: one analysis builds an
+uncompressed join index whose size tracks the graph, and it is that accumulator,
+not the compressed data, that runs out of memory first.
