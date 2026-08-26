@@ -103,7 +103,11 @@ that for this class the compressed container is the right thing to compute on.
 The container format and its compressor are prior work, published
 separately~\cite{gfaz2026}, and are \emph{not} a contribution of this paper. We
 recap only the properties the engine depends on (Section~\ref{sec:container}) and
-we do not re-evaluate compression ratio or compressor throughput as results.
+we do not re-evaluate compression ratio as a result. One exception is the
+container's CPU compression and decompression backend, which we re-engineered and
+report on here for the first time (Section~\ref{sec:container}); it is a
+performance change to prior work rather than a contribution of this paper, and no
+result in Section~\ref{sec:eval} depends on it.
 Section~\ref{sec:principles} instead distills, from that format and from the
 engine we built on it, the properties a compressed format must have for queries to
 run on it at all, which is the part of this work we expect to transfer to other

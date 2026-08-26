@@ -3,7 +3,14 @@ and their interchange format has grown with them: the current human pangenome
 ships $369$\,GB of Graphical Fragment Assembly (GFA) text, over $90\%$ of it
 haplotype traversals. Compression has already solved the storage half of this
 problem. A state-of-the-art container reduces that file more than $80\times$, to
-$4.5$\,GB, at GiB/s rates~\cite{gfaz2026}. Analysis has not. Every tool that
+$4.5$\,GB~\cite{gfaz2026}, and the re-engineered CPU backend we contribute here
+lifts its throughput from the hundreds of MB/s reported there to
+\needsexp{X}\,GB/s compressing and \needsexp{Y}\,GB/s
+decompressing\needsexp{abstract figures must be the matched-thread, single-methodology
+numbers from Section~\ref{sec:container}, and must hold on the whole-genome graphs,
+not only on the single-chromosome peak. Compression on HPRC v1.1 is currently
+sub-GiB/s; if that stays true, say ``decompressing at \needsexp{Y}\,GB/s'' here and
+leave the compression factor to Section~\ref{sec:container}}. Analysis has not. Every tool that
 consumes a pangenome first expands the file back into an in-memory graph.
 Producing a growth curve of a few thousand integers therefore costs four hours
 and $336$\,GB of RAM, and two of our three baselines cannot load the largest
