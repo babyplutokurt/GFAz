@@ -1,24 +1,25 @@
 \section{Introduction}
 \label{sec:intro}
 
-Every compressed dataset carries an implicit contract: space is saved now, and
+Every compressed dataset carries an implicit contract: space is saved now and
 paid back later, at the moment somebody wants to use the data. The payment is
-usually invisible because it is small relative to everything else. When a dataset
-is a few gigabytes, expanding it costs a few seconds and the expanded form fits in
-memory, so compression is purely a win and the decompress step is an
-implementation detail.
-
-That contract breaks when the expanded form no longer fits. At that point the
-decompression step stops being a preamble to the computation and becomes the
-dominant term: the system must stream hundreds of gigabytes off storage, rebuild
-an in-memory representation larger than the input, and only then begin the work
-that the user actually asked for. The compressed archive, meanwhile, sits unused
-during the entire computation. It was treated as a shipping container, opened once
-and discarded, rather than as a representation anything could run on.
+usually invisible, because expanding a few gigabytes costs a few seconds and the
+expanded form fits in memory. The contract breaks when the expanded form no
+longer does. Decompression then stops being a preamble to the computation and
+becomes the dominant term: the system streams hundreds of gigabytes off storage,
+rebuilds an in-memory representation larger than the input, and only then begins
+the work the user actually asked for. The compressed archive, meanwhile, goes
+unread for the entire run. It was treated as a shipping container, opened once
+and discarded, rather than as a representation anything could execute on.
 
 This paper takes one workload where that break has already happened and asks what
-changes if the compressed container is treated as the substrate the queries
-execute on. The workload is pangenome analytics.
+changes if the compressed container is treated as the substrate the queries run
+on. The workload is pangenome analytics, where a routine question whose entire
+answer is a few thousand integers currently costs four hours and $336$\,GB of
+RAM, while a $4.5$\,GB compressed copy of the same data sits idle on disk
+(Figure~\ref{fig:tax}).
+
+\input{fig_tax}
 
 \paragraph{The workload.}
 A pangenome graph represents the genomes of many individuals in one structure:
@@ -56,7 +57,7 @@ succinct whole-graph index before any of its operations~\cite{guarracino2022odgi
 Panacus parses path and walk records into item tables before computing a growth
 curve~\cite{parmigiani2024panacus}. On the two largest HPRC graphs, two of these
 three cannot load the input at all on a $503$\,GiB machine, and the third needs
-four hours and $330$\,GB of resident memory to answer a question whose entire
+four hours and $336$\,GB of resident memory to answer a question whose entire
 output is a few thousand integers. The $4.5$\,GB container is never in the loop.
 
 \paragraph{The observation.}
@@ -75,6 +76,15 @@ is exactly what a grammar-compressed traversal column can supply, which means th
 compressed container is not merely storable but \emph{computable}, and the
 expansion step everyone pays for is not required by the computation. It is
 required only by the interface the existing tools present.
+
+The obvious ways to avoid paying it do not work, and Section~\ref{subsec:bg-alternatives}
+measures why. Expanding once to fast local storage moves the cost rather than
+removing it, because the tools' resident footprint, not their read bandwidth, is
+what fails first. Buying memory does not scale with a cohort that is still an
+order of magnitude from its target size. Succinct whole-graph
+indexes~\cite{siren2022gbz} shrink the materialized object but still materialize
+it, and they answer topology queries rather than the path-centric folds that
+dominate this workload.
 
 \paragraph{This paper.}
 We build \sys, an execution engine that evaluates pangenome analyses directly on a
@@ -116,38 +126,32 @@ domains.
 \paragraph{Contributions.}
 \begin{itemize}[noitemsep,topsep=3pt,leftmargin=*]
   \item \textbf{A characterization of computable compression.} Five properties
-        (Section~\ref{sec:principles}) that separate a compressed format a query
-        engine can execute on from one that must be expanded first, together with
-        an account of where common storage formats sit against them.
+        (Section~\ref{sec:principles}) separating a compressed format a query
+        engine can execute on from one that must be expanded first, with an
+        account of where common storage formats sit against them.
   \item \textbf{A streaming execution engine over compressed traversals}
-        (Section~\ref{sec:engine}): a decode primitive whose cost is linear in
-        emitted elements and requires no side table, a memory model that bounds
-        residency to the compressed columns plus a query accumulator, a bounded
-        rule-leaf cache that trades memory for repeated expansion under an
-        explicit budget, and a parallel schedule in which synchronization never
-        touches the decode path.
-  \item \textbf{\cmd{deconstruct}: variant projection without a graph}
-        (Section~\ref{sec:deconstruct}). Reference-relative variant calling is
-        the most consequential and the most topology-sensitive pangenome
-        derivation, and the one apparently least suited to streaming. We give a
-        two-phase algorithm that separates an $O(V{+}E)$ topology-only site
-        discovery pass from a compressed-traversal allele fold, handles
-        inversions in both phases, and reproduces the established tool's output
-        at $\sim$$99.99\%$ position concordance without a materialized graph or a
-        general snarl index.
-  \item \textbf{An evaluation that measures the storage argument, not only the
-        speedup} (Section~\ref{sec:eval}): end-to-end cost including I/O and from
-        cold cache, a direct comparison against the obvious alternative of
-        expanding to fast local storage first, sensitivity of query time to
-        compression ratio, and thread scaling. Against \cmd{vg deconstruct},
-        Panacus, and \cmd{odgi pav}, \sys is $15$--$613\times$ faster with
-        $3$--$25\times$ less memory, and it answers questions on $358$--$369$\,GB
-        graphs that the baselines cannot load.
-  \item \textbf{A negative result we report rather than omit.} One of the six
-        analyses, presence/absence variation, builds an uncompressed node-to-group
-        join index. That accumulator, not the traversal store, exceeds machine
-        memory at whole-genome scale, which locates the real limit of the design:
-        computing over compression bounds the \emph{data} you hold, and says
-        nothing about the state your query chooses to build
-        (Section~\ref{sec:discussion}).
+        (Section~\ref{sec:engine}): a decode primitive linear in emitted elements
+        and free of side tables, a memory model bounding residency to the columns
+        a query touches plus its accumulator, a bounded rule-leaf cache as the one
+        explicit space--time dial, and a parallel schedule whose synchronization
+        never touches the decode path.
+  \item \textbf{Variant projection without a graph}
+        (Section~\ref{sec:deconstruct}). Reference-relative variant calling is the
+        most consequential pangenome derivation and the one least suited to
+        streaming. We split it into an $O(V{+}E)$ topology-only site-discovery
+        pass and a compressed-traversal allele fold, handle inversions in both,
+        and reproduce the established tool's output at ${\sim}99.99\%$ position
+        concordance with no materialized graph.
+  \item \textbf{An evaluation of the storage argument, not only the speedup}
+        (Section~\ref{sec:eval}): cold-cache end-to-end cost, a direct comparison
+        against expanding to fast local storage first, the sensitivity of query
+        time to compression ratio, and thread scaling. \sys is $15$--$613\times$
+        faster than \cmd{vg deconstruct}, Panacus, and \cmd{odgi pav} at
+        $3$--$25\times$ less memory, and answers questions on graphs they cannot
+        load at all.
+  \item \textbf{A negative result.} One of the six analyses builds an
+        uncompressed join index, and it is that accumulator, not the traversal
+        store, that exhausts memory at whole-genome scale. Computing over
+        compression bounds the \emph{data} a query holds and says nothing about
+        the state it chooses to build (Section~\ref{sec:discussion}).
 \end{itemize}

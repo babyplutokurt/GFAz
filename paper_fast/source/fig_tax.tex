@@ -1,0 +1,44 @@
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  scale=0.97, every node/.append style={transform shape},
+  box/.style={draw, rounded corners=1.5pt, minimum height=6.5mm, align=center,
+              inner xsep=3pt, font=\scriptsize},
+  cold/.style={box, fill=black!4},
+  hot/.style={box, fill=black!18, draw=black!55},
+  ours/.style={box, fill=black!7, draw=black!55},
+  ar/.style={-{Latex[length=1.6mm]}, black!65, line width=0.5pt},
+  lbl/.style={font=\scriptsize\itshape, black!60},
+  cost/.style={font=\scriptsize\bfseries}
+]
+%% ---- top pipeline: what every tool does today ------------------------------
+\node[cold] (gfa)  at (0,0)      {GFA text\\$369$\,GB};
+\node[cold] (dec)  at (2.05,0)   {decompress\\$+$ parse};
+\node[hot]  (mem)  at (4.15,0)   {in-memory graph\\$336$\,GB resident};
+\node[cold] (ans1) at (6.30,0)   {answer\\$\sim$3\,KB};
+\draw[ar] (gfa) -- (dec); \draw[ar] (dec) -- (mem); \draw[ar] (mem) -- (ans1);
+\node[lbl, anchor=west] at (-1.28,0.70) {today};
+\node[cost] at (6.30,-0.68) {251\,min};
+
+%% the copy that already solves storage, and that nothing in the run touches
+\node[cold, dashed, draw=black!40, text=black!45] (idle) at (2.05,-1.12)
+  {compressed copy, $4.5$\,GB\\\emph{never opened}};
+
+\draw[dashed, black!25] (-1.32,-1.78) -- (7.35,-1.78);
+
+%% ---- bottom pipeline: this paper -------------------------------------------
+\node[ours] (cont) at (0,-2.62)   {container\\$4.5$\,GB};
+\node[ours] (str)  at (2.05,-2.62){streaming\\fold};
+\node[ours] (acc)  at (4.15,-2.62){accumulator\\$13.7$\,GB resident};
+\node[ours] (ans2) at (6.30,-2.62){answer\\$\sim$3\,KB};
+\draw[ar] (cont) -- (str); \draw[ar] (str) -- (acc); \draw[ar] (acc) -- (ans2);
+\node[lbl, anchor=west] at (-1.28,-1.92) {\sys};
+\node[cost] at (6.30,-3.30) {41\,s};
+\end{tikzpicture}
+\caption{The materialize-to-analyze tax, for one pangenome growth curve on the
+$369$\,GB HPRC graph. Both pipelines return the same few thousand integers. The
+existing one spends its time and nearly all of its memory rebuilding a graph
+larger than the compressed copy it never opens; \sys folds the compressed columns
+directly and never materializes the graph.}
+\label{fig:tax}
+\end{figure}
