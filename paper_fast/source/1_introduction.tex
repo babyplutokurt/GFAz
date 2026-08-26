@@ -21,7 +21,6 @@ RAM, while a $4.5$\,GB compressed copy of the same data sits idle on disk
 
 \input{fig_tax}
 
-\paragraph{The workload.}
 A pangenome graph represents the genomes of many individuals in one structure:
 nodes are DNA segments, edges are admissible adjacencies, and each haplotype is
 recorded as an ordered, orientation-signed walk through the
@@ -60,7 +59,6 @@ three cannot load the input at all on a $503$\,GiB machine, and the third needs
 four hours and $336$\,GB of resident memory to answer a question whose entire
 output is a few thousand integers. The $4.5$\,GB container is never in the loop.
 
-\paragraph{The observation.}
 Two properties of this workload make the materialization avoidable. First, the
 dominant component of the file, the traversals, is already stored in a form that
 can be walked: a grammar-compressed integer stream in which rule expansion is a
@@ -86,7 +84,6 @@ indexes~\cite{siren2022gbz} shrink the materialized object but still materialize
 it, and they answer topology queries rather than the path-centric folds that
 dominate this workload.
 
-\paragraph{This paper.}
 We build \sys, an execution engine that evaluates pangenome analyses directly on a
 grammar-compressed container. A query decompresses the entropy-coded blocks it
 needs, streams the still-grammar-compressed traversal columns through a templated
@@ -109,7 +106,7 @@ in Section~\ref{sec:discussion}. What we claim is that a large, ubiquitous, and
 growing class of pangenome analytics falls on the streaming side of that line, and
 that for this class the compressed container is the right thing to compute on.
 
-\paragraph{Relationship to prior work on the container.}
+\paragraph{Relationship to prior work.}
 The container format and its compressor are prior work, published
 separately~\cite{gfaz2026}, and are \emph{not} a contribution of this paper. We
 recap only the properties the engine depends on (Section~\ref{sec:container}) and
