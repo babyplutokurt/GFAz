@@ -1,108 +1,84 @@
 \section{Introduction}
 \label{sec:intro}
 
-Every compressed dataset carries an implicit contract: space is saved now and
-paid back later, at the moment somebody wants to use the data. The payment is
-usually invisible, because expanding a few gigabytes costs a few seconds and the
-expanded form fits in memory. The contract breaks when the expanded form no
-longer does. Decompression then stops being a preamble to the computation and
-becomes the dominant term: the system streams hundreds of gigabytes off storage,
-rebuilds an in-memory representation larger than the input, and only then begins
-the work the user actually asked for. The compressed archive, meanwhile, goes
-unread for the entire run. It was treated as a shipping container, opened once
-and discarded, rather than as a representation anything could execute on.
-
-This paper takes one workload where that break has already happened and asks what
-changes if the compressed container is treated as the substrate the queries run
-on. The workload is pangenome analytics, where a routine question whose entire
-answer is a few thousand integers currently costs four hours and $336$\,GB of
-RAM, while a $4.5$\,GB compressed copy of the same data sits idle on disk
+Computing a growth curve over the current human pangenome takes four hours and
+$336$\,GB of RAM. The entire output is a few thousand integers. Throughout that
+run, a $4.5$\,GB compressed copy of the same data sits on disk, unread, while the
+tool rebuilds in memory the $369$\,GB text file it was compressed from
 (Figure~\ref{fig:tax}).
+
+This is the standard contract of compressed storage: space is saved now and paid
+back when somebody uses the data. The payment is invisible while the expanded form
+still fits in memory, which is why it is normally nobody's concern. It stops being
+invisible when the expanded form no longer fits. Decompression is then not a
+preamble to the computation but the dominant term, and the compressed archive is
+treated as a shipping container, opened once and discarded, rather than as a
+representation anything could execute on.
 
 \input{fig_tax}
 
-A pangenome graph represents the genomes of many individuals in one structure:
-nodes are DNA segments, edges are admissible adjacencies, and each haplotype is
-recorded as an ordered, orientation-signed walk through the
-nodes~\cite{eizenga2020pangenome,liao2023draft}. Pangenomes are replacing the
-single linear reference genome across human genomics because they remove reference
+A pangenome graph stores the genomes of many individuals in one structure: nodes
+are DNA segments, edges are admissible adjacencies, and each haplotype is an
+orientation-signed walk through the
+nodes~\cite{eizenga2020pangenome,liao2023draft}. Pangenomes are displacing the
+single linear reference across human genomics because they remove reference
 bias~\cite{lin2024measuring}, and they are exchanged as Graphical Fragment
-Assembly (GFA) text~\cite{gfaspec}, the format that graph builders such as
-Minigraph--Cactus~\cite{hickey2024pangenome} and PGGB~\cite{garrison2024building}
-emit and that downstream tools consume.
+Assembly (GFA) text~\cite{gfaspec}. The format scales badly in a specific way.
+Topology grows sublinearly as haplotypes are added, since shared sequence
+collapses onto shared nodes, but every haplotype's walk is written out
+explicitly, so traversal records grow nearly linearly and come to exceed $90\%$ of
+the file~\cite{heringer2025human}. Successive releases of the Human Pangenome
+Reference Consortium graph show the trajectory: $48$\,GB, then $358$\,GB, then
+$369$\,GB, with cohorts still an order of magnitude below where population studies
+are heading~\cite{wang2022human}.
 
-The format scales badly, and it scales badly in a specific, structural way. Graph
-topology grows sublinearly as haplotypes are added, because shared sequence
-collapses onto shared nodes. Traversals do not: each haplotype's walk is written
-out explicitly, so the traversal records grow nearly linearly with cohort size and
-come to dominate everything else, exceeding $90\%$ of the file and, on some
-chromosome graphs, $98\%$~\cite{heringer2025human}. Successive releases of the
-Human Pangenome Reference Consortium graph illustrate the trajectory: $48$\,GB,
-then $358$\,GB, then $369$\,GB of GFA text, with cohort sizes still an order of
-magnitude below where population studies are heading~\cite{wang2022human}.
+Those traversal records are also the most compressible part of the file, because
+human haplotypes are nearly identical, and domain-specific compressors reduce that
+$369$\,GB graph to roughly
+$4.5$\,GB~\cite{siren2022gbz,heringer2025human,gfaz2026}. Storage is solved. Using
+the data is not: every analysis begins by rebuilding something at least as large as
+the GFA. \cmd{vg deconstruct} loads the graph and a snarl decomposition to emit
+variants~\cite{garrison2018variation,hickey2020genotyping}, \cmd{odgi} builds a
+succinct whole-graph index before any operation~\cite{guarracino2022odgi}, and
+Panacus parses walk records into item tables~\cite{parmigiani2024panacus}. On the
+two largest HPRC graphs, two of those three cannot load the input at all on a
+$503$\,GiB machine.
 
-Traversal records are also the most compressible part of the file, precisely
-because human haplotypes are nearly identical: the same node-ID substrings recur
-across samples at every scale. Domain-specific compressors exploit
-this~\cite{siren2022gbz,heringer2025human,gfaz2026}, and the best of them reduce a
-$369$\,GB graph to roughly $4.5$\,GB. Storage, in other words, is a solved problem
-for this workload.
+The obvious escapes do not work, and Section~\ref{subsec:bg-alternatives} measures
+why. Expanding once to fast local storage moves the cost rather than removing it,
+because resident footprint, not read bandwidth, is what fails first. Buying memory
+does not scale with a cohort still an order of magnitude from its target size.
+Succinct whole-graph indexes~\cite{siren2022gbz} shrink the materialized object but
+still materialize it, and they serve topology queries rather than the traversal
+scans that dominate this workload.
 
-Using the data is not. Every analysis a biologist runs on a pangenome today begins
-by rebuilding something at least as large as the GFA. \cmd{vg deconstruct} loads
-the graph and a snarl decomposition to emit
-variants~\cite{garrison2018variation,hickey2020genotyping}; \cmd{odgi} builds a
-succinct whole-graph index before any of its operations~\cite{guarracino2022odgi};
-Panacus parses path and walk records into item tables before computing a growth
-curve~\cite{parmigiani2024panacus}. On the two largest HPRC graphs, two of these
-three cannot load the input at all on a $503$\,GiB machine, and the third needs
-four hours and $336$\,GB of resident memory to answer a question whose entire
-output is a few thousand integers. The $4.5$\,GB container is never in the loop.
+The materialization is avoidable, for two reasons. First, the dominant component
+of the file is already stored in a form that can be walked: a grammar-compressed
+integer stream whose rule expansion is a local, bounded-depth array lookup, needing
+no side table and no global state. Second, the analyses that consume pangenomes are
+overwhelmingly \emph{path-centric folds}. They scan traversals in order and reduce
+node visits into a small accumulator, a coverage histogram or an allele table, and
+they neither mutate the graph nor need random node-to-step access. A fold does not
+require its stream materialized; it requires the elements delivered in order, which
+is exactly what such a column supplies.
 
-Two properties of this workload make the materialization avoidable. First, the
-dominant component of the file, the traversals, is already stored in a form that
-can be walked: a grammar-compressed integer stream in which rule expansion is a
-local, bounded-depth array lookup. Second, the analyses that consume pangenomes
-are overwhelmingly \emph{path-centric folds}. They do not mutate the graph and
-they do not need random node-to-step access. They scan traversals in order and
-reduce node visits into an accumulator that is small: a coverage histogram, a
-window-by-sample matrix, an allele table anchored to a reference path.
+\sys is an execution engine built on that observation. A query names the columns it
+needs; \sys decompresses only the entropy-coded blocks backing those columns,
+streams the still-grammar-compressed traversals through a visitor templated on the
+query's fold so that decoding and reduction are one inlined loop, and merges
+per-thread accumulators at the end. No list of path steps is materialized and no
+whole-graph object is built, so resident memory is the compressed columns the query
+touches plus the accumulator it chooses to keep, and nothing else.
 
-A fold over a stream does not need the stream materialized. It needs the elements
-delivered in order, and a decoder that can produce them without global state. That
-is exactly what a grammar-compressed traversal column can supply, which means the
-compressed container is not merely storable but \emph{computable}, and the
-expansion step everyone pays for is not required by the computation. It is
-required only by the interface the existing tools present.
+This reverses the usual storage trade-off. Conventionally, a higher compression
+ratio means a longer wait before computation starts, so ratio trades against access
+latency. Here the compressed columns are what the inner loop walks, so a higher
+ratio means fewer bytes touched per unit of biological work: on the $369$\,GB HPRC
+graph, an $83\times$ reduction in bytes is what turns four hours into $41$ seconds.
 
-The obvious ways to avoid paying it do not work, and Section~\ref{subsec:bg-alternatives}
-measures why. Expanding once to fast local storage moves the cost rather than
-removing it, because the tools' resident footprint, not their read bandwidth, is
-what fails first. Buying memory does not scale with a cohort that is still an
-order of magnitude from its target size. Succinct whole-graph
-indexes~\cite{siren2022gbz} shrink the materialized object but still materialize
-it, and they answer topology queries rather than the path-centric folds that
-dominate this workload.
-
-We build \sys, an execution engine that evaluates pangenome analyses directly on a
-grammar-compressed container. A query decompresses the entropy-coded blocks it
-needs, streams the still-grammar-compressed traversal columns through a templated
-visitor, and merges per-thread accumulators. Nothing expands into a materialized
-list of path steps, and no whole-graph object is ever constructed.
-
-The consequence is a reversal of the usual storage trade-off. In the conventional
-arrangement, a higher compression ratio means a longer wait before the computation
-starts, so ratio trades against access latency. Here the compressed columns are
-what the query reads and what its inner loop walks, so a higher ratio means fewer
-bytes touched per unit of biological work. Compression stops being a tax on access
-and becomes a multiplier on it: on the $369$\,GB HPRC graph, an $83\times$
-reduction in bytes is what makes an analysis that took four hours take
-$41$ seconds.
-
-We do not claim this for graph workloads in general, and we are explicit about the
-boundary. Operations requiring arbitrary node-to-step queries, graph editing, or
-topology rewriting are better served by materialized graph toolkits, and we say so
-in Section~\ref{sec:discussion}. What we claim is that a large, ubiquitous, and
+We do not claim this for graph workloads in general. Operations needing arbitrary
+node-to-step queries, graph editing, or topology rewriting belong to materialized
+toolkits, and Section~\ref{sec:discussion} says so. We claim that a large and
 growing class of pangenome analytics falls on the streaming side of that line, and
 that for this class the compressed container is the right thing to compute on.
 

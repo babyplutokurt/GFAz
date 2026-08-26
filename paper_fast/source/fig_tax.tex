@@ -17,7 +17,9 @@
 \node[hot]  (mem)  at (4.15,0)   {in-memory graph\\$336$\,GB resident};
 \node[cold] (ans1) at (6.30,0)   {answer\\$\sim$3\,KB};
 \draw[ar] (gfa) -- (dec); \draw[ar] (dec) -- (mem); \draw[ar] (mem) -- (ans1);
-\node[lbl, anchor=west] at (-1.28,0.70) {today};
+\node[font=\scriptsize\itshape, black!55, anchor=west] at (-1.32,1.15)
+  {query: \cmd{growth} on hprc-v2.1 --- the pangenome growth curve};
+\node[lbl, anchor=west] at (-1.28,0.70) {Panacus (today)};
 \node[cost] at (6.30,-0.68) {251\,min};
 
 %% the copy that already solves storage, and that nothing in the run touches
@@ -32,11 +34,12 @@
 \node[ours] (acc)  at (4.15,-2.62){accumulator\\$13.7$\,GB resident};
 \node[ours] (ans2) at (6.30,-2.62){answer\\$\sim$3\,KB};
 \draw[ar] (cont) -- (str); \draw[ar] (str) -- (acc); \draw[ar] (acc) -- (ans2);
-\node[lbl, anchor=west] at (-1.28,-1.92) {\sys};
+\node[lbl, anchor=west] at (-1.28,-1.92) {\sys (this paper)};
 \node[cost] at (6.30,-3.30) {41\,s};
 \end{tikzpicture}
-\caption{The materialize-to-analyze tax, for one pangenome growth curve on the
-$369$\,GB HPRC graph. Both pipelines return the same few thousand integers. The
+\caption{The materialize-to-analyze tax, for a single query: the pangenome
+growth curve on the $369$\,GB hprc-v2.1 graph, whose output is a few thousand
+integers. Both pipelines compute the identical curve, on the same 16 threads. The
 existing one spends its time and nearly all of its memory rebuilding a graph
 larger than the compressed copy it never opens; \sys folds the compressed columns
 directly and never materializes the graph.}
