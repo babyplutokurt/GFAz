@@ -158,3 +158,19 @@ cd source && latexmk -pdf main.tex
 `algorithm.sty` / `algorithmic.sty` are not in this machine's BasicTeX install;
 they were added to the user tree with
 `tlmgr init-usertree && tlmgr --usermode install algorithms algorithmicx`.
+
+### The abstract's throughput figures
+
+`0_abstract.tex` carries `\needsexp{X}` / `\needsexp{Y}` for compression and
+decompression rates. Before filling them in:
+
+1. They must be the matched-thread, single-methodology numbers from §4, not the
+   README's 32-thread CLI wall times against the ICS paper's 16-thread warm-cache
+   averages.
+2. They must hold on the **whole-genome** graphs, not the single-chromosome peak.
+   Decompression is safe everywhere (2292-5426 MiB/s on HPRC). Compression is not:
+   v1.1 is 291 MiB/s and v2.0 is 555 MiB/s, both sub-GiB/s. If that survives
+   re-measurement, claim the GiB/s rate for decompression only and move the
+   compression figure to §4.
+3. A reviewer will check the abstract against `tab:datasets`. A peak quoted where
+   the text implies whole-genome is the kind of thing that gets caught.
