@@ -9,7 +9,7 @@ array instead of a hash map. `GFAZ_SERIAL_PARSE=1` forces the line-at-a-time
 parsers; the .gfaz must be byte-identical with and without it.
 
 Covers the shapes the chunked parsers accept (permuted numeric names, dense
-names with irregular fields, named segments) and the ones they must hand back
+names with irregular fields, named segments, numbers mixed with names) and the ones they must hand back
 to the serial parsers (repeated names, non-canonical numbers, links or steps
 that name unknown segments, sparse numbering, a tag repeated in one row).
 """
@@ -121,12 +121,34 @@ def main():
   sparse = rotated[:]
   sparse[100] = "4000000000"
 
+  # Named segments resolve through a name lookup; mixes and awkward names
+  # must behave as in the serial parser.
+  mixed = [name if i % 3 else f"s{name}" for i, name in enumerate(rotated)]
+  named_repeated = named[:]
+  named_repeated[2500] = named_repeated[10]
+  named_leading_zero = named[:]
+  named_leading_zero[3000] = "0042"
+  dense_then_named = dense[:2000] + [f"n{i}" for i in range(2000, SEGMENTS)]
+
   cases = {
       "dense_irregular_fields": (dense, {}),
       "rotated": (rotated, {}),
       "shuffled": (shuffled, {}),
       "offset": (offset, {}),
       "named": (named, {}),
+      "mixed_numbers_and_names": (mixed, {}),
+      "dense_then_named": (dense_then_named, {}),
+      "named_repeated": (named_repeated, {}),
+      "named_leading_zero_number": (named_leading_zero, {
+          "extra_lines": ["L\t42\t+\ts7\t+\t0M", "L\t0042\t+\ts8\t+\t0M"]
+      }),
+      "named_unknown_references": (named, {
+          "extra_lines": [
+              "L\ts17\t+\tnope\t+\t0M",
+              "P\todd\ts17+,nope+,s20-\t*",
+              "W\todd\t1\tchr1\t0\t3\t>s17<nope>s20",
+          ]
+      }),
       "no_link_tags": (rotated, {"link_tags": False}),
       "repeated_name": (repeated, {}),
       "leading_zero_name": (leading_zero, {}),

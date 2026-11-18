@@ -55,12 +55,14 @@ memory-mapped and parsed in parallel; which route runs depends on the file:
   be parsed in independent blocks. Segment IDs are still assigned in file
   order. When every name is a canonical decimal number (the HPRC and HGSVC3
   Minigraph-Cactus graphs, whose numbers do not start at 1 in file order),
-  names resolve through a `number -> id` array instead of a hash map, and
+  names resolve through a `number -> id` array instead of a hash map. Other
+  names (`s1`, `s2`, ... in Minigraph graphs) are copied into one arena and
+  resolved through a hash map built after the parallel pass. Either way,
   segment sequences are written straight into the flattened store. Per-block
   optional-field columns are concatenated in row order, so the result is the
   one the serial parser builds.
 - General parser, serial S/L lines: inputs the block parsers hand back
-  (repeated segment names, sparse or non-canonical numbers, links that name
+  (repeated or empty segment names, sparse or non-canonical numbers, links that name
   unknown segments, a tag repeated within a row, a tag whose type changes).
 
 All routes produce the same `GfaGraph`, so the `.gfaz` does not depend on the

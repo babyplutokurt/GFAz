@@ -911,6 +911,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   link_field_meta_.clear();
   node_name_lookup_.clear();
   numeric_name_table_.clear();
+  segment_name_arena_.clear();
   num_segments_hint_ = 0;
   num_links_hint_ = 0;
   all_segment_names_numeric_ = true;
@@ -1990,6 +1991,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
             (!parsed_segments_in_parallel
                  ? " (serial)"
                  : !numeric_name_table_.empty() ? " (parallel, number table)"
+                 : !segment_name_arena_.empty() ? " (parallel, name lookup)"
                                                 : " (parallel)"));
 
   // Phase 2: With numeric node IDs, links are independent indexed rows and can
@@ -2189,6 +2191,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   c_offsets.shrink_to_fit();
   release_phase_pages(4);
   numeric_name_table_ = {};
+  segment_name_arena_ = {};
   log_phase("parse J/C-lines");
 
   munmap(const_cast<char *>(mmap_data), file_size);
@@ -2242,6 +2245,9 @@ bool GfaParser::parse_segments_in_chunks(
   auto &lengths = graph.segments.node_sequence_lengths;
   auto &concat = graph.segments.node_sequences_concat;
   std::vector<size_t> sequence_bases(chunk_count + 1, 0);
+  // Set when some name is not a canonical number: names are then resolved
+  // through node_name_lookup_, as in the serial parser.
+  std::atomic<bool> named{false};
   if (direct_segment_columns) {
     lengths.resize(count);
   } else {
@@ -2267,7 +2273,17 @@ bool GfaParser::parse_segments_in_chunks(
         size_t pos = 1;
         const std::string_view name = next_field(line, pos);
         const std::string_view sequence = next_field(line, pos);
-        if (!parse_canonical_number(name, name_numbers[i]) ||
+        bool name_ok = true;
+        if (!parse_canonical_number(name, name_numbers[i])) {
+          name_numbers[i] = 0;
+          // A number written with leading zeros (or too large) is matched by
+          // value in the serial parser while names are numeric: hand back.
+          // The serial parser also never resolves an empty name.
+          name_ok = !name.empty() && !is_numeric(name);
+          if (name_ok && !named.load(std::memory_order_relaxed))
+            named.store(true, std::memory_order_relaxed);
+        }
+        if (!name_ok ||
             sequence.size() > std::numeric_limits<uint32_t>::max() ||
             !append_chunk_optional_fields(line, pos, i - base,
                                           optional[chunk])) {
@@ -2291,15 +2307,61 @@ bool GfaParser::parse_segments_in_chunks(
 
   std::vector<uint32_t> table;
   bool ok = !failed.load(std::memory_order_relaxed);
-  bool dense = ok;
-  if (ok) {
+  const bool use_name_lookup = ok && named.load(std::memory_order_relaxed);
+  if (use_name_lookup) {
+    // Copy the names into one arena and index them; IDs are file order.
+    std::vector<uint32_t>().swap(name_numbers);
+    std::vector<size_t> name_bases(chunk_count + 1, 0);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1)
+#endif
+    for (size_t chunk = 0; chunk < chunk_count; ++chunk) {
+      size_t bytes = 0;
+      for (size_t i = row_bases[chunk]; i < row_bases[chunk + 1]; ++i) {
+        const std::string_view line(data + offsets[i].offset,
+                                    offsets[i].length);
+        size_t pos = 1;
+        bytes += next_field(line, pos).size();
+      }
+      name_bases[chunk + 1] = bytes;
+    }
+    for (size_t chunk = 0; chunk < chunk_count; ++chunk)
+      name_bases[chunk + 1] += name_bases[chunk];
+    segment_name_arena_.resize(name_bases.back());
+    std::vector<std::string_view> name_views(count);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1)
+#endif
+    for (size_t chunk = 0; chunk < chunk_count; ++chunk) {
+      char *out = segment_name_arena_.data() + name_bases[chunk];
+      for (size_t i = row_bases[chunk]; i < row_bases[chunk + 1]; ++i) {
+        const std::string_view line(data + offsets[i].offset,
+                                    offsets[i].length);
+        size_t pos = 1;
+        const std::string_view name = next_field(line, pos);
+        std::memcpy(out, name.data(), name.size());
+        name_views[i] = std::string_view(out, name.size());
+        out += name.size();
+      }
+    }
+    node_name_lookup_.clear();
+    node_name_lookup_.reserve(count);
+    for (size_t i = 0; i < count && ok; ++i) {
+      // A repeated name merges rows in the serial parser.
+      ok = node_name_lookup_
+               .emplace(name_views[i], static_cast<uint32_t>(i + 1))
+               .second;
+    }
+  }
+  bool dense = ok && !use_name_lookup;
+  if (dense) {
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) reduction(&& : dense)
 #endif
     for (size_t i = 0; i < count; ++i)
       dense = dense && name_numbers[i] == i + 1;
   }
-  if (ok && !dense) {
+  if (ok && !dense && !use_name_lookup) {
     // Names are numbers but not 1..N in file order. Segment IDs are still
     // assigned in file order; the table maps each number to its ID. Bound the
     // table so sparse numbering does not cost more than the hash lookup.
@@ -2332,6 +2394,8 @@ bool GfaParser::parse_segments_in_chunks(
     lengths = {};
     graph.segments.optional_fields.clear();
     segment_field_meta_.clear();
+    node_name_lookup_.clear();
+    segment_name_arena_ = {};
     return false;
   }
 
