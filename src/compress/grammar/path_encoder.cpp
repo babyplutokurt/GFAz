@@ -59,19 +59,16 @@ void encode_path_2mer_dispatch(std::vector<gfaz::NodeId> &path,
   }
 }
 
-} // namespace
-
-PathEncoder::PathEncoder() {}
-
-void PathEncoder::encode_paths_2mer(
-    std::vector<std::vector<gfaz::NodeId>> &paths,
-    const CompressionRules2Mer &rules, std::vector<uint8_t> &rules_used) {
-  const size_t num_rules =
-      rules.next_available_id - rules.rules_start_id;
+// Shared driver: runs `body(index, mark_rule)` over [0, count) in parallel and
+// folds the per-thread rule-usage bitmaps into `rules_used`.
+template <typename Body>
+void encode_range_2mer(size_t count, const CompressionRules2Mer &rules,
+                       std::vector<uint8_t> &rules_used, Body body) {
+  const size_t num_rules = rules.next_available_id - rules.rules_start_id;
   if (rules_used.size() != num_rules)
     rules_used.assign(num_rules, 0);
 
-  if (paths.empty())
+  if (count == 0)
     return;
 
 #ifdef _OPENMP
@@ -83,14 +80,13 @@ void PathEncoder::encode_paths_2mer(
 #pragma omp parallel
   {
     auto &local_usage = thread_usage[omp_get_thread_num()];
+    const auto mark_rule = [&local_usage](size_t rule_offset) {
+      local_usage[rule_offset / 64] |= uint64_t{1} << (rule_offset % 64);
+    };
 
 #pragma omp for schedule(dynamic)
-    for (size_t p = 0; p < paths.size(); ++p) {
-      encode_path_2mer_dispatch(paths[p], rules, [&](size_t rule_offset) {
-        local_usage[rule_offset / 64] |=
-            uint64_t{1} << (rule_offset % 64);
-      });
-    }
+    for (size_t p = 0; p < count; ++p)
+      body(p, mark_rule);
   }
 
 #pragma omp parallel for schedule(static)
@@ -108,10 +104,48 @@ void PathEncoder::encode_paths_2mer(
     }
   }
 #else
-  for (auto &path : paths) {
-    encode_path_2mer_dispatch(path, rules, [&](size_t rule_offset) {
-      rules_used[rule_offset] = 1;
-    });
-  }
+  const auto mark_rule = [&rules_used](size_t rule_offset) {
+    rules_used[rule_offset] = 1;
+  };
+  for (size_t p = 0; p < count; ++p)
+    body(p, mark_rule);
 #endif
+}
+
+} // namespace
+
+PathEncoder::PathEncoder() {}
+
+// Encoding shrinks a traversal in place. Give the freed tail back right away
+// so resident memory follows the encoded size from round to round instead of
+// staying at the original traversal size until the last round.
+void PathEncoder::release_unused_capacity(std::vector<gfaz::NodeId> &path) {
+  constexpr size_t kMinimumReclaimElements =
+      (64ull * 1024ull) / sizeof(gfaz::NodeId);
+  const size_t unused = path.capacity() - path.size();
+  if (unused < kMinimumReclaimElements || unused <= path.size() / 4)
+    return;
+  std::vector<gfaz::NodeId>(path).swap(path);
+}
+
+void PathEncoder::encode_paths_2mer(
+    std::vector<std::vector<gfaz::NodeId>> &paths,
+    const CompressionRules2Mer &rules, std::vector<uint8_t> &rules_used) {
+  encode_range_2mer(paths.size(), rules, rules_used,
+                    [&](size_t p, const auto &mark_rule) {
+                      encode_path_2mer_dispatch(paths[p], rules, mark_rule);
+                      release_unused_capacity(paths[p]);
+                    });
+}
+
+void PathEncoder::encode_indexed_2mer(size_t count,
+                                      const CompressionRules2Mer &rules,
+                                      std::vector<uint8_t> &rules_used,
+                                      const VisitIndex &visit) {
+  encode_range_2mer(count, rules, rules_used,
+                    [&](size_t p, const auto &mark_rule) {
+                      visit(p, [&](std::vector<gfaz::NodeId> &path) {
+                        encode_path_2mer_dispatch(path, rules, mark_rule);
+                      });
+                    });
 }

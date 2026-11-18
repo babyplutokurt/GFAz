@@ -1,6 +1,7 @@
 # ── Build artifacts ──
 build/
 build_cpu/
+build_base/
 bin/
 *.o
 *.so

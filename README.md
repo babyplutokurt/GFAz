@@ -5,7 +5,7 @@ decompressing Graphical Fragment Assembly (GFA) files.
 
 In our current benchmarks, GFAz reaches up to 20x higher compression ratio than
 Gzip and 13x higher compression ratio than Zstd. At 16 CPU threads it reaches
-up to 1.4 GB/s compression and 5.4 GB/s decompression; the experimental GPU
+up to 2.1 GB/s compression and 5.4 GB/s decompression; the experimental GPU
 backend reaches up to 4.8 GB/s compression and 9.4 GB/s decompression.
 
 It has two execution backends:
@@ -26,7 +26,12 @@ writes to `/dev/null`.
 
 - Compression ratio: up to 84x on whole-genome HPRC graphs, up to 20x higher
   than Gzip and 13x higher than Zstd.
-- CPU throughput: up to 1.4 GB/s compression and 5.4 GB/s decompression.
+- CPU throughput: up to 2.1 GB/s compression and 5.4 GB/s decompression.
+  The 396 GB HPRC v2.1 graph compresses in about 3 minutes.
+- CPU memory: `--memory-budget` cuts compression peak memory by 2.6-4.4x on
+  whole-genome graphs (HPRC v2.1: 161 GB to 37 GB) for the same output; see
+  [docs/WORKFLOW.md](docs/WORKFLOW.md#measured-cpu-throughput-and-memory) for
+  per-dataset time and memory.
 - GPU backend (experimental): up to 4.8 GB/s compression and 9.4 GB/s
   decompression.
 
@@ -115,6 +120,14 @@ build/bin/gfaz compress example.gfa
 
 # GPU compression; still writes the same .gfaz container
 build/bin/gfaz compress --gpu example.gfa
+```
+
+Lower-memory CPU compression (same output, byte for byte):
+
+```bash
+# Keep at most 2 GiB of path/walk data in RAM; stream the rest through a temp
+# file on fast local storage
+build/bin/gfaz compress --memory-budget 2G --tmp-dir /path/on/nvme example.gfa
 ```
 
 Decompression:

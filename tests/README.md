@@ -31,6 +31,18 @@
 - `test_thread_determinism.py` asserts pav/growth/deconstruct produce
   byte-identical output at 1/4/8 threads (the OpenMP reductions must be
   thread-count invariant).
+- `test_low_memory_compress.py` asserts `gfaz compress --memory-budget` writes a
+  byte-identical `.gfaz` for budgets that spill everything, part, or nothing,
+  across thread counts and delta settings, and that an unusable `--tmp-dir` or
+  budget fails cleanly.
+- `test_parallel_parse_equivalence.py` asserts the parallel S/L parsers used
+  for graphs that miss the direct parser (unordered numeric segment names,
+  irregular optional fields) give a byte-identical `.gfaz` to the serial line
+  parsers (`GFAZ_SERIAL_PARSE=1`), including the inputs they must hand back.
+- `test_rule_scan_equivalence.py` asserts the two ways the rule generator finds
+  repeated 2-mers (per-thread sets, or sorting every 2-mer; pinned with
+  `GFAZ_RULE_SCAN=sets|all`) and the default per-round choice give a
+  byte-identical `.gfaz`.
 - `test_degenerate_inputs.py` covers degenerate-but-valid graphs (segments-only,
   walks-only, header-only) round-tripping cleanly, and invalid invocations
   (missing/malformed BED, unresolved pav/deconstruct reference) failing with a
@@ -53,6 +65,12 @@
   `vg` live (position-level overlap >= 0.99, record-count delta <= 0.5%). Skips
   unless `GFAZ_LARGE_CONCORDANCE=1` and the chrY inputs + vg are present.
 - Shared normalizers live in `tests/concordance/concordance_utils.py`.
+
+`tests/cpp/`
+- C++ tests built with the project and run by `ctest --test-dir build`.
+- `test_gfa_decoder.cpp` covers the front-door decoder API.
+- `test_key_sort.cpp` checks the rule generator's parallel key sort against
+  `std::sort` on uniform, skewed, repeated and extreme-valued inputs.
 
 ## Running
 

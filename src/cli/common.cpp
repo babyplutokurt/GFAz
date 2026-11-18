@@ -103,6 +103,11 @@ OPTIONS (compress):
                             Rolling GPU input chunk size in MiB
     --gpu-legacy            Use the old whole-graph GPU compression path
                              Note: GPU mode ignores --delta/--threshold
+    --memory-budget <SIZE>  Lower peak memory (CPU): keep at most SIZE of
+                             path/walk data in RAM (e.g. 512M, 4G) and stream
+                             the rest through a temp file. Same output.
+    --tmp-dir <DIR>         Temp file location for --memory-budget; use fast
+                             local storage (default: $TMPDIR, else output dir)
     -s, --stats             Show size/statistics summary
     --debug                 Show internal debug/timing output
     -h, --help              Show this help message
@@ -476,6 +481,11 @@ OPTIONS:
                             Rolling GPU input chunk size in MiB
     --gpu-legacy            Use the old whole-graph GPU compression path
                              Note: GPU mode ignores --delta/--threshold
+    --memory-budget <SIZE>  Lower peak memory (CPU): keep at most SIZE of
+                             path/walk data in RAM (e.g. 512M, 4G) and stream
+                             the rest through a temp file. Same output.
+    --tmp-dir <DIR>         Temp file location for --memory-budget; use fast
+                             local storage (default: $TMPDIR, else output dir)
     -s, --stats             Show size/statistics summary
     --debug                 Show internal debug/timing output
     -h, --help              Show this help message

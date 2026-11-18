@@ -45,6 +45,10 @@ void print_grammar_round(const GrammarRoundDebugInfo &info) {
             << info.generate_ms << " ms, encode=" << info.encode_ms
             << " ms, remap=" << info.remap_ms
             << " ms, rules=" << info.rules_used << "/" << info.num_rules
+            << ", elements=" << info.elements_before << " -> "
+            << info.elements_after
+            << format_reduction_percent(info.elements_before,
+                                        info.elements_after)
             << std::endl;
 }
 

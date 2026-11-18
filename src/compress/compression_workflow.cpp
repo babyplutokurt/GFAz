@@ -3,6 +3,7 @@
 #include "compress/grammar/packed_2mer.hpp"
 #include "compress/grammar/path_encoder.hpp"
 #include "compress/grammar/rule_generator.hpp"
+#include "compress/grammar/traversal_spill.hpp"
 #include "compress/io/gfa_parser.hpp"
 #include "core/utils/debug_log.hpp"
 #include "core/utils/runtime_utils.hpp"
@@ -15,6 +16,7 @@
 #include <cstdint>
 
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -39,7 +41,8 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
                                     uint32_t &next_id, int num_rounds,
                                     size_t freq_threshold, uint32_t layer_start,
                                     std::vector<Packed2mer> &rulebook,
-                                    int num_threads);
+                                    int num_threads,
+                                    gfaz::TraversalSpill *spill);
 
 namespace {
 
@@ -61,6 +64,10 @@ struct CompressionContext {
   double data_size_mb = 0;
 
   std::vector<Packed2mer> rulebook;
+
+  // Set when a traversal memory budget is in effect; released once every
+  // traversal is back in memory.
+  std::unique_ptr<gfaz::TraversalSpill> spill;
 };
 
 // Grammar encoding shrinks vectors in place, leaving their original traversal
@@ -220,13 +227,24 @@ void initialize_output_metadata(CompressionContext &ctx) {
   }
   ctx.out.delta_round = ctx.delta_round;
 
-  for (const auto &p : ctx.graph.paths_data.traversals)
-    ctx.out.original_path_lengths.push_back(static_cast<uint32_t>(p.size()));
-  for (const auto &w : ctx.graph.walks.walks)
-    ctx.out.original_walk_lengths.push_back(static_cast<uint32_t>(w.size()));
+  if (ctx.spill) {
+    // The graph's vectors only hold the traversals that fit the budget.
+    const auto &lengths = ctx.spill->original_lengths();
+    const auto split = lengths.begin() + ctx.spill->num_paths();
+    ctx.out.original_path_lengths.assign(lengths.begin(), split);
+    ctx.out.original_walk_lengths.assign(split, lengths.end());
+    ctx.total_elements = 0;
+    for (const uint32_t length : lengths)
+      ctx.total_elements += length;
+  } else {
+    for (const auto &p : ctx.graph.paths_data.traversals)
+      ctx.out.original_path_lengths.push_back(static_cast<uint32_t>(p.size()));
+    for (const auto &w : ctx.graph.walks.walks)
+      ctx.out.original_walk_lengths.push_back(static_cast<uint32_t>(w.size()));
 
-  ctx.total_elements = total_node_count(ctx.graph.paths_data.traversals) +
-                       total_node_count(ctx.graph.walks.walks);
+    ctx.total_elements = total_node_count(ctx.graph.paths_data.traversals) +
+                         total_node_count(ctx.graph.walks.walks);
+  }
   ctx.data_size_mb = ctx.total_elements * sizeof(int32_t) / (1024.0 * 1024.0);
 }
 
@@ -265,12 +283,15 @@ double apply_delta_transform(CompressionContext &ctx) {
   // above that raw symbol space. For delta_round > 0 we keep the current fast
   // path and let the fused delta transform compute the relevant bound.
   ctx.max_abs = 0;
-  if (ctx.delta_round == 0) {
+  if (ctx.spill) {
+    // The spill delta-transformed every traversal as the parser delivered it.
+    ctx.max_abs = ctx.spill->max_abs();
+  } else if (ctx.delta_round == 0) {
     const uint32_t path_max = max_abs_symbol(ctx.graph.paths_data.traversals);
     const uint32_t walk_max = max_abs_symbol(ctx.graph.walks.walks);
     ctx.max_abs = std::max(path_max, walk_max);
   }
-  for (int i = 0; i < ctx.delta_round; ++i) {
+  for (int i = 0; !ctx.spill && i < ctx.delta_round; ++i) {
     const uint32_t path_max =
         gfaz::Codec::delta_transform_and_max_abs(ctx.graph.paths_data.traversals);
     const uint32_t walk_max =
@@ -306,7 +327,22 @@ double run_grammar_stage(CompressionContext &ctx) {
   const auto start = std::chrono::high_resolution_clock::now();
   run_grammar_compression(ctx.graph.paths_data.traversals, ctx.graph.walks.walks, ctx.next_id,
                           ctx.num_rounds, ctx.freq_threshold, ctx.layer_start,
-                          ctx.rulebook, ctx.num_threads);
+                          ctx.rulebook, ctx.num_threads, ctx.spill.get());
+  if (ctx.spill) {
+    // Entropy coding needs every traversal in memory; by now they are a small
+    // fraction of their original size.
+    ctx.spill->materialize_all(ctx.graph.paths_data.traversals,
+                               ctx.graph.walks.walks);
+    ctx.spill->throw_if_failed();
+    if (gfaz_debug_enabled()) {
+      std::cerr << "[CPU Grammar Compress] traversal spill: peak temp file "
+                << ctx.spill->peak_file_bytes() / (1024.0 * 1024.0)
+                << " MB, total written "
+                << ctx.spill->total_written_bytes() / (1024.0 * 1024.0)
+                << " MB" << std::endl;
+    }
+    ctx.spill.reset();
+  }
   compact_encoded_traversals(ctx.graph.paths_data.traversals);
   compact_encoded_traversals(ctx.graph.walks.walks);
 #if defined(__GLIBC__)
@@ -648,10 +684,24 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
                                     uint32_t &next_id, int num_rounds,
                                     size_t freq_threshold, uint32_t layer_start,
                                     std::vector<Packed2mer> &rulebook,
-                                    int num_threads) {
+                                    int num_threads,
+                                    gfaz::TraversalSpill *spill) {
   // Compute total traversal size for throughput calculation
   const size_t total_elements =
-      total_node_count(paths) + total_node_count(walks);
+      total_node_count(paths) + total_node_count(walks) +
+      (spill ? spill->spilled_steps() : 0);
+
+  // While some traversals are spilled, the scan and encode passes fetch those
+  // from the temp file one at a time; the rest are used in place.
+  const size_t num_paths = paths.size();
+  const TraversalFetch fetch_traversal =
+      [&](size_t index,
+          std::vector<gfaz::NodeId> &scratch) -> const std::vector<gfaz::NodeId> & {
+    if (!spill->is_spilled(index))
+      return index < num_paths ? paths[index] : walks[index - num_paths];
+    spill->load(index, scratch);
+    return scratch;
+  };
   double data_size_mb = total_elements * sizeof(int32_t) / (1024.0 * 1024.0);
 
   // Timing accumulators
@@ -659,14 +709,22 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
   double time_encode_paths_ms = 0;
   double time_compact_sort_remap_ms = 0;
   int actual_rounds = 0;
+  size_t current_elements = total_elements;
 
   auto total_start = std::chrono::high_resolution_clock::now();
 
+  size_t scan_keys = 0;
   for (int round = 0; round < num_rounds; ++round) {
     auto t0 = std::chrono::high_resolution_clock::now();
+    const bool spilled_round = spill != nullptr && spill->spilled_count() > 0;
     RuleGenerator gen;
     CompressionRules2Mer rules = gen.generate_rules_2mer_combined(
-        paths, walks, next_id, freq_threshold, num_threads);
+        paths, walks, next_id, freq_threshold, num_threads,
+        spilled_round ? &fetch_traversal : nullptr, &scan_keys);
+    if (spill) {
+      spill->throw_if_failed();
+      spill->release_thread_buffers();
+    }
     auto t1 = std::chrono::high_resolution_clock::now();
     const double round_generate_ms = elapsed_ms(t0, t1);
     time_generate_rules_ms += round_generate_ms;
@@ -679,9 +737,43 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
     t0 = std::chrono::high_resolution_clock::now();
     PathEncoder encoder;
     std::vector<uint8_t> rules_used;
-    encoder.encode_paths_2mer(paths, rules, rules_used);
-    encoder.encode_paths_2mer(walks, rules, rules_used);
+    if (spilled_round) {
+      spill->begin_rewrite();
+      encoder.encode_indexed_2mer(
+          spill->size(), rules, rules_used,
+          [&](size_t index, const PathEncoder::EncodeOne &encode) {
+            auto &slot =
+                index < num_paths ? paths[index] : walks[index - num_paths];
+            if (!spill->is_spilled(index)) {
+              const size_t before = slot.size();
+              encode(slot);
+              spill->note_memory_shrink(before - slot.size());
+              PathEncoder::release_unused_capacity(slot);
+              return;
+            }
+            // Encode the spilled traversal, then keep it in memory if the
+            // budget now allows, else write it to the next generation.
+            auto &scratch = spill->scratch();
+            spill->load(index, scratch);
+            encode(scratch);
+            spill->store(index, scratch, slot);
+          });
+      spill->end_rewrite();
+      spill->throw_if_failed();
+    } else {
+      encoder.encode_paths_2mer(paths, rules, rules_used);
+      encoder.encode_paths_2mer(walks, rules, rules_used);
+    }
+#if defined(__GLIBC__)
+    // The encoder released each traversal's unused tail; hand those pages
+    // back to the OS before the next round's rule-generation scratch grows.
+    malloc_trim(0);
+#endif
     t1 = std::chrono::high_resolution_clock::now();
+    const size_t elements_before = current_elements;
+    if (gfaz_debug_enabled())
+      current_elements = total_node_count(paths) + total_node_count(walks) +
+                         (spill ? spill->spilled_steps() : 0);
     const double round_encode_ms = elapsed_ms(t0, t1);
     time_encode_paths_ms += round_encode_ms;
 
@@ -720,6 +812,8 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
                              round_remap_ms,
                              total_used,
                              num_rules,
+                             elements_before,
+                             current_elements,
                              {}});
       }
       break;
@@ -764,6 +858,10 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
     remap_rule_ids(paths, rules.rules_start_id, id_map);
     remap_rule_ids(walks, rules.rules_start_id, id_map);
 
+    if (spill != nullptr && spill->spilled_count() > 0) {
+      // Still-spilled traversals get the remap when they are next loaded.
+      spill->set_pending_remap(rules.rules_start_id, std::move(id_map));
+    }
     id_map.clear();
     id_map.shrink_to_fit();
 
@@ -784,6 +882,7 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
     if (gfaz_debug_enabled()) {
       print_grammar_round({round + 1, round_generate_ms, round_encode_ms,
                            round_remap_ms, total_used, num_rules,
+                           elements_before, current_elements,
                            read_process_memory_snapshot()});
     }
   }
@@ -805,6 +904,16 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
 gfaz::CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,
                             size_t freq_threshold, int delta_round,
                             int num_threads, bool show_stats) {
+  return compress_gfa_with_options(gfa_file_path, num_rounds, freq_threshold,
+                                   delta_round, num_threads, show_stats,
+                                   CompressOptions{});
+}
+
+gfaz::CompressedData compress_gfa_with_options(const std::string &gfa_file_path,
+                                         int num_rounds, size_t freq_threshold,
+                                         int delta_round, int num_threads,
+                                         bool show_stats,
+                                         const CompressOptions &options) {
   // CPU compression pipeline:
   // 1. Parse the input GFA into gfaz::GfaGraph.
   // 2. Initialize output metadata and establish the traversal ID space.
@@ -822,9 +931,40 @@ gfaz::CompressedData compress_gfa(const std::string &gfa_file_path, int num_roun
   ctx.num_threads = num_threads;
   ctx.show_stats = show_stats;
 
+  if (options.traversal_memory_budget_bytes > 0) {
+#if defined(__GLIBC__)
+    // Lower-memory mode streams traversals through per-thread buffers that
+    // are allocated and freed every pass. By default glibc raises its mmap
+    // threshold after the first large free and then parks such buffers in
+    // each worker thread's arena (up to ~64 MB per thread) instead of
+    // returning them, which shows up as resident memory in the later stages.
+    // A fixed threshold makes large blocks go back to the OS when freed. This
+    // is process-wide, so it is only done when a budget was asked for.
+    mallopt(M_MMAP_THRESHOLD, 4 * 1024 * 1024);
+#endif
+    // The spill applies the delta transform as traversals arrive, so it
+    // needs the validated round count now.
+    ctx.spill = std::make_unique<gfaz::TraversalSpill>(
+        options.traversal_memory_budget_bytes, options.tmp_dir,
+        std::max(0, delta_round));
+  }
+
   {
     GfaParser parser;
-    ctx.graph = parser.parse(gfa_file_path, num_threads, true);
+    ctx.graph = parser.parse(gfa_file_path, num_threads, true, ctx.spill.get());
+  }
+  if (ctx.spill) {
+    ctx.spill->throw_if_failed();
+    ctx.spill->release_thread_buffers();
+    if (gfaz_debug_enabled()) {
+      std::cerr << "[CPU Workflow] traversal memory budget "
+                << options.traversal_memory_budget_bytes / (1024.0 * 1024.0)
+                << " MB: " << ctx.spill->spilled_count() << " of "
+                << ctx.spill->size() << " traversals spilled ("
+                << ctx.spill->spilled_steps() << " steps, "
+                << ctx.spill->total_written_bytes() / (1024.0 * 1024.0)
+                << " MB on disk)" << std::endl;
+    }
   }
   log_cpu_memory_checkpoint("[CPU Workflow][Memory] after parse");
 
@@ -837,6 +977,26 @@ gfaz::CompressedData compress_gfa(const std::string &gfa_file_path, int num_roun
   // Stage 2: transform traversals and build the grammar rulebook.
   const double time_delta_ms = apply_delta_transform(ctx);
   log_cpu_memory_checkpoint("[CPU Workflow][Memory] after delta transform");
+
+  // In lower-memory mode, compress segments and links now and release them,
+  // instead of holding them through the grammar rounds and compressing them
+  // alongside every other record group. They are usually the largest
+  // non-traversal data, and nothing after this point reads them. Segment
+  // count is already covered by next_id here, as it is after the grammar.
+  const bool low_memory = options.traversal_memory_budget_bytes > 0;
+  double time_segments_links_ms = 0;
+  if (low_memory) {
+#ifdef _OPENMP
+#pragma omp parallel
+#pragma omp single
+#endif
+    time_segments_links_ms = compress_segment_link_fields(ctx, ctx.next_id);
+#if defined(__GLIBC__)
+    malloc_trim(0);
+#endif
+    log_cpu_memory_checkpoint(
+        "[CPU Workflow][Memory] after early segment/link compression");
+  }
   const double time_grammar_ms = run_grammar_stage(ctx);
   log_cpu_memory_checkpoint("[CPU Workflow][Memory] after grammar compression");
 
@@ -868,7 +1028,6 @@ gfaz::CompressedData compress_gfa(const std::string &gfa_file_path, int num_roun
   double time_rule_columns_ms = 0;
   double time_paths_ms = 0;
   double time_walks_ms = 0;
-  double time_segments_links_ms = 0;
   double time_optional_fields_ms = 0;
   double time_jumps_ms = 0;
   double time_containments_ms = 0;
@@ -877,14 +1036,16 @@ gfaz::CompressedData compress_gfa(const std::string &gfa_file_path, int num_roun
 #pragma omp parallel
 #pragma omp single
   {
+    if (!low_memory) {
+#pragma omp task shared(ctx, time_segments_links_ms)
+      time_segments_links_ms = compress_segment_link_fields(ctx, ctx.next_id);
+    }
 #pragma omp task shared(ctx, time_rule_columns_ms)
     time_rule_columns_ms = compress_rule_columns(ctx);
 #pragma omp task shared(ctx, time_paths_ms)
     time_paths_ms = compress_path_fields(ctx);
 #pragma omp task shared(ctx, time_walks_ms)
     time_walks_ms = compress_walk_fields(ctx);
-#pragma omp task shared(ctx, time_segments_links_ms)
-    time_segments_links_ms = compress_segment_link_fields(ctx, ctx.next_id);
 #pragma omp task shared(ctx, time_optional_fields_ms)
     time_optional_fields_ms = compress_optional_fields(ctx);
 #pragma omp task shared(ctx, time_jumps_ms)
@@ -896,7 +1057,8 @@ gfaz::CompressedData compress_gfa(const std::string &gfa_file_path, int num_roun
   time_rule_columns_ms = compress_rule_columns(ctx);
   time_paths_ms = compress_path_fields(ctx);
   time_walks_ms = compress_walk_fields(ctx);
-  time_segments_links_ms = compress_segment_link_fields(ctx, ctx.next_id);
+  if (!low_memory)
+    time_segments_links_ms = compress_segment_link_fields(ctx, ctx.next_id);
   time_optional_fields_ms = compress_optional_fields(ctx);
   time_jumps_ms = compress_jump_fields(ctx);
   time_containments_ms = compress_containment_fields(ctx);

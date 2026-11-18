@@ -142,6 +142,8 @@ set(GFAZ_COMPRESS_SOURCES
   src/compress/io/gfa_write_utils.cpp
   src/compress/grammar/rule_generator.cpp
   src/compress/grammar/path_encoder.cpp
+  src/compress/grammar/traversal_spill.cpp
+  src/compress/grammar/key_sort.cpp
   src/compress/compression_workflow.cpp
   src/compress/compression_utils.cpp
   src/compress/compression_debug.cpp
@@ -308,7 +310,15 @@ if(BUILD_CLI)
     gfaz_compress gfaz_core)
   configure_gfa_target(gfaz_front_door_api_test)
 
+  add_executable(gfaz_key_sort_test
+    tests/cpp/test_key_sort.cpp
+  )
+  target_link_libraries(gfaz_key_sort_test PRIVATE
+    gfaz_compress gfaz_core)
+  configure_gfa_target(gfaz_key_sort_test)
+
   enable_testing()
+  add_test(NAME gfaz_key_sort COMMAND gfaz_key_sort_test)
   add_test(
     NAME gfaz_front_door_api
     COMMAND gfaz_front_door_api_test

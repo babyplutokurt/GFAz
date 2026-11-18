@@ -16,6 +16,8 @@ struct GrammarRoundDebugInfo {
   double remap_ms = 0;
   size_t rules_used = 0;
   size_t num_rules = 0;
+  size_t elements_before = 0;
+  size_t elements_after = 0;
   runtime_utils::ProcessMemorySnapshot memory;
 };
 
