@@ -319,6 +319,15 @@ if(BUILD_CLI)
 
   enable_testing()
   add_test(NAME gfaz_key_sort COMMAND gfaz_key_sort_test)
+
+  add_executable(gfaz_kmer_seen_table_test
+    tests/cpp/test_kmer_seen_table.cpp
+  )
+  target_link_libraries(gfaz_kmer_seen_table_test PRIVATE
+    gfaz_compress
+  )
+  configure_gfa_target(gfaz_kmer_seen_table_test)
+  add_test(NAME gfaz_kmer_seen_table COMMAND gfaz_kmer_seen_table_test)
   add_test(
     NAME gfaz_front_door_api
     COMMAND gfaz_front_door_api_test

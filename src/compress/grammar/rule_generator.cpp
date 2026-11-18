@@ -1,4 +1,5 @@
 #include "compress/grammar/rule_generator.hpp"
+#include "compress/grammar/kmer_seen_table.hpp"
 #include "compress/grammar/key_sort.hpp"
 #include "core/utils/debug_log.hpp"
 #include "robin_hood.h"
@@ -181,8 +182,11 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
   // GFAZ_RULE_SCAN=sets|all pins the route; tests use it to check that both
   // produce the same output.
   const char *forced_scan = std::getenv("GFAZ_RULE_SCAN");
+  const bool force_legacy_sets =
+      forced_scan != nullptr && std::string_view(forced_scan) == "sets-legacy";
   const bool force_sets =
-      forced_scan != nullptr && std::string_view(forced_scan) == "sets";
+      force_legacy_sets ||
+      (forced_scan != nullptr && std::string_view(forced_scan) == "sets");
   const bool force_all =
       forced_scan != nullptr && std::string_view(forced_scan) == "all";
   if (fetch == nullptr && !force_sets &&
@@ -196,10 +200,18 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
     emit_all = force_all || total_2mers / 2 <= *scan_keys;
   }
 
+  // The hash route keeps one table per thread. KmerSeenTable needs one probe
+  // per 2-mer but only holds IDs below 2^30; beyond that (or with
+  // GFAZ_RULE_SCAN=sets-legacy) two robin_hood sets per thread do the same.
+  // Every ID in the sequences is below starting_id.
+  const bool use_seen_tables = !emit_all && !force_legacy_sets &&
+                               KmerSeenTable::ids_fit(starting_id);
+  const bool use_legacy_sets = !emit_all && !use_seen_tables;
+  std::vector<KmerSeenTable> thread_tables(use_seen_tables ? actual_threads : 0);
   std::vector<robin_hood::unordered_flat_set<Packed2mer>> thread_seen(
-      emit_all ? 0 : actual_threads);
+      use_legacy_sets ? actual_threads : 0);
   std::vector<robin_hood::unordered_flat_set<Packed2mer>> thread_repeated(
-      emit_all ? 0 : actual_threads);
+      use_legacy_sets ? actual_threads : 0);
   size_t num_keys = 0;
   // Uninitialized so the pages are first touched by the parallel writers.
   std::unique_ptr<Packed2mer[]> merge_keys;
@@ -214,6 +226,46 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
       Packed2mer *out = merge_keys.get() + emit_offsets[p];
       for (size_t i = 0; i + 1 < seq.size(); ++i)
         out[i] = canonical_2mer(pack_2mer(seq[i], seq[i + 1]));
+    }
+  } else if (use_seen_tables) {
+    // Start each table at half the previous round's keys per thread: random
+    // inserts make the whole table resident, so a generous start costs memory,
+    // while a low one costs a single extra doubling.
+    const size_t expected_per_thread =
+        scan_keys != nullptr
+            ? *scan_keys / static_cast<size_t>(actual_threads) / 2
+            : 0;
+#pragma omp parallel
+    {
+      KmerSeenTable &table = thread_tables[omp_get_thread_num()];
+      table.reserve(expected_per_thread);
+      std::vector<gfaz::NodeId> scratch;
+      // Inserts are independent of each other, so hash a block of 2-mers,
+      // start loading their slots, then insert them.
+      constexpr size_t kBlock = 32;
+      Packed2mer keys[kBlock];
+      uint64_t hashes[kBlock];
+
+#pragma omp for schedule(dynamic)
+      for (size_t p = 0; p < total_sequences; ++p) {
+        const auto &seq =
+            fetch != nullptr ? (*fetch)(p, scratch) : sequence_at(p);
+        if (seq.size() < 2)
+          continue;
+
+        const size_t pairs = seq.size() - 1;
+        for (size_t begin = 0; begin < pairs; begin += kBlock) {
+          const size_t count = std::min(kBlock, pairs - begin);
+          for (size_t k = 0; k < count; ++k) {
+            keys[k] = canonical_2mer(
+                pack_2mer(seq[begin + k], seq[begin + k + 1]));
+            hashes[k] = KmerSeenTable::hash(keys[k]);
+            table.prefetch(hashes[k]);
+          }
+          for (size_t k = 0; k < count; ++k)
+            table.insert(keys[k], hashes[k]);
+        }
+      }
     }
   } else {
 #pragma omp parallel
@@ -247,8 +299,10 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
     std::vector<size_t> offsets(static_cast<size_t>(actual_threads) + 1, 0);
     for (int t = 0; t < actual_threads; ++t) {
       offsets[static_cast<size_t>(t) + 1] =
-          offsets[static_cast<size_t>(t)] + thread_seen[t].size() +
-          thread_repeated[t].size();
+          offsets[static_cast<size_t>(t)] +
+          (use_seen_tables
+               ? thread_tables[t].size() + thread_tables[t].repeated()
+               : thread_seen[t].size() + thread_repeated[t].size());
     }
 
     num_keys = offsets.back();
@@ -256,6 +310,11 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
 #pragma omp parallel for schedule(static)
     for (int t = 0; t < actual_threads; ++t) {
       size_t pos = offsets[static_cast<size_t>(t)];
+      if (use_seen_tables) {
+        thread_tables[t].emit(merge_keys.get() + pos);
+        thread_tables[t].release();
+        continue;
+      }
       for (Packed2mer kmer : thread_seen[t])
         merge_keys[pos++] = kmer;
       for (Packed2mer kmer : thread_repeated[t])

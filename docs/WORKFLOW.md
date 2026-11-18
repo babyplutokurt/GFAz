@@ -72,9 +72,12 @@ Main implementation: `src/compress/grammar/rule_generator.cpp`. A round's rules
 are the canonical 2-mers that occur at least twice, in sorted order. Two scans
 find them:
 
-- Per-thread hash sets drop repeats inside a thread before the sort. Used in
-  the early rounds, where most 2-mers repeat, and whenever traversals are being
-  streamed from the spill file.
+- Per-thread hash tables drop repeats inside a thread before the sort. Used
+  in the early rounds, where most 2-mers repeat, and whenever traversals are
+  being streamed from the spill file. Each table
+  (`include/compress/grammar/kmer_seen_table.hpp`) costs one probe per 2-mer
+  and keeps its "seen twice" mark inside the key, which needs node IDs below
+  2^30; larger IDs fall back to two `robin_hood` sets per thread.
 - Later rounds, where most 2-mers are distinct, write every 2-mer to the sort
   buffer and skip the sets. The switch uses the previous round's key count.
 
@@ -89,8 +92,8 @@ These environment variables pin a code path. They do not change the output and
 exist for the equivalence tests and for A/B timing:
 
 - `GFAZ_SERIAL_PARSE=1`: use the serial S/L line parsers in the general parser.
-- `GFAZ_RULE_SCAN=sets|all`: always use the hash-set scan, or always sort every
-  2-mer.
+- `GFAZ_RULE_SCAN=sets|sets-legacy|all`: always use the hash-table scan, its
+  two-set fallback, or always sort every 2-mer.
 - `GFAZ_SPILL_CODEC=raw`: store spilled traversals as plain `int32` instead of
   varints.
 - `GFAZ_SPILL_DROP_CACHE=1`: evict spill-file pages from the page cache as they

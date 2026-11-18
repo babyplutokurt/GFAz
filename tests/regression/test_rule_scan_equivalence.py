@@ -6,6 +6,8 @@ Each grammar round turns every 2-mer that occurs at least twice into a rule.
 The generator either collects 2-mers through per-thread sets (which drop
 repeats before the sort) or, once most 2-mers are distinct, writes all of them
 to the sort buffer. It picks per round; `GFAZ_RULE_SCAN=sets|all` pins one.
+`sets-legacy` pins the two-sets-per-thread fallback that the set route uses
+when node IDs do not fit the single-probe table.
 The .gfaz must be byte-identical for both pinned routes and the default.
 """
 
@@ -48,7 +50,7 @@ def check(cli: Path, src: Path, workdir: Path):
     for threads in ("1", "4"):
       extra = ["-d", delta, "-j", threads]
       reference = compress(cli, src, workdir / "sets.gfaz", extra, "sets")
-      for scan in ("all", None):
+      for scan in ("sets-legacy", "all", None):
         got = compress(cli, src, workdir / "other.gfaz", extra, scan)
         if got != reference:
           raise AssertionError(
