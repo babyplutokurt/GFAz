@@ -44,6 +44,58 @@ Notes:
 - OpenMP is used when available.
 - `num_threads=0` uses auto policy (`GFAZ_NUM_THREADS` -> `OMP_NUM_THREADS` -> `min(8, logical_cpus/2)`), and this same policy applies to parser parallel sections and CPU workflow OpenMP regions.
 
+### Parsing
+
+Main implementation: `src/compress/io/gfa_parser.cpp`. The input is
+memory-mapped and parsed in parallel; which route runs depends on the file:
+
+- Direct two-pass parser: segment names are `1..N` in file order and optional
+  fields are fixed `i`/`f`/`A` columns.
+- General parser, parallel S/L lines: everything else whose S and L lines can
+  be parsed in independent blocks. Segment IDs are still assigned in file
+  order. When every name is a canonical decimal number (the HPRC and HGSVC3
+  Minigraph-Cactus graphs, whose numbers do not start at 1 in file order),
+  names resolve through a `number -> id` array instead of a hash map, and
+  segment sequences are written straight into the flattened store. Per-block
+  optional-field columns are concatenated in row order, so the result is the
+  one the serial parser builds.
+- General parser, serial S/L lines: inputs the block parsers hand back
+  (repeated segment names, sparse or non-canonical numbers, links that name
+  unknown segments, a tag repeated within a row, a tag whose type changes).
+
+All routes produce the same `GfaGraph`, so the `.gfaz` does not depend on the
+route or the thread count (`tests/regression/test_parallel_parse_equivalence.py`).
+
+### Rule generation
+
+Main implementation: `src/compress/grammar/rule_generator.cpp`. A round's rules
+are the canonical 2-mers that occur at least twice, in sorted order. Two scans
+find them:
+
+- Per-thread hash sets drop repeats inside a thread before the sort. Used in
+  the early rounds, where most 2-mers repeat, and whenever traversals are being
+  streamed from the spill file.
+- Later rounds, where most 2-mers are distinct, write every 2-mer to the sort
+  buffer and skip the sets. The switch uses the previous round's key count.
+
+Keys are sorted with a bucketed radix sort
+(`src/compress/grammar/key_sort.cpp`: sampled splitters, then a byte-wise radix
+sort per bucket). Both scans give the same rules
+(`tests/regression/test_rule_scan_equivalence.py`).
+
+### Test and debugging switches
+
+These environment variables pin a code path. They do not change the output and
+exist for the equivalence tests and for A/B timing:
+
+- `GFAZ_SERIAL_PARSE=1`: use the serial S/L line parsers in the general parser.
+- `GFAZ_RULE_SCAN=sets|all`: always use the hash-set scan, or always sort every
+  2-mer.
+- `GFAZ_SPILL_CODEC=raw`: store spilled traversals as plain `int32` instead of
+  varints.
+- `GFAZ_SPILL_DROP_CACHE=1`: evict spill-file pages from the page cache as they
+  are written and read.
+
 ### Lower-memory compression (`--memory-budget`)
 
 By default every path/walk traversal is held in memory (4 bytes per step) until
@@ -90,6 +142,48 @@ one byte per traversal step at its peak.
 Independently of the budget, the encoder returns each traversal's unused
 capacity after every round, so resident traversal memory follows the encoded
 size instead of staying at the parsed size until the last round.
+
+### Measured CPU throughput and memory
+
+16 threads, input in the page cache, AMD Ryzen Threadripper PRO 9955WX, 512 GB
+RAM, spill file and decompressed output on a Samsung 990 PRO NVMe drive.
+Throughput is the GFA size over end-to-end CLI wall time. Medians of 5 runs
+for the first four graphs, 3 for HPRC v1.1 and HGSVC3, single runs for HPRC
+v2.x.
+
+Compression, default and with `--memory-budget 2G`:
+
+| Graph | GFA size | Time | Throughput | Peak RSS | Time (2G) | Throughput (2G) | Peak RSS (2G) |
+|---|---|---|---|---|---|---|---|
+| E. coli | 0.12 GB | 0.33 s | 0.36 GB/s | 0.26 GB | 0.38 s | 0.31 GB/s | 0.20 GB |
+| HGSVC3-sv | 3.51 GB | 7.17 s | 0.49 GB/s | 8.51 GB | 7.53 s | 0.47 GB/s | 8.42 GB |
+| HPRC chr6 | 4.06 GB | 2.60 s | 1.56 GB/s | 2.02 GB | 3.20 s | 1.27 GB/s | 2.37 GB |
+| HPRC chr1 | 7.58 GB | 5.27 s | 1.44 GB/s | 4.06 GB | 5.82 s | 1.30 GB/s | 4.26 GB |
+| HPRC v1.1 | 50.8 GB | 57.7 s | 0.88 GB/s | 31.5 GB | 64.0 s | 0.79 GB/s | 12.0 GB |
+| HGSVC3 | 80.1 GB | 100.3 s | 0.80 GB/s | 46.3 GB | 110.9 s | 0.72 GB/s | 15.7 GB |
+| HPRC v2.0 | 384.3 GB | 183.7 s | 2.09 GB/s | 156.7 GB | 273.2 s | 1.41 GB/s | 34.9 GB |
+| HPRC v2.1 | 395.7 GB | 184.5 s | 2.15 GB/s | 161.4 GB | 277.3 s | 1.43 GB/s | 37.0 GB |
+
+Decompression (default streaming mode), to `/dev/null` and to a file:
+
+| Graph | Time (`/dev/null`) | Throughput | Peak RSS | Time (file) | Throughput | Peak RSS |
+|---|---|---|---|---|---|---|
+| E. coli | 0.12 s | 0.98 GB/s | 0.13 GB | 0.16 s | 0.74 GB/s | 0.13 GB |
+| HGSVC3-sv | 2.71 s | 1.30 GB/s | 4.07 GB | 3.59 s | 0.98 GB/s | 4.07 GB |
+| HPRC chr6 | 1.27 s | 3.20 GB/s | 1.23 GB | 1.97 s | 2.06 GB/s | 1.69 GB |
+| HPRC chr1 | 3.30 s | 2.30 GB/s | 2.65 GB | 4.40 s | 1.72 GB/s | 3.00 GB |
+| HPRC v1.1 | 26.5 s | 1.92 GB/s | 13.0 GB | 32.2 s | 1.58 GB/s | 13.5 GB |
+| HGSVC3 | 29.9 s | 2.68 GB/s | 16.1 GB | 42.3 s | 1.90 GB/s | 17.6 GB |
+| HPRC v2.0 | 83.2 s | 4.62 GB/s | 22.7 GB | 143.9 s | 2.67 GB/s | 24.2 GB |
+| HPRC v2.1 | 86.9 s | 4.55 GB/s | 25.0 GB | 158.9 s | 2.49 GB/s | 27.3 GB |
+
+Notes:
+
+- The budget pays off on whole-genome graphs. On graphs whose traversals
+  already fit in a few GB (chr1, chr6) it does not lower peak RSS, and on
+  HGSVC3-sv, which has no paths or walks, it has nothing to spill.
+- On the HPRC v2.x graphs the default run's memory plus the input exceed the
+  node's RAM, so part of the input leaves the page cache during the run.
 
 ## CPU Decompression Workflow Details
 
