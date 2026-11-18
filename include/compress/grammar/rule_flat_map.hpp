@@ -71,6 +71,15 @@ public:
     }
   }
 
+  // Start loading the slot `find(key)` will probe first.
+  void prefetch(Packed2mer key) const {
+#if defined(__GNUC__) || defined(__clang__)
+    __builtin_prefetch(slots_.get() + (hash_key(key) & mask_));
+#else
+    (void)key;
+#endif
+  }
+
   uint32_t find(Packed2mer key) const {
     size_t idx = hash_key(key) & mask_;
     const Slot *slots = slots_.get();

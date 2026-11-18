@@ -1,18 +1,33 @@
 #include "compress/grammar/path_encoder.hpp"
 #include "compress/grammar/packed_2mer.hpp"
+#include <limits>
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
 namespace {
 
-template <typename RuleLookup, typename MarkRule>
-void encode_path_2mer(std::vector<gfaz::NodeId> &path,
-                      const CompressionRules2Mer &rules, RuleLookup lookup,
-                      MarkRule mark_rule) {
-  size_t encoded_size = 0;
+// Table slots are prefetched this many input pairs ahead of the probe.
+constexpr size_t kPrefetchDistance = 12;
 
-  for (size_t i = 0; i < path.size(); ++i) {
+// `new_rule_start`: a pair whose left element has an ID at or above this value
+// is not looked up. See encode_path_2mer_dispatch for when that is valid.
+template <typename RuleLookup, typename Prefetch, typename MarkRule>
+void encode_path_2mer(std::vector<gfaz::NodeId> &path,
+                      const CompressionRules2Mer &rules,
+                      uint32_t new_rule_start, RuleLookup lookup,
+                      Prefetch prefetch, MarkRule mark_rule) {
+  size_t encoded_size = 0;
+  const size_t input_size = path.size();
+
+  for (size_t i = 0; i < input_size; ++i) {
+    // Every pair that does get looked up is a pair of adjacent input elements
+    // (the write position trails the read position, so path[i + k] is still
+    // input). Start loading its slot now.
+    if (i + kPrefetchDistance < input_size)
+      prefetch(canonical_2mer(pack_2mer(path[i + kPrefetchDistance - 1],
+                                        path[i + kPrefetchDistance])));
+
     const gfaz::NodeId node = path[i];
     path[encoded_size++] = node;
 
@@ -21,6 +36,11 @@ void encode_path_2mer(std::vector<gfaz::NodeId> &path,
 
     int32_t first = path[encoded_size - 2];
     int32_t second = path[encoded_size - 1];
+    const uint32_t first_abs =
+        first < 0 ? 0u - static_cast<uint32_t>(first)
+                  : static_cast<uint32_t>(first);
+    if (first_abs >= new_rule_start)
+      continue;
     Packed2mer top_kmer = pack_2mer(first, second);
     const Packed2mer canonical = canonical_2mer(top_kmer);
     const uint32_t rule_id = lookup(canonical);
@@ -43,19 +63,26 @@ void encode_path_2mer_dispatch(std::vector<gfaz::NodeId> &path,
                                const CompressionRules2Mer &rules,
                                MarkRule mark_rule) {
   if (!rules.flat_map.empty()) {
+    // flat_map is filled by RuleGenerator::generate_rules_2mer_combined, whose
+    // rules are the 2-mers of the sequences being encoded. Those sequences
+    // hold only IDs below rules_start_id, so a pair that starts with a rule
+    // created in this pass can never be a rule itself.
     encode_path_2mer(
-        path, rules,
+        path, rules, rules.rules_start_id,
         [&rules](Packed2mer canonical) { return rules.flat_map.find(canonical); },
+        [&rules](Packed2mer canonical) { rules.flat_map.prefetch(canonical); },
         mark_rule);
   } else {
+    // Rule sets loaded from a file (add-haplotypes) span several rounds, so a
+    // freshly created rule can start a later rule: look up every pair.
     encode_path_2mer(
-        path, rules,
+        path, rules, std::numeric_limits<uint32_t>::max(),
         [&rules](Packed2mer canonical) {
           auto it = rules.kmer_to_rule_id.find(canonical);
           return it == rules.kmer_to_rule_id.end() ? RuleFlatMap::kNotFound
                                                    : it->second;
         },
-        mark_rule);
+        [](Packed2mer) {}, mark_rule);
   }
 }
 
