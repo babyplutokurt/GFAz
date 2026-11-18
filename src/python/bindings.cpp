@@ -37,6 +37,20 @@ gfaz::GfaGraph parse_gfa_file(const std::string &file_path) {
   return parser.parse(file_path);
 }
 
+gfaz::CompressedData compress_gfa_with_budget(const std::string &gfa_file_path,
+                                        int num_rounds, size_t freq_threshold,
+                                        int delta_round, int num_threads,
+                                        bool show_stats,
+                                        size_t memory_budget_bytes,
+                                        const std::string &tmp_dir) {
+  CompressOptions options;
+  options.traversal_memory_budget_bytes = memory_budget_bytes;
+  options.tmp_dir = tmp_dir;
+  return compress_gfa_with_options(gfa_file_path, num_rounds, freq_threshold,
+                                   delta_round, num_threads, show_stats,
+                                   options);
+}
+
 std::vector<int32_t>
 reconstruct_path_cpu(const std::vector<int32_t> &compressed_path,
                      const std::map<uint32_t, uint64_t> &rulebook,
@@ -320,13 +334,17 @@ PYBIND11_MODULE(gfa_compression, m) {
       .def_readonly("walk_seq_ends_zstd", &gfaz::CompressedData::walk_seq_ends_zstd);
 
   // Stable CPU-oriented APIs at module root.
-  m.def("compress", &compress_gfa,
-        "Compress a GFA file (returns CompressedData)",
+  m.def("compress", &compress_gfa_with_budget,
+        "Compress a GFA file (returns CompressedData). A non-zero "
+        "memory_budget_bytes caps the path/walk data held in memory and "
+        "streams the rest through a temp file in tmp_dir; the result is "
+        "identical.",
         py::arg("gfa_file_path"), py::arg("num_rounds") = kDefaultRounds,
         py::arg("freq_threshold") = kDefaultFreqThreshold,
         py::arg("delta_round") = kDefaultDeltaRound,
         py::arg("num_threads") = kDefaultNumThreads,
-        py::arg("show_stats") = false);
+        py::arg("show_stats") = false, py::arg("memory_budget_bytes") = 0,
+        py::arg("tmp_dir") = "");
 
   m.def(
       "decompress",
@@ -658,13 +676,14 @@ PYBIND11_MODULE(gfa_compression, m) {
   // Stable naming-normalized aliases.
   m.def("parse", &parse_gfa_file, "Parse a GFA file", py::arg("file_path"));
   m.def("parse_gfa", &parse_gfa_file, "Parse a GFA file", py::arg("file_path"));
-  m.def("compress_file", &compress_gfa,
+  m.def("compress_file", &compress_gfa_with_budget,
         "Alias for compress with normalized argument names",
         py::arg("gfa_file_path"), py::arg("rounds") = kDefaultRounds,
         py::arg("threshold") = kDefaultFreqThreshold,
         py::arg("delta_round") = kDefaultDeltaRound,
         py::arg("threads") = kDefaultNumThreads,
-        py::arg("show_stats") = false);
+        py::arg("show_stats") = false, py::arg("memory_budget_bytes") = 0,
+        py::arg("tmp_dir") = "");
   m.def(
       "decompress_data",
       [](const gfaz::CompressedData &data, int threads) {

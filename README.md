@@ -117,6 +117,14 @@ build/bin/gfaz compress example.gfa
 build/bin/gfaz compress --gpu example.gfa
 ```
 
+Lower-memory CPU compression (same output, byte for byte):
+
+```bash
+# Keep at most 2 GiB of path/walk data in RAM; stream the rest through a temp
+# file on fast local storage
+build/bin/gfaz compress --memory-budget 2G --tmp-dir /path/on/nvme example.gfa
+```
+
 Decompression:
 
 ```bash

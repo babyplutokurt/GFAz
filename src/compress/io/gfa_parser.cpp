@@ -691,7 +691,9 @@ bool GfaParser::is_numeric(std::string_view s) {
 }
 
 gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_threads,
-                                bool direct_segment_columns) {
+                                bool direct_segment_columns,
+                                gfaz::TraversalSink *traversal_sink) {
+  traversal_sink_ = traversal_sink;
   ScopedOMPThreads omp_scope(num_threads);
   const auto parse_start = Clock::now();
   auto phase_start = parse_start;
@@ -1107,6 +1109,8 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
       direct_graph.walks.seq_ids.resize(walk_bases.back());
       direct_graph.walks.seq_starts.resize(walk_bases.back());
       direct_graph.walks.seq_ends.resize(walk_bases.back());
+      if (traversal_sink_)
+        traversal_sink_->prepare(path_bases.back(), walk_bases.back());
 
       direct_graph.jumps.from_ids.resize(jump_bases.back());
       direct_graph.jumps.from_orients.resize(jump_bases.back());
@@ -1575,6 +1579,20 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     }
   };
 
+  // For the serial record loops, which walk the file in order: drop the
+  // mapping behind the cursor every window so the input text does not pile up
+  // in resident memory for the whole phase. Pages a later phase needs are
+  // simply read back from the page cache.
+  constexpr size_t kSequentialReleaseWindow = 64ull * 1024ull * 1024ull;
+  auto release_behind = [&](size_t offset, size_t &cursor) {
+    if (offset < cursor + kSequentialReleaseWindow)
+      return;
+    const size_t end = (offset / page_size) * page_size;
+    madvise(const_cast<char *>(mmap_data) + cursor, end - cursor,
+            MADV_DONTNEED);
+    cursor = end;
+  };
+
   madvise(const_cast<char *>(mmap_data), file_size, MADV_DONTNEED);
   num_segments_hint_ = s_offsets.size();
   num_links_hint_ = l_offsets.size();
@@ -1706,9 +1724,11 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
       graph.segments.node_id_to_name.reserve(num_segments_hint_ + 1);
       graph.segments.node_sequences.reserve(num_segments_hint_ + 1);
     }
+    size_t release_cursor = 0;
     for (const auto &off : s_offsets) {
       std::string_view line(mmap_data + off.offset, off.length);
       parse_s_line(line, graph);
+      release_behind(off.offset, release_cursor);
     }
   }
 
@@ -1821,9 +1841,11 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   }
 
   if (!parsed_links_in_parallel) {
+    size_t release_cursor = 0;
     for (const auto &off : l_offsets) {
       std::string_view line(mmap_data + off.offset, off.length);
       parse_l_line(line, graph);
+      release_behind(off.offset, release_cursor);
     }
   }
 
@@ -1873,6 +1895,20 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   graph.walks.seq_ids.resize(w_offsets.size());
   graph.walks.seq_starts.resize(w_offsets.size());
   graph.walks.seq_ends.resize(w_offsets.size());
+  if (traversal_sink_)
+    traversal_sink_->prepare(p_offsets.size(), w_offsets.size());
+
+  // Traversal lines are long, so most of their pages hold nothing else. Drop
+  // those pages as soon as the line is parsed; otherwise the whole P/W text
+  // stays resident until the end of this phase, on top of the parsed data.
+  auto release_line_pages = [&](const gfaz::LineOffset &off) {
+    const size_t first = ((off.offset + page_size - 1) / page_size) * page_size;
+    const size_t last = ((off.offset + off.length) / page_size) * page_size;
+    if (last > first) {
+      madvise(const_cast<char *>(mmap_data) + first, last - first,
+              MADV_DONTNEED);
+    }
+  };
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
@@ -1880,6 +1916,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   for (size_t i = 0; i < p_offsets.size(); ++i) {
     std::string_view line(mmap_data + p_offsets[i].offset, p_offsets[i].length);
     parse_p_line(line, graph, i);
+    release_line_pages(p_offsets[i]);
   }
 
 #ifdef _OPENMP
@@ -1889,6 +1926,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   for (size_t i = 0; i < w_offsets.size(); ++i) {
     std::string_view line(mmap_data + w_offsets[i].offset, w_offsets[i].length);
     parse_w_line(line, graph, i);
+    release_line_pages(w_offsets[i]);
   }
   p_offsets.clear();
   p_offsets.shrink_to_fit();
@@ -2053,7 +2091,11 @@ void GfaParser::parse_p_line(std::string_view line, gfaz::GfaGraph &graph,
     ++pos;
   std::string overlaps(line.substr(pos));
 
-  std::vector<gfaz::NodeId> path;
+  // With a sink, decode into the sink's reused per-thread buffer: a spilled
+  // traversal never needs its own allocation.
+  std::vector<gfaz::NodeId> local_path;
+  std::vector<gfaz::NodeId> &path =
+      traversal_sink_ ? traversal_sink_->scratch() : local_path;
   if (!(all_segment_names_numeric_ &&
         try_parse_numeric_path_simd(nodes_str, path))) {
     path.clear();
@@ -2084,7 +2126,12 @@ void GfaParser::parse_p_line(std::string_view line, gfaz::GfaGraph &graph,
     }
   }
 
-  graph.paths_data.traversals[index] = std::move(path);
+  if (traversal_sink_) {
+    traversal_sink_->consume(false, index, path,
+                             graph.paths_data.traversals[index]);
+  } else {
+    graph.paths_data.traversals[index] = std::move(path);
+  }
   graph.paths_data.names[index] = std::move(path_name);
   graph.paths_data.overlaps[index] = std::move(overlaps);
 }
@@ -2099,7 +2146,10 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
   std::string_view seq_end_view = next_field(line, pos);
   std::string_view walk_str = next_field(line, pos);
 
-  std::vector<gfaz::NodeId> walk;
+  std::vector<gfaz::NodeId> local_walk;
+  std::vector<gfaz::NodeId> &walk =
+      traversal_sink_ ? traversal_sink_->scratch() : local_walk;
+  walk.clear();
   size_t walk_steps = 0;
   for (char c : walk_str) {
     if (c == '>' || c == '<')
@@ -2137,7 +2187,11 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
     walk_pos = name_end;
   }
 
-  graph.walks.walks[index] = std::move(walk);
+  if (traversal_sink_) {
+    traversal_sink_->consume(true, index, walk, graph.walks.walks[index]);
+  } else {
+    graph.walks.walks[index] = std::move(walk);
+  }
   graph.walks.sample_ids[index] = std::string(sample_id_view);
   graph.walks.hap_indices[index] = 0;
   for (char c : hap_index_view) {

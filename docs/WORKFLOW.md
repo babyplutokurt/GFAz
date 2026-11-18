@@ -40,9 +40,56 @@ Main implementation: `src/compress/compression_workflow.cpp`
 
 Notes:
 
-- CPU compression parameters: rounds, frequency threshold, delta rounds, thread count.
+- CPU compression parameters: rounds, frequency threshold, delta rounds, thread count, and an optional traversal memory budget (below).
 - OpenMP is used when available.
 - `num_threads=0` uses auto policy (`GFAZ_NUM_THREADS` -> `OMP_NUM_THREADS` -> `min(8, logical_cpus/2)`), and this same policy applies to parser parallel sections and CPU workflow OpenMP regions.
+
+### Lower-memory compression (`--memory-budget`)
+
+By default every path/walk traversal is held in memory (4 bytes per step) until
+the grammar rounds finish. `gfaz compress --memory-budget <SIZE>` (API:
+`compress_gfa_with_options` with `CompressOptions::traversal_memory_budget_bytes`)
+caps that:
+
+- The parser hands each traversal to a `TraversalSpill`
+  (`include/compress/grammar/traversal_spill.hpp`) through the `TraversalSink`
+  interface instead of storing it in `GfaGraph`. The spill delta-transforms it
+  and keeps it in memory while the budget allows; the overflow is written,
+  varint-encoded, to an unlinked temp file in `--tmp-dir`.
+- During a grammar round with spilled traversals, the rule scan and the encode
+  pass load those traversals one at a time from the temp file (dynamic
+  scheduling, one per worker), so resident traversal data is bounded by the
+  budget plus `threads x largest traversal`. Each encode pass rewrites the
+  still-spilled traversals into a second temp file and moves back into memory
+  whatever now fits. The rule-ID remap for spilled traversals is applied when
+  they are next loaded rather than in a separate pass.
+- Traversals roughly halve per round in the early rounds, so after a few rounds
+  everything is in memory and the remaining rounds run the normal in-memory
+  code. Whatever is still spilled after the last round is loaded before entropy
+  coding.
+
+Asking for a budget also switches two things that trade a little time for
+memory:
+
+- Segments and links are compressed and released right after parsing, before
+  the grammar rounds, instead of being held through them and compressed
+  alongside every other record group at the end.
+- On glibc the malloc mmap threshold is fixed at 4 MiB, so the per-thread
+  buffers used for streaming go back to the OS when freed rather than staying
+  parked in each worker thread's arena.
+
+The rules, their IDs, and the encoded traversals are the same as in the
+in-memory run, so the `.gfaz` is byte-identical for any budget
+(`tests/regression/test_low_memory_compress.py`). The budget itself only
+covers traversal data: optional fields, rule-generation scratch, entropy-coding
+buffers, and segments/links while they are being parsed are not counted
+against it. Put `--tmp-dir` on fast local storage
+(default: `$TMPDIR`, else the output directory); the temp file needs roughly
+one byte per traversal step at its peak.
+
+Independently of the budget, the encoder returns each traversal's unused
+capacity after every round, so resident traversal memory follows the encoded
+size instead of staying at the parsed size until the last round.
 
 ## CPU Decompression Workflow Details
 
@@ -107,7 +154,7 @@ CLI entrypoint: `src/cli/gfaz_cli.cpp`
 
 ### `gfaz compress`
 
-- CPU default path: parse -> `compress_gfa` -> `serialize_compressed_data`
+- CPU default path: parse -> `compress_gfa_with_options` -> `serialize_compressed_data` (`--memory-budget`/`--tmp-dir` select the lower-memory mode)
 - GPU path (`--gpu`, CUDA build): parse/convert -> `compress_gfa_gpu` -> shared serializer
 - CPU-only build with `--gpu`: warns and falls back to CPU path.
 

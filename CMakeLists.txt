@@ -142,6 +142,7 @@ set(GFAZ_COMPRESS_SOURCES
   src/compress/io/gfa_write_utils.cpp
   src/compress/grammar/rule_generator.cpp
   src/compress/grammar/path_encoder.cpp
+  src/compress/grammar/traversal_spill.cpp
   src/compress/compression_workflow.cpp
   src/compress/compression_utils.cpp
   src/compress/compression_debug.cpp
