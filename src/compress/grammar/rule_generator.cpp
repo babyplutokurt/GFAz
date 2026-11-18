@@ -1,4 +1,5 @@
 #include "compress/grammar/rule_generator.hpp"
+#include "compress/grammar/key_sort.hpp"
 #include "core/utils/debug_log.hpp"
 #include "robin_hood.h"
 #include "core/utils/threading_utils.hpp"
@@ -269,11 +270,7 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
     *scan_keys = num_keys;
   const auto t_collect = std::chrono::high_resolution_clock::now();
 
-#if defined(__GLIBCXX__)
-  __gnu_parallel::sort(merge_keys.get(), merge_keys.get() + num_keys);
-#else
-  std::sort(merge_keys.get(), merge_keys.get() + num_keys);
-#endif
+  gfaz::parallel_sort_keys(merge_keys.get(), num_keys, actual_threads);
   const auto t_sort = std::chrono::high_resolution_clock::now();
 
   // Parallel duplicate extraction over the sorted keys. Chunk starts are
