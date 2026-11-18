@@ -39,6 +39,10 @@
   for graphs that miss the direct parser (unordered numeric segment names,
   irregular optional fields) give a byte-identical `.gfaz` to the serial line
   parsers (`GFAZ_SERIAL_PARSE=1`), including the inputs they must hand back.
+- `test_rule_scan_equivalence.py` asserts the two ways the rule generator finds
+  repeated 2-mers (per-thread sets, or sorting every 2-mer; pinned with
+  `GFAZ_RULE_SCAN=sets|all`) and the default per-round choice give a
+  byte-identical `.gfaz`.
 - `test_degenerate_inputs.py` covers degenerate-but-valid graphs (segments-only,
   walks-only, header-only) round-tripping cleanly, and invalid invocations
   (missing/malformed BED, unresolved pav/deconstruct reference) failing with a

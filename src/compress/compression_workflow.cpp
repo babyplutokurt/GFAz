@@ -713,13 +713,14 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
 
   auto total_start = std::chrono::high_resolution_clock::now();
 
+  size_t scan_keys = 0;
   for (int round = 0; round < num_rounds; ++round) {
     auto t0 = std::chrono::high_resolution_clock::now();
     const bool spilled_round = spill != nullptr && spill->spilled_count() > 0;
     RuleGenerator gen;
     CompressionRules2Mer rules = gen.generate_rules_2mer_combined(
         paths, walks, next_id, freq_threshold, num_threads,
-        spilled_round ? &fetch_traversal : nullptr);
+        spilled_round ? &fetch_traversal : nullptr, &scan_keys);
     if (spill) {
       spill->throw_if_failed();
       spill->release_thread_buffers();

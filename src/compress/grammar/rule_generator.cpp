@@ -6,6 +6,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
+#include <string_view>
 #include <vector>
 
 #ifdef _OPENMP
@@ -149,7 +151,8 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer(
 CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
     const std::vector<std::vector<gfaz::NodeId>> &paths,
     const std::vector<std::vector<gfaz::NodeId>> &walks, uint32_t starting_id,
-    size_t freq_threshold, int num_threads, const TraversalFetch *fetch) {
+    size_t freq_threshold, int num_threads, const TraversalFetch *fetch,
+    size_t *scan_keys) {
 
   CompressionRules2Mer rules;
   rules.rules_start_id = starting_id;
@@ -159,75 +162,123 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
 
 #ifdef _OPENMP
   const int actual_threads = resolve_omp_thread_count(num_threads);
-  std::vector<robin_hood::unordered_flat_set<Packed2mer>> thread_seen(
-      actual_threads);
-  std::vector<robin_hood::unordered_flat_set<Packed2mer>> thread_repeated(
-      actual_threads);
   const size_t total_sequences = paths.size() + walks.size();
+  const auto sequence_at = [&](size_t p) -> const std::vector<gfaz::NodeId> & {
+    return p < paths.size() ? paths[p] : walks[p - paths.size()];
+  };
+
+  // The rules are the 2-mers that occur at least twice, in sorted order. The
+  // per-thread sets below exist to shrink what has to be sorted: they drop
+  // repeats within a thread. Once most 2-mers are distinct (the later rounds)
+  // the sets drop little and cost more than sorting the extra keys, so every
+  // 2-mer is written straight to the sort buffer instead. Both routes give
+  // the same sorted list of keys that occur twice or more. The choice uses the
+  // previous round's key count, since 2-mers only get more distinct per round.
+  size_t total_2mers = 0;
+  std::vector<size_t> emit_offsets;
+  bool emit_all = false;
+  // GFAZ_RULE_SCAN=sets|all pins the route; tests use it to check that both
+  // produce the same output.
+  const char *forced_scan = std::getenv("GFAZ_RULE_SCAN");
+  const bool force_sets =
+      forced_scan != nullptr && std::string_view(forced_scan) == "sets";
+  const bool force_all =
+      forced_scan != nullptr && std::string_view(forced_scan) == "all";
+  if (fetch == nullptr && !force_sets &&
+      (force_all || (scan_keys != nullptr && *scan_keys > 0))) {
+    emit_offsets.resize(total_sequences + 1, 0);
+    for (size_t p = 0; p < total_sequences; ++p) {
+      const size_t length = sequence_at(p).size();
+      emit_offsets[p + 1] = emit_offsets[p] + (length < 2 ? 0 : length - 1);
+    }
+    total_2mers = emit_offsets.back();
+    emit_all = force_all || total_2mers / 2 <= *scan_keys;
+  }
+
+  std::vector<robin_hood::unordered_flat_set<Packed2mer>> thread_seen(
+      emit_all ? 0 : actual_threads);
+  std::vector<robin_hood::unordered_flat_set<Packed2mer>> thread_repeated(
+      emit_all ? 0 : actual_threads);
+  size_t num_keys = 0;
+  // Uninitialized so the pages are first touched by the parallel writers.
+  std::unique_ptr<Packed2mer[]> merge_keys;
 
   const auto t_scan0 = std::chrono::high_resolution_clock::now();
+  if (emit_all) {
+    num_keys = total_2mers;
+    merge_keys.reset(new Packed2mer[num_keys]);
+#pragma omp parallel for schedule(dynamic)
+    for (size_t p = 0; p < total_sequences; ++p) {
+      const auto &seq = sequence_at(p);
+      Packed2mer *out = merge_keys.get() + emit_offsets[p];
+      for (size_t i = 0; i + 1 < seq.size(); ++i)
+        out[i] = canonical_2mer(pack_2mer(seq[i], seq[i + 1]));
+    }
+  } else {
 #pragma omp parallel
-  {
-    const int tid = omp_get_thread_num();
-    auto &local_seen = thread_seen[tid];
-    auto &local_repeated = thread_repeated[tid];
-    std::vector<gfaz::NodeId> scratch;
+    {
+      const int tid = omp_get_thread_num();
+      auto &local_seen = thread_seen[tid];
+      auto &local_repeated = thread_repeated[tid];
+      std::vector<gfaz::NodeId> scratch;
 
 #pragma omp for schedule(dynamic)
-    for (size_t p = 0; p < total_sequences; ++p) {
-      const auto &seq =
-          fetch != nullptr
-              ? (*fetch)(p, scratch)
-              : (p < paths.size() ? paths[p] : walks[p - paths.size()]);
-      if (seq.size() < 2)
-        continue;
-
-      for (size_t i = 0; i + 1 < seq.size(); ++i) {
-        const Packed2mer canonical =
-            canonical_2mer(pack_2mer(seq[i], seq[i + 1]));
-        if (local_repeated.count(canonical))
+      for (size_t p = 0; p < total_sequences; ++p) {
+        const auto &seq =
+            fetch != nullptr ? (*fetch)(p, scratch) : sequence_at(p);
+        if (seq.size() < 2)
           continue;
-        if (!local_seen.insert(canonical).second)
-          local_repeated.insert(canonical);
+
+        for (size_t i = 0; i + 1 < seq.size(); ++i) {
+          const Packed2mer canonical =
+              canonical_2mer(pack_2mer(seq[i], seq[i + 1]));
+          if (local_repeated.count(canonical))
+            continue;
+          if (!local_seen.insert(canonical).second)
+            local_repeated.insert(canonical);
+        }
       }
     }
   }
-
   const auto t_scan1 = std::chrono::high_resolution_clock::now();
 
-  std::vector<size_t> offsets(static_cast<size_t>(actual_threads) + 1, 0);
-  for (int t = 0; t < actual_threads; ++t) {
-    offsets[static_cast<size_t>(t) + 1] =
-        offsets[static_cast<size_t>(t)] + thread_seen[t].size() +
-        thread_repeated[t].size();
-  }
+  if (!emit_all) {
+    std::vector<size_t> offsets(static_cast<size_t>(actual_threads) + 1, 0);
+    for (int t = 0; t < actual_threads; ++t) {
+      offsets[static_cast<size_t>(t) + 1] =
+          offsets[static_cast<size_t>(t)] + thread_seen[t].size() +
+          thread_repeated[t].size();
+    }
 
-  std::vector<Packed2mer> merge_keys(offsets.back());
+    num_keys = offsets.back();
+    merge_keys.reset(new Packed2mer[num_keys]);
 #pragma omp parallel for schedule(static)
-  for (int t = 0; t < actual_threads; ++t) {
-    size_t pos = offsets[static_cast<size_t>(t)];
-    for (Packed2mer kmer : thread_seen[t])
-      merge_keys[pos++] = kmer;
-    for (Packed2mer kmer : thread_repeated[t])
-      merge_keys[pos++] = kmer;
-    thread_seen[t].clear();
-    thread_repeated[t].clear();
+    for (int t = 0; t < actual_threads; ++t) {
+      size_t pos = offsets[static_cast<size_t>(t)];
+      for (Packed2mer kmer : thread_seen[t])
+        merge_keys[pos++] = kmer;
+      for (Packed2mer kmer : thread_repeated[t])
+        merge_keys[pos++] = kmer;
+      thread_seen[t].clear();
+      thread_repeated[t].clear();
+    }
+    thread_seen.clear();
+    thread_repeated.clear();
   }
-  thread_seen.clear();
-  thread_repeated.clear();
+  if (scan_keys != nullptr)
+    *scan_keys = num_keys;
   const auto t_collect = std::chrono::high_resolution_clock::now();
 
 #if defined(__GLIBCXX__)
-  __gnu_parallel::sort(merge_keys.begin(), merge_keys.end());
+  __gnu_parallel::sort(merge_keys.get(), merge_keys.get() + num_keys);
 #else
-  std::sort(merge_keys.begin(), merge_keys.end());
+  std::sort(merge_keys.get(), merge_keys.get() + num_keys);
 #endif
   const auto t_sort = std::chrono::high_resolution_clock::now();
 
   // Parallel duplicate extraction over the sorted keys. Chunk starts are
   // advanced to run boundaries so every run of equal keys is scanned by
   // exactly one chunk; sorted order is preserved in the output.
-  const size_t num_keys = merge_keys.size();
   const size_t num_chunks =
       std::max<size_t>(1, std::min<size_t>(static_cast<size_t>(actual_threads) * 4,
                                            num_keys / 4096 + 1));
@@ -272,8 +323,7 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
       i = j;
     }
   }
-  merge_keys.clear();
-  merge_keys.shrink_to_fit();
+  merge_keys.reset();
   const auto t_dedup = std::chrono::high_resolution_clock::now();
 
   if (gfaz_debug_enabled()) {
@@ -282,7 +332,8 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
     };
     std::cerr << "    [generate sub] scan=" << ms(t_scan0, t_scan1)
               << " ms, collect=" << ms(t_scan1, t_collect)
-              << " ms (keys=" << offsets.back() << ")"
+              << " ms (keys=" << num_keys
+              << (emit_all ? ", all 2-mers)" : ")")
               << ", sort=" << ms(t_collect, t_sort)
               << " ms, dedup=" << ms(t_sort, t_dedup) << " ms" << std::endl;
   }
