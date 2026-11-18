@@ -66,6 +66,12 @@
   unless `GFAZ_LARGE_CONCORDANCE=1` and the chrY inputs + vg are present.
 - Shared normalizers live in `tests/concordance/concordance_utils.py`.
 
+`tests/cpp/`
+- C++ tests built with the project and run by `ctest --test-dir build`.
+- `test_gfa_decoder.cpp` covers the front-door decoder API.
+- `test_key_sort.cpp` checks the rule generator's parallel key sort against
+  `std::sort` on uniform, skewed, repeated and extreme-valued inputs.
+
 ## Running
 
 The hermetic CPU-only suite (CLI regressions + concordance, no bindings needed):
