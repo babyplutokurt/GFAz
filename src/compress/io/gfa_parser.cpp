@@ -534,6 +534,215 @@ bool assign_fixed_optional_fields(
   return true;
 }
 
+// Strict decimal parse: digits only, no leading zero, fits in uint32. Two
+// names that pass are the same string exactly when they are the same number.
+inline bool parse_canonical_number(std::string_view s, uint32_t &value) {
+  if (s.empty() || s.size() > 10 || s[0] == '0')
+    return false;
+  uint64_t result = 0;
+  for (char c : s) {
+    const unsigned digit = static_cast<unsigned>(c - '0');
+    if (digit > 9)
+      return false;
+    result = result * 10 + digit;
+  }
+  if (result > std::numeric_limits<uint32_t>::max())
+    return false;
+  value = static_cast<uint32_t>(result);
+  return true;
+}
+
+size_t optional_column_rows(const gfaz::OptionalFieldColumn &col) {
+  switch (col.type) {
+  case 'i':
+    return col.int_values.size();
+  case 'f':
+    return col.float_values.size();
+  case 'A':
+    return col.char_values.size();
+  case 'Z':
+  case 'J':
+  case 'H':
+    return col.string_lengths.size();
+  case 'B':
+    return col.b_subtypes.size();
+  }
+  return 0;
+}
+
+void pad_optional_column(gfaz::OptionalFieldColumn &col, size_t rows) {
+  switch (col.type) {
+  case 'i':
+    if (col.int_values.size() < rows)
+      col.int_values.resize(rows, std::numeric_limits<int64_t>::min());
+    break;
+  case 'f':
+    if (col.float_values.size() < rows)
+      col.float_values.resize(rows, std::numeric_limits<float>::lowest());
+    break;
+  case 'A':
+    if (col.char_values.size() < rows)
+      col.char_values.resize(rows, '\0');
+    break;
+  case 'Z':
+  case 'J':
+  case 'H':
+    if (col.string_lengths.size() < rows)
+      col.string_lengths.resize(rows, 0);
+    break;
+  case 'B':
+    if (col.b_subtypes.size() < rows) {
+      col.b_subtypes.resize(rows, '\0');
+      col.b_lengths.resize(rows, 0);
+    }
+    break;
+  }
+}
+
+inline uint16_t optional_tag_key(std::string_view tag) {
+  return (static_cast<uint16_t>(static_cast<unsigned char>(tag[0])) << 8) |
+         static_cast<uint16_t>(static_cast<unsigned char>(tag[1]));
+}
+
+// Optional-field columns for one contiguous block of rows, filled by a single
+// worker with row numbers relative to the block. Blocks are concatenated in
+// row order afterwards, which reproduces the columns (and their order of first
+// appearance) that the serial parser builds.
+struct OptionalColumnChunk {
+  std::vector<gfaz::OptionalFieldColumn> columns;
+  FixedFieldMeta meta;
+};
+
+// Returns false for rows the serial parser must handle: a tag whose type
+// changes, a tag repeated within one row, or an unsupported type.
+bool append_chunk_optional_fields(std::string_view line, size_t pos,
+                                  size_t local_row,
+                                  OptionalColumnChunk &chunk) {
+  while (pos < line.size()) {
+    const std::string_view field = next_field(line, pos);
+    if (field.empty())
+      break;
+    if (field.size() < 5 || field[2] != ':' || field[4] != ':')
+      continue;
+    const char type = field[3];
+    if (type != 'i' && type != 'f' && type != 'A' && type != 'Z' &&
+        type != 'J' && type != 'H' && type != 'B')
+      return false;
+    const uint16_t key = optional_tag_key(field);
+    auto it = chunk.meta.find(key);
+    if (it == chunk.meta.end()) {
+      it = chunk.meta.emplace(key, std::make_pair(type, chunk.columns.size()))
+               .first;
+      gfaz::OptionalFieldColumn col;
+      col.tag = std::string(field.substr(0, 2));
+      col.type = type;
+      chunk.columns.push_back(std::move(col));
+    } else if (it->second.first != type) {
+      return false;
+    }
+    gfaz::OptionalFieldColumn &col = chunk.columns[it->second.second];
+    if (optional_column_rows(col) > local_row)
+      return false;
+    append_optional_value(col, type, local_row, field.substr(5));
+  }
+  return true;
+}
+
+// Concatenates per-block columns in row order. `row_bases[k]` is the first row
+// of block k and `row_bases.back()` the total row count. Blocks are freed as
+// they are consumed. Returns false on a type conflict between blocks.
+bool merge_optional_chunks(std::vector<OptionalColumnChunk> &chunks,
+                           const std::vector<size_t> &row_bases,
+                           std::vector<gfaz::OptionalFieldColumn> &out,
+                           FixedFieldMeta &out_meta) {
+  out.clear();
+  out_meta.clear();
+  std::vector<size_t> string_bytes;
+  std::vector<size_t> b_bytes;
+  for (const auto &chunk : chunks) {
+    for (const auto &col : chunk.columns) {
+      const uint16_t key = optional_tag_key(col.tag);
+      auto it = out_meta.find(key);
+      if (it == out_meta.end()) {
+        it = out_meta.emplace(key, std::make_pair(col.type, out.size())).first;
+        gfaz::OptionalFieldColumn merged;
+        merged.tag = col.tag;
+        merged.type = col.type;
+        out.push_back(std::move(merged));
+        string_bytes.push_back(0);
+        b_bytes.push_back(0);
+      } else if (it->second.first != col.type) {
+        out.clear();
+        out_meta.clear();
+        return false;
+      }
+      string_bytes[it->second.second] += col.concatenated_strings.size();
+      b_bytes[it->second.second] += col.b_concat_bytes.size();
+    }
+  }
+
+  const size_t total_rows = row_bases.back();
+  for (size_t i = 0; i < out.size(); ++i) {
+    reserve_optional_column(out[i], out[i].type, total_rows);
+    out[i].concatenated_strings.reserve(string_bytes[i]);
+    out[i].b_concat_bytes.reserve(b_bytes[i]);
+  }
+
+  for (size_t k = 0; k < chunks.size(); ++k) {
+    for (auto &col : chunks[k].columns) {
+      gfaz::OptionalFieldColumn &dst =
+          out[out_meta.find(optional_tag_key(col.tag))->second.second];
+      pad_optional_column(dst, row_bases[k]);
+      dst.int_values.insert(dst.int_values.end(), col.int_values.begin(),
+                            col.int_values.end());
+      dst.float_values.insert(dst.float_values.end(), col.float_values.begin(),
+                              col.float_values.end());
+      dst.char_values.insert(dst.char_values.end(), col.char_values.begin(),
+                             col.char_values.end());
+      dst.concatenated_strings.append(col.concatenated_strings);
+      dst.string_lengths.insert(dst.string_lengths.end(),
+                                col.string_lengths.begin(),
+                                col.string_lengths.end());
+      dst.b_subtypes.insert(dst.b_subtypes.end(), col.b_subtypes.begin(),
+                            col.b_subtypes.end());
+      dst.b_lengths.insert(dst.b_lengths.end(), col.b_lengths.begin(),
+                           col.b_lengths.end());
+      dst.b_concat_bytes.insert(dst.b_concat_bytes.end(),
+                                col.b_concat_bytes.begin(),
+                                col.b_concat_bytes.end());
+    }
+    chunks[k] = OptionalColumnChunk{};
+  }
+  return true;
+}
+
+// Splits `count` rows into contiguous blocks for the chunked parsers; more
+// blocks than threads so dynamic scheduling can even out uneven line lengths.
+std::vector<size_t> chunk_row_bases(size_t count) {
+  int threads = 1;
+#ifdef _OPENMP
+  threads = std::max(1, omp_get_max_threads());
+#endif
+  const size_t chunks =
+      std::max<size_t>(1, std::min(count, static_cast<size_t>(threads) * 8));
+  std::vector<size_t> bases(chunks + 1);
+  for (size_t k = 0; k <= chunks; ++k)
+    bases[k] = count / chunks * k + std::min(k, count % chunks);
+  return bases;
+}
+
+// Drops input pages a block's forward scan has finished with, one window at a
+// time, so the text does not stay resident for the whole phase.
+inline void release_chunk_pages(const char *data, size_t page_size,
+                                size_t offset, size_t &cursor) {
+  constexpr size_t kWindow = 16ull * 1024ull * 1024ull;
+  if (offset < cursor + kWindow)
+    return;
+  const size_t end = (offset / page_size) * page_size;
+  madvise(const_cast<char *>(data) + cursor, end - cursor, MADV_DONTNEED);
+  cursor = end;
+}
+
 } // namespace
 
 using gfaz::runtime_utils::format_memory_snapshot;
@@ -701,6 +910,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   segment_field_meta_.clear();
   link_field_meta_.clear();
   node_name_lookup_.clear();
+  numeric_name_table_.clear();
   num_segments_hint_ = 0;
   num_links_hint_ = 0;
   all_segment_names_numeric_ = true;
@@ -1719,6 +1929,16 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     }
   }
 
+  // GFAZ_SERIAL_PARSE forces the line-at-a-time parsers below; tests use it
+  // as the reference the chunked parsers must reproduce.
+  const bool allow_chunked_parse = std::getenv("GFAZ_SERIAL_PARSE") == nullptr;
+  if (allow_chunked_parse && !parsed_segments_in_parallel &&
+      !s_offsets.empty()) {
+    parsed_segments_in_parallel =
+        parse_segments_in_chunks(mmap_data, s_offsets, page_size,
+                                 direct_segment_columns, graph);
+  }
+
   if (!parsed_segments_in_parallel) {
     if (direct_segment_columns) {
       graph.segments.node_id_to_name.reserve(num_segments_hint_ + 1);
@@ -1766,7 +1986,11 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   s_offsets.clear();
   s_offsets.shrink_to_fit();
   release_phase_pages(1);
-  log_phase("parse S-lines");
+  log_phase(std::string("parse S-lines") +
+            (!parsed_segments_in_parallel
+                 ? " (serial)"
+                 : !numeric_name_table_.empty() ? " (parallel, number table)"
+                                                : " (parallel)"));
 
   // Phase 2: With numeric node IDs, links are independent indexed rows and can
   // use the same fixed-width optional-column fast path.
@@ -1840,7 +2064,19 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     }
   }
 
+  if (allow_chunked_parse && !parsed_links_in_parallel &&
+      !l_offsets.empty()) {
+    parsed_links_in_parallel =
+        parse_links_in_chunks(mmap_data, l_offsets, page_size, graph);
+  }
+
   if (!parsed_links_in_parallel) {
+    graph.links.from_ids.reserve(num_links_hint_);
+    graph.links.to_ids.reserve(num_links_hint_);
+    graph.links.from_orients.reserve(num_links_hint_);
+    graph.links.to_orients.reserve(num_links_hint_);
+    graph.links.overlap_nums.reserve(num_links_hint_);
+    graph.links.overlap_ops.reserve(num_links_hint_);
     size_t release_cursor = 0;
     for (const auto &off : l_offsets) {
       std::string_view line(mmap_data + off.offset, off.length);
@@ -1882,7 +2118,8 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   l_offsets.clear();
   l_offsets.shrink_to_fit();
   release_phase_pages(2);
-  log_phase("parse L-lines");
+  log_phase(std::string("parse L-lines") +
+            (parsed_links_in_parallel ? " (parallel)" : " (serial)"));
 
   // Phase 3: Parse P/W-lines (parallel - each writes to pre-allocated index)
   graph.paths_data.traversals.resize(p_offsets.size());
@@ -1951,6 +2188,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   c_offsets.clear();
   c_offsets.shrink_to_fit();
   release_phase_pages(4);
+  numeric_name_table_ = {};
   log_phase("parse J/C-lines");
 
   munmap(const_cast<char *>(mmap_data), file_size);
@@ -1983,6 +2221,223 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   }
 
   return graph;
+}
+
+bool GfaParser::parse_segments_in_chunks(
+    const char *data, const std::vector<gfaz::LineOffset> &offsets,
+    size_t page_size, bool direct_segment_columns, gfaz::GfaGraph &graph) {
+  const size_t count = offsets.size();
+  if (count >= std::numeric_limits<uint32_t>::max())
+    return false;
+
+  const std::vector<size_t> row_bases = chunk_row_bases(count);
+  const size_t chunk_count = row_bases.size() - 1;
+  std::vector<OptionalColumnChunk> optional(chunk_count);
+  std::vector<uint32_t> name_numbers(count);
+  auto &names = graph.segments.node_id_to_name;
+  auto &sequences = graph.segments.node_sequences;
+  // With direct columns the sequences go straight into the flattened layout
+  // the entropy stage consumes (lengths now, bytes in a second pass once the
+  // offsets are known) and no per-segment strings are created.
+  auto &lengths = graph.segments.node_sequence_lengths;
+  auto &concat = graph.segments.node_sequences_concat;
+  std::vector<size_t> sequence_bases(chunk_count + 1, 0);
+  if (direct_segment_columns) {
+    lengths.resize(count);
+  } else {
+    names.resize(count + 1);
+    sequences.resize(count + 1);
+  }
+  std::atomic<bool> failed{false};
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1)
+#endif
+  for (size_t chunk = 0; chunk < chunk_count; ++chunk) {
+    const size_t base = row_bases[chunk];
+    size_t release_cursor =
+        ((offsets[base].offset + page_size - 1) / page_size) * page_size;
+    size_t sequence_bytes = 0;
+    try {
+      for (size_t i = base; i < row_bases[chunk + 1]; ++i) {
+        if (failed.load(std::memory_order_relaxed))
+          break;
+        const auto &off = offsets[i];
+        const std::string_view line(data + off.offset, off.length);
+        size_t pos = 1;
+        const std::string_view name = next_field(line, pos);
+        const std::string_view sequence = next_field(line, pos);
+        if (!parse_canonical_number(name, name_numbers[i]) ||
+            sequence.size() > std::numeric_limits<uint32_t>::max() ||
+            !append_chunk_optional_fields(line, pos, i - base,
+                                          optional[chunk])) {
+          failed.store(true, std::memory_order_relaxed);
+          break;
+        }
+        if (direct_segment_columns) {
+          lengths[i] = static_cast<uint32_t>(sequence.size());
+          sequence_bytes += sequence.size();
+        } else {
+          names[i + 1].assign(name.data(), name.size());
+          sequences[i + 1].assign(sequence.data(), sequence.size());
+        }
+        release_chunk_pages(data, page_size, off.offset, release_cursor);
+      }
+    } catch (...) {
+      failed.store(true, std::memory_order_relaxed);
+    }
+    sequence_bases[chunk + 1] = sequence_bytes;
+  }
+
+  std::vector<uint32_t> table;
+  bool ok = !failed.load(std::memory_order_relaxed);
+  bool dense = ok;
+  if (ok) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) reduction(&& : dense)
+#endif
+    for (size_t i = 0; i < count; ++i)
+      dense = dense && name_numbers[i] == i + 1;
+  }
+  if (ok && !dense) {
+    // Names are numbers but not 1..N in file order. Segment IDs are still
+    // assigned in file order; the table maps each number to its ID. Bound the
+    // table so sparse numbering does not cost more than the hash lookup.
+    uint32_t max_number = 0;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) reduction(max : max_number)
+#endif
+    for (size_t i = 0; i < count; ++i)
+      max_number = std::max(max_number, name_numbers[i]);
+    const uint64_t limit =
+        std::max<uint64_t>(uint64_t{16} * count, uint64_t{1} << 20);
+    ok = max_number <= limit;
+    if (ok) {
+      table.assign(static_cast<size_t>(max_number) + 1, 0);
+      for (size_t i = 0; i < count && ok; ++i) {
+        uint32_t &slot = table[name_numbers[i]];
+        ok = slot == 0; // a repeated name merges rows in the serial parser
+        slot = static_cast<uint32_t>(i + 1);
+      }
+    }
+  }
+  if (ok) {
+    ok = merge_optional_chunks(optional, row_bases,
+                               graph.segments.optional_fields,
+                               segment_field_meta_);
+  }
+  if (!ok) {
+    names.resize(1);
+    sequences.resize(1);
+    lengths = {};
+    graph.segments.optional_fields.clear();
+    segment_field_meta_.clear();
+    return false;
+  }
+
+  if (direct_segment_columns) {
+    for (size_t chunk = 0; chunk < chunk_count; ++chunk)
+      sequence_bases[chunk + 1] += sequence_bases[chunk];
+    concat.resize(sequence_bases.back());
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1)
+#endif
+    for (size_t chunk = 0; chunk < chunk_count; ++chunk) {
+      const size_t base = row_bases[chunk];
+      size_t release_cursor =
+          ((offsets[base].offset + page_size - 1) / page_size) * page_size;
+      char *out = concat.data() + sequence_bases[chunk];
+      for (size_t i = base; i < row_bases[chunk + 1]; ++i) {
+        const auto &off = offsets[i];
+        const std::string_view line(data + off.offset, off.length);
+        size_t pos = 1;
+        (void)next_field(line, pos);
+        const std::string_view sequence = next_field(line, pos);
+        std::memcpy(out, sequence.data(), sequence.size());
+        out += sequence.size();
+        release_chunk_pages(data, page_size, off.offset, release_cursor);
+      }
+    }
+  }
+
+  if (!dense) {
+    all_segment_names_numeric_ = false;
+    numeric_name_table_ = std::move(table);
+  }
+  return true;
+}
+
+bool GfaParser::parse_links_in_chunks(
+    const char *data, const std::vector<gfaz::LineOffset> &offsets,
+    size_t page_size, gfaz::GfaGraph &graph) {
+  const size_t count = offsets.size();
+  const std::vector<size_t> row_bases = chunk_row_bases(count);
+  const size_t chunk_count = row_bases.size() - 1;
+  std::vector<OptionalColumnChunk> optional(chunk_count);
+  auto &links = graph.links;
+  links.from_ids.resize(count);
+  links.to_ids.resize(count);
+  links.from_orients.resize(count);
+  links.to_orients.resize(count);
+  links.overlap_nums.resize(count);
+  links.overlap_ops.resize(count);
+  std::atomic<bool> failed{false};
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1)
+#endif
+  for (size_t chunk = 0; chunk < chunk_count; ++chunk) {
+    const size_t base = row_bases[chunk];
+    size_t release_cursor =
+        ((offsets[base].offset + page_size - 1) / page_size) * page_size;
+    try {
+      for (size_t i = base; i < row_bases[chunk + 1]; ++i) {
+        if (failed.load(std::memory_order_relaxed))
+          break;
+        const auto &off = offsets[i];
+        const std::string_view line(data + off.offset, off.length);
+        size_t pos = 1;
+        const uint32_t from_id = resolve_node_id(next_field(line, pos));
+        const std::string_view from_orient = next_field(line, pos);
+        const uint32_t to_id = resolve_node_id(next_field(line, pos));
+        const std::string_view to_orient = next_field(line, pos);
+        const std::string_view overlap = next_field(line, pos);
+        // The serial parser drops a link with an unknown endpoint, which
+        // shifts every later row.
+        if (from_id == 0 || to_id == 0 ||
+            !append_chunk_optional_fields(line, pos, i - base,
+                                          optional[chunk])) {
+          failed.store(true, std::memory_order_relaxed);
+          break;
+        }
+        links.from_ids[i] = from_id;
+        links.to_ids[i] = to_id;
+        links.from_orients[i] = from_orient.empty() ? '+' : from_orient[0];
+        links.to_orients[i] = to_orient.empty() ? '+' : to_orient[0];
+        if (overlap.empty() || overlap == "*") {
+          links.overlap_nums[i] = 0;
+          links.overlap_ops[i] = '\0';
+        } else {
+          char op = '\0';
+          links.overlap_nums[i] = parse_overlap_num(overlap, op);
+          links.overlap_ops[i] = op;
+        }
+        release_chunk_pages(data, page_size, off.offset, release_cursor);
+      }
+    } catch (...) {
+      failed.store(true, std::memory_order_relaxed);
+    }
+  }
+
+  if (failed.load(std::memory_order_relaxed) ||
+      !merge_optional_chunks(optional, row_bases, graph.link_optional_fields,
+                             link_field_meta_)) {
+    graph.links = {};
+    graph.link_optional_fields.clear();
+    link_field_meta_.clear();
+    return false;
+  }
+  return true;
 }
 
 void GfaParser::parse_s_line(std::string_view line, gfaz::GfaGraph &graph) {
@@ -2365,6 +2820,14 @@ uint32_t GfaParser::resolve_node_id(std::string_view node_name_view) const {
 
   if (all_segment_names_numeric_)
     return parse_uint32(node_name_view);
+
+  if (!numeric_name_table_.empty()) {
+    uint32_t number = 0;
+    if (!parse_canonical_number(node_name_view, number) ||
+        number >= numeric_name_table_.size())
+      return 0;
+    return numeric_name_table_[number];
+  }
 
   auto it = node_name_lookup_.find(node_name_view);
   return (it == node_name_lookup_.end()) ? 0 : it->second;
