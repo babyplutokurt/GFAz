@@ -149,7 +149,7 @@ size instead of staying at the parsed size until the last round.
 RAM, spill file and decompressed output on a Samsung 990 PRO NVMe drive.
 Throughput is the GFA size over end-to-end CLI wall time. Medians of 5 runs
 for the first four graphs, 3 for HPRC v1.1 and HGSVC3, single runs for HPRC
-v2.x.
+v2.x. Reproduce with `scripts/benchmark/compress_decompress.py`.
 
 Compression, default and with `--memory-budget 2G`:
 

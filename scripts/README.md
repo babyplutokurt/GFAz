@@ -2,6 +2,12 @@
 
 `scripts/benchmark/`
 - Benchmark drivers and performance comparison helpers.
+- `compress_decompress.py`: hot-cache throughput and peak RSS of `gfaz compress`
+  (default and `--memory-budget`) and `gfaz decompress` (to `/dev/null` and to
+  a file) over a list of GFAs; records page-cache residency around each run and
+  the output hash. Produced the tables in `docs/WORKFLOW.md`.
+- `compress_memory.py`: interleaved A/B of `gfaz compress` builds or options
+  (wall time, peak RSS, output hash).
 - `decompress_modes.py`: compare CPU streaming vs legacy decompression.
 - `extract_queries.py`: benchmark `extract-path` / `extract-walk` queries.
 - `add_haplotypes.py`: benchmark `gfaz add-haplotypes`.
