@@ -5,6 +5,7 @@
 #include "compress/grammar/rule_flat_map.hpp"
 #include "core/model/gfa_graph.hpp"
 #include "robin_hood.h"
+#include <functional>
 #include <vector>
 
 
@@ -26,6 +27,11 @@ struct CompressionRules2Mer {
   size_t num_rules() const { return rule_id_to_kmer.size(); }
 };
 
+// Returns traversal `index` (paths first, then walks) for a scan. Traversals
+// that are not held in memory are decoded into `scratch` and that is returned.
+using TraversalFetch = std::function<const std::vector<gfaz::NodeId> &(
+    size_t index, std::vector<gfaz::NodeId> &scratch)>;
+
 class RuleGenerator {
 public:
   RuleGenerator();
@@ -41,7 +47,8 @@ public:
   generate_rules_2mer_combined(const std::vector<std::vector<gfaz::NodeId>> &paths,
                                const std::vector<std::vector<gfaz::NodeId>> &walks,
                                uint32_t starting_id, size_t freq_threshold,
-                               int num_threads = 0);
+                               int num_threads = 0,
+                               const TraversalFetch *fetch = nullptr);
 };
 
 #endif // RULE_GENERATOR_HPP

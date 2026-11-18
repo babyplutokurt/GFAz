@@ -149,7 +149,7 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer(
 CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
     const std::vector<std::vector<gfaz::NodeId>> &paths,
     const std::vector<std::vector<gfaz::NodeId>> &walks, uint32_t starting_id,
-    size_t freq_threshold, int num_threads) {
+    size_t freq_threshold, int num_threads, const TraversalFetch *fetch) {
 
   CompressionRules2Mer rules;
   rules.rules_start_id = starting_id;
@@ -171,11 +171,14 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
     const int tid = omp_get_thread_num();
     auto &local_seen = thread_seen[tid];
     auto &local_repeated = thread_repeated[tid];
+    std::vector<gfaz::NodeId> scratch;
 
 #pragma omp for schedule(dynamic)
     for (size_t p = 0; p < total_sequences; ++p) {
       const auto &seq =
-          p < paths.size() ? paths[p] : walks[p - paths.size()];
+          fetch != nullptr
+              ? (*fetch)(p, scratch)
+              : (p < paths.size() ? paths[p] : walks[p - paths.size()]);
       if (seq.size() < 2)
         continue;
 
@@ -298,8 +301,17 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
       }
     }
   };
-  process_sequences(paths);
-  process_sequences(walks);
+  if (fetch != nullptr) {
+    std::vector<gfaz::NodeId> scratch;
+    std::vector<std::vector<gfaz::NodeId>> one(1);
+    for (size_t p = 0; p < paths.size() + walks.size(); ++p) {
+      one[0] = (*fetch)(p, scratch);
+      process_sequences(one);
+    }
+  } else {
+    process_sequences(paths);
+    process_sequences(walks);
+  }
   repeated_pairs.assign(repeated.begin(), repeated.end());
 #endif
 

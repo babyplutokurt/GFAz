@@ -31,6 +31,10 @@
 - `test_thread_determinism.py` asserts pav/growth/deconstruct produce
   byte-identical output at 1/4/8 threads (the OpenMP reductions must be
   thread-count invariant).
+- `test_low_memory_compress.py` asserts `gfaz compress --memory-budget` writes a
+  byte-identical `.gfaz` for budgets that spill everything, part, or nothing,
+  across thread counts and delta settings, and that an unusable `--tmp-dir` or
+  budget fails cleanly.
 - `test_degenerate_inputs.py` covers degenerate-but-valid graphs (segments-only,
   walks-only, header-only) round-tripping cleanly, and invalid invocations
   (missing/malformed BED, unresolved pav/deconstruct reference) failing with a

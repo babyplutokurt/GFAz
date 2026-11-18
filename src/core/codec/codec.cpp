@@ -227,7 +227,25 @@ ZstdCompressedBlock zstd_compress_bytes(const void *data, size_t size_bytes) {
     return block;
   }
 
-  ZSTD_CCtx *ctx = get_thread_cctx();
+  // Single-threaded blocks reuse this thread's context. A multithreaded
+  // context keeps its worker pool, per-worker match tables and job buffers
+  // (tens of MB per worker) until it is freed, so large blocks get their own
+  // context and release it as soon as the block is done; the setup cost is
+  // negligible next to compressing a block that large.
+  struct OwnedCCtx {
+    ZSTD_CCtx *ctx = nullptr;
+    ~OwnedCCtx() {
+      if (ctx)
+        ZSTD_freeCCtx(ctx);
+    }
+  } owned;
+  ZSTD_CCtx *ctx = nullptr;
+  if (resolve_zstd_workers(size_bytes) > 0) {
+    owned.ctx = ZSTD_createCCtx();
+    ctx = owned.ctx;
+  } else {
+    ctx = get_thread_cctx();
+  }
   if (ctx == nullptr) {
     std::cerr << "ZSTD compression failed: unable to create compression context"
               << std::endl;
@@ -238,20 +256,22 @@ ZstdCompressedBlock zstd_compress_bytes(const void *data, size_t size_bytes) {
     return block;
   }
 
+  // Compress into an uninitialized staging buffer and copy out the exact
+  // result. Sizing the payload to the worst-case bound would zero-fill (and
+  // so make resident) as many bytes as the input, and the payload would keep
+  // that capacity for as long as the CompressedData lives.
   const size_t bound = ZSTD_compressBound(size_bytes);
-  block.payload.resize(bound);
+  std::unique_ptr<uint8_t[]> staging(new uint8_t[bound]);
   const size_t compressed_size =
-      ZSTD_compress2(ctx, block.payload.data(), block.payload.size(), data,
-                     size_bytes);
+      ZSTD_compress2(ctx, staging.get(), bound, data, size_bytes);
 
   if (ZSTD_isError(compressed_size)) {
     std::cerr << "ZSTD compression failed: "
               << ZSTD_getErrorName(compressed_size) << std::endl;
-    block.payload.clear();
     return block;
   }
 
-  block.payload.resize(compressed_size);
+  block.payload.assign(staging.get(), staging.get() + compressed_size);
   return block;
 }
 } // namespace

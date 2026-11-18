@@ -1,6 +1,7 @@
 #include "cli/commands.hpp"
 
 #include <chrono>
+#include <cstdlib>
 #include <getopt.h>
 #include <iomanip>
 #include <iostream>
@@ -17,6 +18,40 @@
 
 namespace gfaz::cli {
 
+namespace {
+
+// Parses sizes such as "268435456", "512M", "4G", "1.5G" (binary units).
+bool parse_size_arg(const char *name, const char *text, size_t &bytes) {
+  try {
+    size_t used = 0;
+    const std::string value(text);
+    const double number = std::stod(value, &used);
+    double scale = 1.0;
+    if (used < value.size()) {
+      switch (value[used]) {
+      case 'k': case 'K': scale = 1024.0; break;
+      case 'm': case 'M': scale = 1024.0 * 1024.0; break;
+      case 'g': case 'G': scale = 1024.0 * 1024.0 * 1024.0; break;
+      case 't': case 'T': scale = 1024.0 * 1024.0 * 1024.0 * 1024.0; break;
+      default: throw std::invalid_argument(value);
+      }
+      const std::string rest = value.substr(used + 1);
+      if (!(rest.empty() || rest == "B" || rest == "b" || rest == "iB"))
+        throw std::invalid_argument(value);
+    }
+    if (!(number > 0))
+      throw std::invalid_argument(value);
+    bytes = static_cast<size_t>(number * scale);
+    return true;
+  } catch (const std::exception &) {
+    std::cerr << "Error: invalid size for " << name << ": '" << text
+              << "' (expected e.g. 512M or 4G)\n";
+    return false;
+  }
+}
+
+} // namespace
+
 int do_compress(int argc, char *argv[]) {
   int rounds = kDefaultRounds;
   int delta_round = kDefaultDeltaRound;
@@ -27,6 +62,7 @@ int do_compress(int argc, char *argv[]) {
   bool show_stats = false;
   bool debug = false;
   unsigned long long gpu_chunk_mb = 0;
+  CompressOptions cpu_options;
 
   static struct option long_options[] = {
       {"rounds", required_argument, 0, 'r'},
@@ -40,6 +76,8 @@ int do_compress(int argc, char *argv[]) {
       {"gpu-legacy", no_argument, 0, kOptGpuLegacy},
       {"stats", no_argument, 0, 's'},
       {"debug", no_argument, 0, kOptDebug},
+      {"memory-budget", required_argument, 0, kOptMemoryBudget},
+      {"tmp-dir", required_argument, 0, kOptTmpDir},
       {"help", no_argument, 0, 'h'},
       {0, 0, 0, 0}};
 
@@ -81,6 +119,14 @@ int do_compress(int argc, char *argv[]) {
       break;
     case kOptDebug:
       debug = true;
+      break;
+    case kOptMemoryBudget:
+      if (!parse_size_arg("--memory-budget", optarg,
+                          cpu_options.traversal_memory_budget_bytes))
+        return 1;
+      break;
+    case kOptTmpDir:
+      cpu_options.tmp_dir = optarg;
       break;
     case 'h':
       print_compress_help();
@@ -139,6 +185,22 @@ int do_compress(int argc, char *argv[]) {
     }
   }
 #endif
+
+  if (use_gpu && cpu_options.traversal_memory_budget_bytes > 0) {
+    std::cerr << "Note: --memory-budget only applies to the CPU backend."
+              << std::endl;
+  }
+  if (cpu_options.traversal_memory_budget_bytes > 0 &&
+      cpu_options.tmp_dir.empty()) {
+    const char *env_tmp = std::getenv("TMPDIR");
+    if (env_tmp != nullptr && *env_tmp != '\0') {
+      cpu_options.tmp_dir = env_tmp;
+    } else {
+      const size_t slash = output_path.find_last_of('/');
+      cpu_options.tmp_dir =
+          slash == std::string::npos ? "." : output_path.substr(0, slash + 1);
+    }
+  }
 
   std::cout << "=== GFAZ Compress ===" << std::endl;
   std::cout << "Input:  " << input_path << std::endl;
@@ -210,9 +272,9 @@ int do_compress(int argc, char *argv[]) {
     } else {
 #endif
       const auto workflow_start = Clock::now();
-      gfaz::CompressedData compressed_data = compress_gfa(
+      gfaz::CompressedData compressed_data = compress_gfa_with_options(
           input_path, rounds, freq_threshold, delta_round, num_threads,
-          show_stats);
+          show_stats, cpu_options);
       const auto workflow_end = Clock::now();
       workflow_ms =
           std::chrono::duration<double, std::milli>(workflow_end - workflow_start)
