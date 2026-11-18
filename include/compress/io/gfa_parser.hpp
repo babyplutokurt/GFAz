@@ -32,6 +32,10 @@ private:
   std::pmr::monotonic_buffer_resource name_lookup_pool_;
   std::pmr::unordered_map<std::string_view, uint32_t> node_name_lookup_{
       &name_lookup_pool_};
+  // Set when every segment name is a canonical decimal number but the names
+  // are not simply 1..N in file order: maps the number to the segment ID, so
+  // resolving a name is an array read instead of a string hash lookup.
+  std::vector<uint32_t> numeric_name_table_;
   size_t num_segments_hint_ = 0;
   size_t num_links_hint_ = 0;
   gfaz::TraversalSink *traversal_sink_ = nullptr;
@@ -44,6 +48,17 @@ private:
   void parse_l_line(std::string_view line, gfaz::GfaGraph &graph);
   void parse_p_line(std::string_view line, gfaz::GfaGraph &graph, size_t index);
   void parse_w_line(std::string_view line, gfaz::GfaGraph &graph, size_t index);
+
+  // Parallel parsers for the general (non-direct) mode. Each returns false,
+  // leaving the graph as it found it, for any input the serial line parsers
+  // treat specially; the caller then runs those.
+  bool parse_segments_in_chunks(const char *data,
+                                const std::vector<gfaz::LineOffset> &offsets,
+                                size_t page_size, bool direct_segment_columns,
+                                gfaz::GfaGraph &graph);
+  bool parse_links_in_chunks(const char *data,
+                             const std::vector<gfaz::LineOffset> &offsets,
+                             size_t page_size, gfaz::GfaGraph &graph);
 
   void parse_segment_field(std::string_view field, size_t segment_index, gfaz::GfaGraph &graph);
   void parse_link_field(std::string_view field, size_t link_index, gfaz::GfaGraph &graph);
