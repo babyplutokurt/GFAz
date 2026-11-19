@@ -1,7 +1,12 @@
 #include "compress/grammar/path_encoder.hpp"
 #include "compress/grammar/packed_2mer.hpp"
 #include <algorithm>
+#include <cstdint>
 #include <limits>
+#if defined(__linux__)
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -159,7 +164,25 @@ void PathEncoder::release_unused_capacity(std::vector<gfaz::NodeId> &path) {
   constexpr size_t kMinimumReclaimElements =
       (64ull * 1024ull) / sizeof(gfaz::NodeId);
   const size_t unused = path.capacity() - path.size();
-  if (unused < kMinimumReclaimElements || unused <= path.size() / 4)
+  if (unused < kMinimumReclaimElements)
+    return;
+#if defined(__linux__)
+  // Drop the pages behind the tail and keep the allocation: no copy into a
+  // smaller buffer, and the address range costs nothing while untouched.
+  static const uintptr_t page_size =
+      static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
+  const uintptr_t tail_begin =
+      (reinterpret_cast<uintptr_t>(path.data() + path.size()) + page_size - 1) &
+      ~(page_size - 1);
+  const uintptr_t tail_end =
+      reinterpret_cast<uintptr_t>(path.data() + path.capacity()) &
+      ~(page_size - 1);
+  if (tail_end <= tail_begin ||
+      madvise(reinterpret_cast<void *>(tail_begin), tail_end - tail_begin,
+              MADV_DONTNEED) == 0)
+    return;
+#endif
+  if (unused <= path.size() / 4)
     return;
   std::vector<gfaz::NodeId>(path).swap(path);
 }
