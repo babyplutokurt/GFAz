@@ -6,12 +6,17 @@
 #include "core/utils/threading_utils.hpp"
 #include "compress/decompression_debug.hpp"
 
+#include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #include <future>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -115,6 +120,55 @@ void decode_sequence_at_index(const std::vector<int32_t> &flat,
   }
 }
 
+// One output line built in a buffer that is not zero-filled. `ensure` makes
+// room once per step; the `put` calls after it are unchecked.
+class LineBuffer {
+public:
+  LineBuffer() = default;
+  explicit LineBuffer(size_t capacity) { grow(capacity); }
+
+  const char *data() const { return data_.get(); }
+  size_t size() const { return static_cast<size_t>(cursor_ - data_.get()); }
+
+  void ensure(size_t bytes) {
+    if (static_cast<size_t>(limit_ - cursor_) < bytes)
+      grow(bytes);
+  }
+  void put(char c) { *cursor_++ = c; }
+  void put_number(uint32_t value) {
+    cursor_ = std::to_chars(cursor_, limit_, value).ptr;
+  }
+  void append(std::string_view text) {
+    ensure(text.size());
+    std::memcpy(cursor_, text.data(), text.size());
+    cursor_ += text.size();
+  }
+  void append(char c) {
+    ensure(1);
+    put(c);
+  }
+
+private:
+  void grow(size_t bytes) {
+    const size_t used = size();
+    const size_t capacity = static_cast<size_t>(limit_ - data_.get());
+    const size_t new_capacity = std::max(used + bytes, capacity * 2);
+    std::unique_ptr<char[]> grown(new char[new_capacity]);
+    if (used != 0)
+      std::memcpy(grown.get(), data_.get(), used);
+    data_ = std::move(grown);
+    cursor_ = data_.get() + used;
+    limit_ = data_.get() + new_capacity;
+  }
+
+  std::unique_ptr<char[]> data_;
+  char *cursor_ = nullptr;
+  char *limit_ = nullptr;
+};
+
+// Longest text of one step: orientation, ten digits and a separator.
+constexpr size_t kMaxStepBytes = 12;
+
 template <typename Formatter>
 void write_sequence_batch_stream(std::ofstream &out, size_t total_count,
                                  int num_threads, Formatter formatter) {
@@ -128,7 +182,7 @@ void write_sequence_batch_stream(std::ofstream &out, size_t total_count,
 
   auto format_batch = [&](size_t batch_start) {
     const size_t batch_end = std::min(batch_start + batch_size, total_count);
-    std::vector<std::string> lines(batch_end - batch_start);
+    std::vector<LineBuffer> lines(batch_end - batch_start);
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic) num_threads(effective_threads)
@@ -141,7 +195,7 @@ void write_sequence_batch_stream(std::ofstream &out, size_t total_count,
   size_t batch_start = 0;
   auto pending = std::async(std::launch::async, format_batch, batch_start);
   while (batch_start < total_count) {
-    std::vector<std::string> lines = pending.get();
+    std::vector<LineBuffer> lines = pending.get();
     batch_start += batch_size;
     if (batch_start < total_count)
       pending = std::async(std::launch::async, format_batch, batch_start);
@@ -800,30 +854,29 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
                                     index < data.original_path_lengths.size()
                                         ? data.original_path_lengths[index]
                                         : 0;
-                                std::string path_line;
-                                path_line.reserve(name.size() + overlap.size() +
-                                                  original_length * 10 + 8);
-                                path_line += "P\t";
-                                path_line += name;
-                                path_line += '\t';
+                                LineBuffer path_line(
+                                    name.size() + overlap.size() +
+                                    original_length * 10 + 8);
+                                path_line.append("P\t");
+                                path_line.append(name);
+                                path_line.append('\t');
                                 bool first_node = true;
                                 decode_sequence_at_index(
                                     paths_flat, path_offsets, index, rules_first,
                                     rules_second, min_rule_id, data.delta_round,
                                     [&](gfaz::NodeId node) {
+                                      path_line.ensure(kMaxStepBytes);
                                       if (!first_node)
-                                        path_line += ',';
+                                        path_line.put(',');
                                       first_node = false;
                                       const bool reverse = node < 0;
-                                      append_numeric_node_name(
-                                          path_line,
-                                          static_cast<uint32_t>(reverse ? -node
-                                                                        : node));
-                                      path_line += reverse ? '-' : '+';
+                                      path_line.put_number(static_cast<uint32_t>(
+                                          reverse ? -node : node));
+                                      path_line.put(reverse ? '-' : '+');
                                     });
-                                path_line += '\t';
-                                path_line += overlap.empty() ? "*" : overlap;
-                                path_line += '\n';
+                                path_line.append('\t');
+                                path_line.append(overlap.empty() ? "*" : overlap);
+                                path_line.append('\n');
                                 return path_line;
                               });
   t1 = Clock::now();
@@ -858,36 +911,35 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
                                     index < data.original_walk_lengths.size()
                                         ? data.original_walk_lengths[index]
                                         : 0;
-                                std::string walk_line;
-                                walk_line.reserve(sample_id.size() + seq_id.size() +
-                                                  original_length * 10 + 32);
-                                walk_line += "W\t";
-                                walk_line += sample_id;
-                                walk_line += '\t';
-                                walk_line += std::to_string(hap_index);
-                                walk_line += '\t';
-                                walk_line += seq_id;
-                                walk_line += '\t';
-                                walk_line += seq_start >= 0
-                                                 ? std::to_string(seq_start)
-                                                 : "*";
-                                walk_line += '\t';
-                                walk_line += seq_end >= 0
-                                                 ? std::to_string(seq_end)
-                                                 : "*";
-                                walk_line += '\t';
+                                LineBuffer walk_line(
+                                    sample_id.size() + seq_id.size() +
+                                    original_length * 10 + 80);
+                                walk_line.append("W\t");
+                                walk_line.append(sample_id);
+                                walk_line.append('\t');
+                                walk_line.append(std::to_string(hap_index));
+                                walk_line.append('\t');
+                                walk_line.append(seq_id);
+                                walk_line.append('\t');
+                                walk_line.append(seq_start >= 0
+                                                     ? std::to_string(seq_start)
+                                                     : "*");
+                                walk_line.append('\t');
+                                walk_line.append(seq_end >= 0
+                                                     ? std::to_string(seq_end)
+                                                     : "*");
+                                walk_line.append('\t');
                                 decode_sequence_at_index(
                                     walks_flat, walk_offsets, index, rules_first,
                                     rules_second, min_rule_id, data.delta_round,
                                     [&](gfaz::NodeId node) {
                                       const bool reverse = node < 0;
-                                      walk_line += reverse ? '<' : '>';
-                                      append_numeric_node_name(
-                                          walk_line,
-                                          static_cast<uint32_t>(reverse ? -node
-                                                                        : node));
+                                      walk_line.ensure(kMaxStepBytes);
+                                      walk_line.put(reverse ? '<' : '>');
+                                      walk_line.put_number(static_cast<uint32_t>(
+                                          reverse ? -node : node));
                                     });
-                                walk_line += '\n';
+                                walk_line.append('\n');
                                 return walk_line;
                               });
   t1 = Clock::now();
