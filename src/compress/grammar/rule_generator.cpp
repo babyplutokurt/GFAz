@@ -1,3 +1,4 @@
+#include "core/utils/runtime_utils.hpp"
 #include "compress/grammar/rule_generator.hpp"
 #include "compress/grammar/kmer_seen_table.hpp"
 #include "compress/grammar/key_sort.hpp"
@@ -111,6 +112,8 @@ NextRoundScan::Keys NextRoundScan::finish(uint32_t rules_start_id,
   result.count = offsets.back();
   result.unfiltered_count = result.count + skipped;
   result.keys.reset(new Packed2mer[result.count]);
+  gfaz::runtime_utils::advise_huge_pages(result.keys.get(),
+                                         result.count * sizeof(Packed2mer));
 
   const auto final_id = [&](gfaz::NodeId id) -> gfaz::NodeId {
     const uint32_t abs_id = abs_node_id(id);
@@ -357,6 +360,10 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
     constexpr size_t kPiece = size_t{1} << 16;
     merge_keys.reset(new Packed2mer[
         total_2mers + static_cast<size_t>(actual_threads) * kPiece]);
+    gfaz::runtime_utils::advise_huge_pages(
+        merge_keys.get(),
+        (total_2mers + static_cast<size_t>(actual_threads) * kPiece) *
+            sizeof(Packed2mer));
     std::atomic<size_t> next_piece{0};
     // Unused tail of each thread's last piece: [begin, end).
     std::vector<std::pair<size_t, size_t>> gaps(actual_threads, {0, 0});
@@ -470,6 +477,8 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
 
     num_keys = offsets.back();
     merge_keys.reset(new Packed2mer[num_keys]);
+    gfaz::runtime_utils::advise_huge_pages(merge_keys.get(),
+                                           num_keys * sizeof(Packed2mer));
 #pragma omp parallel for schedule(static)
     for (int t = 0; t < actual_threads; ++t) {
       size_t pos = offsets[static_cast<size_t>(t)];

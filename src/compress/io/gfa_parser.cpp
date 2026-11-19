@@ -2542,6 +2542,11 @@ bool GfaParser::parse_segments_in_chunks(
         std::max<uint64_t>(uint64_t{16} * count, uint64_t{1} << 20);
     ok = max_number <= limit;
     if (ok) {
+      // Walk parsing looks names up here at random: ask for huge pages
+      // before the first touch.
+      table.reserve(static_cast<size_t>(max_number) + 1);
+      gfaz::runtime_utils::advise_huge_pages(
+          table.data(), (static_cast<size_t>(max_number) + 1) * sizeof(uint32_t));
       table.assign(static_cast<size_t>(max_number) + 1, 0);
       for (size_t i = 0; i < count && ok; ++i) {
         uint32_t &slot = table[name_numbers[i]];

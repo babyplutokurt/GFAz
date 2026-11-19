@@ -1,9 +1,15 @@
 #include "core/utils/runtime_utils.hpp"
 
+#include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <string_view>
+
+#if defined(__linux__)
+#include <sys/mman.h>
+#endif
 
 namespace gfaz::runtime_utils {
 
@@ -17,6 +23,26 @@ std::string format_size(size_t bytes) {
   else
     oss << bytes << " Bytes";
   return oss.str();
+}
+
+void advise_huge_pages(void *begin, size_t bytes) {
+#if defined(__linux__) && defined(MADV_HUGEPAGE)
+  constexpr size_t kHugePage = size_t{2} << 20;
+  constexpr size_t kMinBytes = size_t{8} << 20;
+  static const bool disabled = std::getenv("GFAZ_NO_HUGE_PAGES") != nullptr;
+  if (disabled || begin == nullptr || bytes < kMinBytes)
+    return;
+  const uintptr_t first =
+      (reinterpret_cast<uintptr_t>(begin) + kHugePage - 1) / kHugePage *
+      kHugePage;
+  const uintptr_t last =
+      (reinterpret_cast<uintptr_t>(begin) + bytes) / kHugePage * kHugePage;
+  if (last > first)
+    madvise(reinterpret_cast<void *>(first), last - first, MADV_HUGEPAGE);
+#else
+  (void)begin;
+  (void)bytes;
+#endif
 }
 
 ProcessMemorySnapshot read_process_memory_snapshot() {

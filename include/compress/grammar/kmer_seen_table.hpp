@@ -2,6 +2,7 @@
 #define KMER_SEEN_TABLE_HPP
 
 #include "compress/grammar/packed_2mer.hpp"
+#include "core/utils/runtime_utils.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -129,6 +130,7 @@ private:
         static_cast<uint64_t *>(std::calloc(capacity, sizeof(uint64_t)));
     if (fresh == nullptr)
       throw std::bad_alloc();
+    gfaz::runtime_utils::advise_huge_pages(fresh, capacity * sizeof(uint64_t));
     const size_t mask = capacity - 1;
     for (size_t index = 0; index < capacity_; ++index) {
       const uint64_t slot = slots_[index];
