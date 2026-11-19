@@ -14,6 +14,9 @@ option(ENABLE_PROFILING "Enable gperftools CPU profiling" OFF)
 option(GFAZ_USE_SYSTEM_ZSTD "Use system-installed Zstd instead of vendored copy" ON)
 option(BUILD_PYTHON_BINDINGS "Build Pybind11 Python bindings" ON)
 option(BUILD_CLI "Build the gfaz CLI executable" ON)
+option(GFAZ_BUILD_HANDLEGRAPH "Build the libhandlegraph adapter (needs GFAZ_HANDLEGRAPH_INCLUDE_DIR)" OFF)
+set(GFAZ_HANDLEGRAPH_INCLUDE_DIR "" CACHE PATH "Directory that contains handlegraph/handle_graph.hpp")
+set(GFAZ_HANDLEGRAPH_LIBRARY "" CACHE FILEPATH "libhandlegraph to link the adapter test against (optional)")
 set(CUDA_PATH "" CACHE PATH "Root directory of the CUDA Toolkit (e.g., /usr/local/cuda)")
 
 # Python is only required for bindings.
@@ -263,6 +266,30 @@ add_library(gfaz_compute STATIC ${GFAZ_COMPUTE_SOURCES})
 set_target_properties(gfaz_compute PROPERTIES POSITION_INDEPENDENT_CODE ON)
 configure_gfa_target(gfaz_compute)
 target_link_libraries(gfaz_compute PUBLIC gfaz_core)
+
+# libhandlegraph adapter: a read-only handlegraph::PathPositionHandleGraph over
+# a .gfaz. Optional because it needs libhandlegraph headers; a host project
+# (vg, odgi) that already has them builds this target and links it.
+if(GFAZ_BUILD_HANDLEGRAPH)
+  if(NOT EXISTS "${GFAZ_HANDLEGRAPH_INCLUDE_DIR}/handlegraph/handle_graph.hpp")
+    message(FATAL_ERROR "GFAZ_BUILD_HANDLEGRAPH needs GFAZ_HANDLEGRAPH_INCLUDE_DIR "
+                        "to point at the libhandlegraph include directory")
+  endif()
+  add_library(gfaz_handlegraph STATIC
+    src/handlegraph_adapter/gfaz_handle_graph.cpp)
+  set_target_properties(gfaz_handlegraph PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  configure_gfa_target(gfaz_handlegraph)
+  target_include_directories(gfaz_handlegraph SYSTEM PUBLIC
+    "${GFAZ_HANDLEGRAPH_INCLUDE_DIR}")
+  target_link_libraries(gfaz_handlegraph PUBLIC gfaz_compute gfaz_core)
+
+  if(GFAZ_HANDLEGRAPH_LIBRARY)
+    add_executable(gfaz_handle_graph_test tests/cpp/test_handle_graph.cpp)
+    configure_gfa_target(gfaz_handle_graph_test)
+    target_link_libraries(gfaz_handle_graph_test PRIVATE
+      gfaz_handlegraph "${GFAZ_HANDLEGRAPH_LIBRARY}")
+  endif()
+endif()
 
 if(BUILD_PYTHON_BINDINGS)
   # Python extension module (import name `gfa_compression`).
