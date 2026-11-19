@@ -41,6 +41,16 @@ inline void append_node_name(std::string &out, uint32_t node_id,
     out += std::to_string(node_id);
 }
 
+inline void prefetch_rule(int32_t node, const std::vector<int32_t> &first,
+                          const std::vector<int32_t> &second, uint32_t min_id,
+                          uint32_t max_id) {
+  const uint32_t abs_id = static_cast<uint32_t>(std::abs(node));
+  if (abs_id >= min_id && abs_id < max_id) {
+    __builtin_prefetch(&first[abs_id - min_id]);
+    __builtin_prefetch(&second[abs_id - min_id]);
+  }
+}
+
 template <typename Emit>
 void expand_rule_emit(uint32_t rule_id, bool reverse,
                       const std::vector<int32_t> &first,
@@ -49,6 +59,10 @@ void expand_rule_emit(uint32_t rule_id, bool reverse,
   const uint32_t idx = rule_id - min_id;
   const int32_t a = first[idx];
   const int32_t b = second[idx];
+
+  // The child expanded second is known now; fetch its rule while the other
+  // child is expanded.
+  prefetch_rule(reverse ? a : b, first, second, min_id, max_id);
 
   if (!reverse) {
     const uint32_t abs_a = static_cast<uint32_t>(std::abs(a));
@@ -109,7 +123,11 @@ void decode_sequence_at_index(const std::vector<int32_t> &flat,
     emit(static_cast<gfaz::NodeId>(decoded));
   };
 
+  constexpr size_t kPrefetchAhead = 4;
   for (size_t pos = start; pos < end; ++pos) {
+    if (pos + kPrefetchAhead < end)
+      prefetch_rule(flat[pos + kPrefetchAhead], rules_first, rules_second,
+                    min_rule_id, max_rule_id);
     const gfaz::NodeId node = flat[pos];
     const uint32_t abs_id = static_cast<uint32_t>(std::abs(node));
     if (abs_id >= min_rule_id && abs_id < max_rule_id)
