@@ -56,6 +56,8 @@ public:
   // Largest absolute symbol produced by the delta transform(s).
   uint32_t max_abs() const { return max_abs_.load(); }
   bool is_spilled(size_t i) const { return records_[i].bytes != 0; }
+  // Number of steps of spilled traversal `i`.
+  size_t spilled_length(size_t i) const { return records_[i].steps; }
   size_t spilled_count() const { return spilled_count_.load(); }
   size_t spilled_steps() const { return spilled_steps_.load(); }
   size_t memory_bytes() const { return memory_bytes_.load(); }

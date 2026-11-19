@@ -46,16 +46,20 @@ def compress(cli: Path, src: Path, dst: Path, extra, scan):
 
 
 def check(cli: Path, src: Path, workdir: Path):
-  for delta in ("0", "1"):
+  # A small budget makes the scans read traversals back from the spill file.
+  budget = ["--memory-budget", "8K", "--tmp-dir", str(workdir)]
+  for delta in ("0", "1", "2"):
     for threads in ("1", "4"):
       extra = ["-d", delta, "-j", threads]
       reference = compress(cli, src, workdir / "sets.gfaz", extra, "sets")
       for scan in ("sets-legacy", "all", None):
-        got = compress(cli, src, workdir / "other.gfaz", extra, scan)
-        if got != reference:
-          raise AssertionError(
-              f"{src.name}: rule scan '{scan or 'default'}' changed the "
-              f"output (delta={delta}, threads={threads})")
+        for spill in ([], budget):
+          got = compress(cli, src, workdir / "other.gfaz", extra + spill, scan)
+          if got != reference:
+            raise AssertionError(
+                f"{src.name}: rule scan '{scan or 'default'}' changed the "
+                f"output (delta={delta}, threads={threads}, "
+                f"budget={'yes' if spill else 'no'})")
 
 
 def main():

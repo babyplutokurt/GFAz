@@ -154,7 +154,7 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
     const std::vector<std::vector<gfaz::NodeId>> &paths,
     const std::vector<std::vector<gfaz::NodeId>> &walks, uint32_t starting_id,
     size_t freq_threshold, int num_threads, const TraversalFetch *fetch,
-    size_t *scan_keys) {
+    size_t *scan_keys, const TraversalLength *fetch_length) {
 
   CompressionRules2Mer rules;
   rules.rules_start_id = starting_id;
@@ -189,11 +189,13 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
       (forced_scan != nullptr && std::string_view(forced_scan) == "sets");
   const bool force_all =
       forced_scan != nullptr && std::string_view(forced_scan) == "all";
-  if (fetch == nullptr && !force_sets &&
+  // With fetched traversals the offsets need each length up front.
+  if ((fetch == nullptr || fetch_length != nullptr) && !force_sets &&
       (force_all || (scan_keys != nullptr && *scan_keys > 0))) {
     emit_offsets.resize(total_sequences + 1, 0);
     for (size_t p = 0; p < total_sequences; ++p) {
-      const size_t length = sequence_at(p).size();
+      const size_t length =
+          fetch != nullptr ? (*fetch_length)(p) : sequence_at(p).size();
       emit_offsets[p + 1] = emit_offsets[p] + (length < 2 ? 0 : length - 1);
     }
     total_2mers = emit_offsets.back();
@@ -220,12 +222,17 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
   if (emit_all) {
     num_keys = total_2mers;
     merge_keys.reset(new Packed2mer[num_keys]);
-#pragma omp parallel for schedule(dynamic)
-    for (size_t p = 0; p < total_sequences; ++p) {
-      const auto &seq = sequence_at(p);
-      Packed2mer *out = merge_keys.get() + emit_offsets[p];
-      for (size_t i = 0; i + 1 < seq.size(); ++i)
-        out[i] = canonical_2mer(pack_2mer(seq[i], seq[i + 1]));
+#pragma omp parallel
+    {
+      std::vector<gfaz::NodeId> scratch;
+#pragma omp for schedule(dynamic)
+      for (size_t p = 0; p < total_sequences; ++p) {
+        const auto &seq =
+            fetch != nullptr ? (*fetch)(p, scratch) : sequence_at(p);
+        Packed2mer *out = merge_keys.get() + emit_offsets[p];
+        for (size_t i = 0; i + 1 < seq.size(); ++i)
+          out[i] = canonical_2mer(pack_2mer(seq[i], seq[i + 1]));
+      }
     }
   } else if (use_seen_tables) {
     // Start each table at half the previous round's keys per thread: random

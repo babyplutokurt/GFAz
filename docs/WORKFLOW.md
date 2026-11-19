@@ -75,8 +75,7 @@ are the canonical 2-mers that occur at least twice, in sorted order. Two scans
 find them:
 
 - Per-thread hash tables drop repeats inside a thread before the sort. Used
-  in the early rounds, where most 2-mers repeat, and whenever traversals are
-  being streamed from the spill file. Each table
+  in the early rounds, where most 2-mers repeat. Each table
   (`include/compress/grammar/kmer_seen_table.hpp`) costs one probe per 2-mer
   and keeps its "seen twice" mark inside the key, which needs node IDs below
   2^30; larger IDs fall back to two `robin_hood` sets per thread.

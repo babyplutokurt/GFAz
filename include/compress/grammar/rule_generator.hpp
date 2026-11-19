@@ -32,6 +32,9 @@ struct CompressionRules2Mer {
 using TraversalFetch = std::function<const std::vector<gfaz::NodeId> &(
     size_t index, std::vector<gfaz::NodeId> &scratch)>;
 
+// Length of traversal `index` without loading it.
+using TraversalLength = std::function<size_t(size_t index)>;
+
 class RuleGenerator {
 public:
   RuleGenerator();
@@ -52,7 +55,8 @@ public:
                                uint32_t starting_id, size_t freq_threshold,
                                int num_threads = 0,
                                const TraversalFetch *fetch = nullptr,
-                               size_t *scan_keys = nullptr);
+                               size_t *scan_keys = nullptr,
+                               const TraversalLength *fetch_length = nullptr);
 };
 
 #endif // RULE_GENERATOR_HPP

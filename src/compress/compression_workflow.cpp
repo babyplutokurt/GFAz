@@ -702,6 +702,12 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
     spill->load(index, scratch);
     return scratch;
   };
+  const TraversalLength traversal_length = [&](size_t index) -> size_t {
+    if (spill->is_spilled(index))
+      return spill->spilled_length(index);
+    return index < num_paths ? paths[index].size()
+                             : walks[index - num_paths].size();
+  };
   double data_size_mb = total_elements * sizeof(int32_t) / (1024.0 * 1024.0);
 
   // Timing accumulators
@@ -720,7 +726,8 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
     RuleGenerator gen;
     CompressionRules2Mer rules = gen.generate_rules_2mer_combined(
         paths, walks, next_id, freq_threshold, num_threads,
-        spilled_round ? &fetch_traversal : nullptr, &scan_keys);
+        spilled_round ? &fetch_traversal : nullptr, &scan_keys,
+        spilled_round ? &traversal_length : nullptr);
     if (spill) {
       spill->throw_if_failed();
       spill->release_thread_buffers();
