@@ -456,6 +456,52 @@ void parse_b_array(std::string_view value_view, gfaz::OptionalFieldColumn &col) 
 
 // Reserve storage for the active type variant of a freshly-discovered optional
 // column, sized to the expected row count. Shared by segment/link parsing.
+// Faults in the pages of a freshly reserved buffer from all threads. A large
+// buffer that one thread then fills (a resize or an append) would otherwise
+// take every page fault on that thread. Only a hint: failure is ignored.
+void populate_pages(const void *begin, size_t bytes) {
+#if defined(__linux__)
+#ifndef MADV_POPULATE_WRITE
+#define MADV_POPULATE_WRITE 23
+#endif
+  constexpr size_t kMinBytes = 64ull * 1024ull * 1024ull;
+  if (begin == nullptr || bytes < kMinBytes)
+    return;
+  const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  const size_t first =
+      (reinterpret_cast<uintptr_t>(begin) + page - 1) / page * page;
+  const size_t last = (reinterpret_cast<uintptr_t>(begin) + bytes) / page * page;
+  if (last <= first)
+    return;
+  const size_t pages = (last - first) / page;
+  constexpr size_t kPagesPerPiece = 4096;
+  const size_t pieces = (pages + kPagesPerPiece - 1) / kPagesPerPiece;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1)
+#endif
+  for (size_t piece = 0; piece < pieces; ++piece) {
+    const size_t piece_first = first + piece * kPagesPerPiece * page;
+    const size_t piece_last =
+        std::min(last, piece_first + kPagesPerPiece * page);
+    madvise(reinterpret_cast<void *>(piece_first), piece_last - piece_first,
+            MADV_POPULATE_WRITE);
+  }
+#else
+  (void)begin;
+  (void)bytes;
+#endif
+}
+
+template <typename T> void reserve_populated(std::vector<T> &values, size_t n) {
+  values.reserve(n);
+  populate_pages(values.data(), n * sizeof(T));
+}
+
+inline void reserve_populated(std::string &value, size_t n) {
+  value.reserve(n);
+  populate_pages(value.data(), n);
+}
+
 void reserve_optional_column(gfaz::OptionalFieldColumn &col, char type,
                              size_t hint) {
   if (type == 'i')
@@ -760,8 +806,17 @@ bool merge_optional_chunks(std::vector<OptionalColumnChunk> &chunks,
   const size_t total_rows = row_bases.back();
   for (size_t i = 0; i < out.size(); ++i) {
     reserve_optional_column(out[i], out[i].type, total_rows);
-    out[i].concatenated_strings.reserve(string_bytes[i]);
-    out[i].b_concat_bytes.reserve(b_bytes[i]);
+    // Every column ends up with one value per row, so the whole reservation
+    // is used; fault it in from all threads before the serial appends below.
+    populate_pages(out[i].int_values.data(),
+                   out[i].int_values.capacity() * sizeof(int64_t));
+    populate_pages(out[i].float_values.data(),
+                   out[i].float_values.capacity() * sizeof(float));
+    populate_pages(out[i].char_values.data(), out[i].char_values.capacity());
+    populate_pages(out[i].string_lengths.data(),
+                   out[i].string_lengths.capacity() * sizeof(uint32_t));
+    reserve_populated(out[i].concatenated_strings, string_bytes[i]);
+    reserve_populated(out[i].b_concat_bytes, b_bytes[i]);
   }
 
   for (size_t k = 0; k < chunks.size(); ++k) {
@@ -2005,6 +2060,8 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
           sequence_offsets[i + 1] =
               sequence_offsets[i] + graph.segments.node_sequence_lengths[i];
         }
+        reserve_populated(graph.segments.node_sequences_concat,
+                          sequence_offsets.back());
         graph.segments.node_sequences_concat.resize(sequence_offsets.back());
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -2112,6 +2169,12 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     if (initialize_fixed_optional_columns(first_line, first_pos,
                                           l_offsets.size(), fixed_columns,
                                           fixed_meta)) {
+      reserve_populated(graph.links.from_ids, l_offsets.size());
+      reserve_populated(graph.links.to_ids, l_offsets.size());
+      reserve_populated(graph.links.from_orients, l_offsets.size());
+      reserve_populated(graph.links.to_orients, l_offsets.size());
+      reserve_populated(graph.links.overlap_nums, l_offsets.size());
+      reserve_populated(graph.links.overlap_ops, l_offsets.size());
       graph.links.from_ids.resize(l_offsets.size());
       graph.links.to_ids.resize(l_offsets.size());
       graph.links.from_orients.resize(l_offsets.size());
@@ -2352,6 +2415,7 @@ bool GfaParser::parse_segments_in_chunks(
   // through node_name_lookup_, as in the serial parser.
   std::atomic<bool> named{false};
   if (direct_segment_columns) {
+    reserve_populated(lengths, count);
     lengths.resize(count);
   } else {
     names.resize(count + 1);
@@ -2505,6 +2569,7 @@ bool GfaParser::parse_segments_in_chunks(
   if (direct_segment_columns) {
     for (size_t chunk = 0; chunk < chunk_count; ++chunk)
       sequence_bases[chunk + 1] += sequence_bases[chunk];
+    reserve_populated(concat, sequence_bases.back());
     concat.resize(sequence_bases.back());
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1)
@@ -2542,6 +2607,12 @@ bool GfaParser::parse_links_in_chunks(
   const size_t chunk_count = row_bases.size() - 1;
   std::vector<OptionalColumnChunk> optional(chunk_count);
   auto &links = graph.links;
+  reserve_populated(links.from_ids, count);
+  reserve_populated(links.to_ids, count);
+  reserve_populated(links.from_orients, count);
+  reserve_populated(links.to_orients, count);
+  reserve_populated(links.overlap_nums, count);
+  reserve_populated(links.overlap_ops, count);
   links.from_ids.resize(count);
   links.to_ids.resize(count);
   links.from_orients.resize(count);
