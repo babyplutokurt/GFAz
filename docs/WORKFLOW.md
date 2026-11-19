@@ -82,6 +82,12 @@ find them:
 - Later rounds, where most 2-mers are distinct, write every 2-mer to the sort
   buffer and skip the sets. The switch uses the previous round's key count.
 
+From the second round on, both scans and the encoder only look at 2-mers that
+contain a rule created by the previous round. A 2-mer of two older symbols was
+already adjacent before that round and was not replaced, so it occurred once
+and still does. In the last rounds, where few symbols are new, this leaves
+only a small share of the 2-mers to sort and look up.
+
 Keys are sorted with a bucketed radix sort
 (`src/compress/grammar/key_sort.cpp`: sampled splitters, then a byte-wise radix
 sort per bucket). Both scans give the same rules
@@ -95,6 +101,8 @@ exist for the equivalence tests and for A/B timing:
 - `GFAZ_SERIAL_PARSE=1`: use the serial S/L line parsers in the general parser.
 - `GFAZ_RULE_SCAN=sets|sets-legacy|all`: always use the hash-table scan, its
   two-set fallback, or always sort every 2-mer.
+- `GFAZ_NEW_SYMBOL_FILTER=0`: look at every 2-mer in every round instead of
+  only those that contain a rule from the previous round.
 - `GFAZ_SPILL_CODEC=raw`: store spilled traversals as plain `int32` instead of
   varints.
 - `GFAZ_SPILL_DROP_CACHE=1`: evict spill-file pages from the page cache as they

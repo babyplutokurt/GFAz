@@ -14,10 +14,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 
 #include <iostream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if defined(__GLIBC__)
@@ -720,6 +722,14 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
   auto total_start = std::chrono::high_resolution_clock::now();
 
   size_t scan_keys = 0;
+  // After a round, every repeated 2-mer contains a rule that round created
+  // (see RuleGenerator::generate_rules_2mer_combined), so the next round only
+  // looks at those. GFAZ_NEW_SYMBOL_FILTER=0 looks at every 2-mer instead;
+  // tests use it to check that the output is the same.
+  const char *filter_switch = std::getenv("GFAZ_NEW_SYMBOL_FILTER");
+  const bool filter_new_symbols =
+      filter_switch == nullptr || std::string_view(filter_switch) != "0";
+  uint32_t min_new_id = 0;
   for (int round = 0; round < num_rounds; ++round) {
     auto t0 = std::chrono::high_resolution_clock::now();
     const bool spilled_round = spill != nullptr && spill->spilled_count() > 0;
@@ -727,7 +737,7 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
     CompressionRules2Mer rules = gen.generate_rules_2mer_combined(
         paths, walks, next_id, freq_threshold, num_threads,
         spilled_round ? &fetch_traversal : nullptr, &scan_keys,
-        spilled_round ? &traversal_length : nullptr);
+        spilled_round ? &traversal_length : nullptr, min_new_id);
     if (spill) {
       spill->throw_if_failed();
       spill->release_thread_buffers();
@@ -764,12 +774,13 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
             spill->load(index, scratch);
             encode(scratch);
             spill->store(index, scratch, slot);
-          });
+          },
+          min_new_id);
       spill->end_rewrite();
       spill->throw_if_failed();
     } else {
-      encoder.encode_paths_2mer(paths, rules, rules_used);
-      encoder.encode_paths_2mer(walks, rules, rules_used);
+      encoder.encode_paths_2mer(paths, rules, rules_used, min_new_id);
+      encoder.encode_paths_2mer(walks, rules, rules_used, min_new_id);
     }
 #if defined(__GLIBC__)
     // The encoder released each traversal's unused tail; hand those pages
@@ -881,6 +892,8 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
       rulebook[idx] = used[i].first;
     }
 
+    if (filter_new_symbols)
+      min_new_id = next_id;
     next_id = new_id;
 
     t1 = std::chrono::high_resolution_clock::now();

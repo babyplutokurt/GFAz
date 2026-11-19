@@ -49,6 +49,12 @@ public:
   // `scan_keys`, when given, carries the number of keys the previous round
   // sorted in and this round's count out; the generator uses it to pick the
   // cheaper way to find repeated 2-mers. It never changes the rules produced.
+  //
+  // `min_new_id` > 0 says the sequences are the output of a grammar round
+  // whose rules got IDs >= min_new_id. A 2-mer of two older IDs was then
+  // already adjacent before that round and was not replaced, so it occurred
+  // once and still does: only 2-mers containing an ID >= min_new_id are
+  // looked at. The rules are the same as with min_new_id = 0.
   CompressionRules2Mer
   generate_rules_2mer_combined(const std::vector<std::vector<gfaz::NodeId>> &paths,
                                const std::vector<std::vector<gfaz::NodeId>> &walks,
@@ -56,7 +62,8 @@ public:
                                int num_threads = 0,
                                const TraversalFetch *fetch = nullptr,
                                size_t *scan_keys = nullptr,
-                               const TraversalLength *fetch_length = nullptr);
+                               const TraversalLength *fetch_length = nullptr,
+                               uint32_t min_new_id = 0);
 };
 
 #endif // RULE_GENERATOR_HPP

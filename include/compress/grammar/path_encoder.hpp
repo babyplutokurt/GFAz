@@ -10,11 +10,14 @@ class PathEncoder {
 public:
     PathEncoder();
 
-    // Encode paths using 2-mer rules
+    // Encode paths using 2-mer rules.
+    // `min_new_id` > 0: the rules were generated with the same min_new_id
+    // (see RuleGenerator), so pairs of two IDs below it are not looked up.
     void encode_paths_2mer(
         std::vector<std::vector<gfaz::NodeId>>& paths, 
         const CompressionRules2Mer& rules, 
-        std::vector<uint8_t>& rules_used);
+        std::vector<uint8_t>& rules_used,
+        uint32_t min_new_id = 0);
 
     // Encodes one traversal in place.
     using EncodeOne = std::function<void(std::vector<gfaz::NodeId> &)>;
@@ -28,7 +31,8 @@ public:
     // accumulated like in encode_paths_2mer.
     void encode_indexed_2mer(size_t count, const CompressionRules2Mer &rules,
                              std::vector<uint8_t> &rules_used,
-                             const VisitIndex &visit);
+                             const VisitIndex &visit,
+                             uint32_t min_new_id = 0);
 
     // Reallocate a traversal that encoding left much smaller than its
     // capacity, so resident memory follows the encoded size.

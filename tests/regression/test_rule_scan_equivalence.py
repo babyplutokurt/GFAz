@@ -9,6 +9,11 @@ to the sort buffer. It picks per round; `GFAZ_RULE_SCAN=sets|all` pins one.
 `sets-legacy` pins the two-sets-per-thread fallback that the set route uses
 when node IDs do not fit the single-probe table.
 The .gfaz must be byte-identical for both pinned routes and the default.
+
+From the second round on, the scan and the encoder skip 2-mers made of two
+symbols older than the previous round, because those cannot repeat.
+`GFAZ_NEW_SYMBOL_FILTER=0` turns that off; the reference output is made that
+way, so every other run also checks the filter.
 """
 
 import os
@@ -31,11 +36,14 @@ from tests.regression.test_low_memory_compress import (
 )
 
 
-def compress(cli: Path, src: Path, dst: Path, extra, scan):
+def compress(cli: Path, src: Path, dst: Path, extra, scan, new_filter=True):
   env = dict(os.environ)
   env.pop("GFAZ_RULE_SCAN", None)
+  env.pop("GFAZ_NEW_SYMBOL_FILTER", None)
   if scan:
     env["GFAZ_RULE_SCAN"] = scan
+  if not new_filter:
+    env["GFAZ_NEW_SYMBOL_FILTER"] = "0"
   result = subprocess.run(
       [str(cli), "compress", *extra, str(src), str(dst)],
       cwd=str(REPO_ROOT), text=True, capture_output=True, check=False, env=env)
@@ -51,8 +59,9 @@ def check(cli: Path, src: Path, workdir: Path):
   for delta in ("0", "1", "2"):
     for threads in ("1", "4"):
       extra = ["-d", delta, "-j", threads]
-      reference = compress(cli, src, workdir / "sets.gfaz", extra, "sets")
-      for scan in ("sets-legacy", "all", None):
+      reference = compress(cli, src, workdir / "sets.gfaz", extra, "sets",
+                           new_filter=False)
+      for scan in ("sets", "sets-legacy", "all", None):
         for spill in ([], budget):
           got = compress(cli, src, workdir / "other.gfaz", extra + spill, scan)
           if got != reference:
