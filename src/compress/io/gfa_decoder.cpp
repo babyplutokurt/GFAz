@@ -1,6 +1,6 @@
 #include "compress/io/gfa_decoder.hpp"
 
-#include "compress/io/gfa_write_utils.hpp"
+#include "core/io/gfa_write_utils.hpp"
 #include "core/codec/codec.hpp"
 #include "core/codec/serialization.hpp"
 #include "core/utils/threading_utils.hpp"

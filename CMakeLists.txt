@@ -132,6 +132,7 @@ endif()
 set(GFAZ_CORE_SOURCES
   src/core/codec/codec.cpp
   src/core/codec/serialization.cpp
+  src/core/io/gfa_write_utils.cpp
   src/core/model/segment_names.cpp
   src/core/utils/runtime_utils.cpp
 )
@@ -140,7 +141,6 @@ set(GFAZ_COMPRESS_SOURCES
   src/compress/io/gfa_parser.cpp
   src/compress/io/gfa_decoder.cpp
   src/compress/io/gfa_writer.cpp
-  src/compress/io/gfa_write_utils.cpp
   src/compress/grammar/rule_generator.cpp
   src/compress/grammar/path_encoder.cpp
   src/compress/grammar/traversal_spill.cpp
@@ -160,6 +160,10 @@ set(GFAZ_COMPUTE_SOURCES
   src/compute/similarity_workflow.cpp
   src/compute/stats_workflow.cpp
   src/compute/depth_workflow.cpp
+  src/compute/region_workflow.cpp
+  src/compute/traversal_set.cpp
+  src/compute/path_index.cpp
+  src/compute/haplotype_catalog.cpp
   src/compute/deconstruct_workflow.cpp
   src/compute/snarl_finder.cpp
   src/compute/traversal_query.cpp
@@ -282,6 +286,7 @@ if(BUILD_CLI)
     src/cli/similarity_command.cpp
     src/cli/stats_command.cpp
     src/cli/depth_command.cpp
+    src/cli/extract_region_command.cpp
     src/cli/deconstruct_command.cpp
   )
   set_target_properties(gfaz PROPERTIES

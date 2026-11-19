@@ -32,6 +32,8 @@ This directory holds the project documentation. The top-level
   odgi-equivalent graph dimension summary.
 - [workflows/DEPTH_WORKFLOW.md](workflows/DEPTH_WORKFLOW.md) — `gfaz depth`, the
   odgi-equivalent node coverage depth.
+- [workflows/REGION_WORKFLOW.md](workflows/REGION_WORKFLOW.md) — `gfaz extract-region`,
+  the subgraph around a reference region as GFA.
 - [workflows/DECONSTRUCT_WORKFLOW.md](workflows/DECONSTRUCT_WORKFLOW.md) —
   `gfaz deconstruct`, the vg-equivalent GFA→VCF workflow.
 

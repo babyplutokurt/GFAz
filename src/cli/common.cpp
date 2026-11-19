@@ -78,6 +78,7 @@ USAGE:
     gfaz similarity -i <input.gfaz> [OPTIONS]
     gfaz stats -i <input.gfaz> [OPTIONS]
     gfaz depth -i <input.gfaz> [OPTIONS]
+    gfaz extract-region -i <input.gfaz> -r <region> [OPTIONS]
     gfaz deconstruct -i <input.gfaz> -r <reference-name> [OPTIONS]
 
 SUBCOMMANDS:
@@ -91,6 +92,7 @@ SUBCOMMANDS:
     similarity    All-vs-all group similarity matrix (odgi similarity-equivalent)
     stats         Graph dimension summary (odgi stats-equivalent)
     depth         Node coverage depth (odgi depth-equivalent)
+    extract-region  Subgraph around a reference region, as GFA
     deconstruct   Derive a VCF (GFA -> VCF) relative to a reference path
 
 OPTIONS (compress):
@@ -359,6 +361,37 @@ NOTES:
     Computed directly from the compressed container metadata (no traversal
     decode for the summary), so it is near-instant.
 
+)";
+}
+
+void print_extract_region_help() {
+  std::cout << R"(
+gfaz extract-region - Subgraph around reference regions, as GFA
+
+USAGE:
+    gfaz extract-region -i <input.gfaz> -r <region> [OPTIONS] > region.gfa
+
+OPTIONS:
+    -i, --input <FILE>      Input .gfaz file.
+    -r, --region <REGION>   CONTIG:START-END (0-based, end-exclusive) or CONTIG.
+                            CONTIG is a P-line name, or sample#hap#seq of a
+                            W-line; coordinates are positions on that sequence.
+                            May be given more than once.
+    -g, --max-gap <BP>      Join two visits of a haplotype to the region, and
+                            keep what lies between them, when they are at most
+                            this many bases apart [default: 100000].
+    --index-block-steps <N> Steps per block of the path index built for the
+                            query [default: 4096]. Smaller blocks cost memory
+                            and narrow each lookup; the output does not change.
+    -t, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP.
+    -j, --threads <N>       Alias for -t.
+    -h, --help              Show this help message.
+
+OUTPUT:
+    GFA on stdout: every segment visited by the kept haplotype stretches, every
+    link between two of those segments, and one P- or W-line per stretch.
+    W-lines carry the coordinates of the stretch; a partial P-line is named
+    NAME:START-END. Segments keep their original GFA names.
 )";
 }
 

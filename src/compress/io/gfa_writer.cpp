@@ -1,5 +1,5 @@
 #include "compress/io/gfa_writer.hpp"
-#include "compress/io/gfa_write_utils.hpp"
+#include "core/io/gfa_write_utils.hpp"
 #include "core/codec/codec.hpp"
 #include "core/model/segment_names.hpp"
 #include "core/utils/debug_log.hpp"

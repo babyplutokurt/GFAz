@@ -49,6 +49,7 @@ void print_pav_help();
 void print_similarity_help();
 void print_stats_help();
 void print_depth_help();
+void print_extract_region_help();
 void print_deconstruct_help();
 
 } // namespace gfaz::cli

@@ -51,6 +51,7 @@ HERMETIC_SUITES = [
     "tests/regression/test_similarity.py",
     "tests/regression/test_stats.py",
     "tests/regression/test_depth.py",
+    "tests/regression/test_extract_region.py",
     "tests/concordance/test_pav_vs_odgi.py",
     "tests/concordance/test_growth_vs_panacus.py",
     "tests/concordance/test_similarity_vs_odgi.py",

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "compress/gpu/decompression/path_decompression_gpu_rolling.hpp"
-#include "compress/io/gfa_write_utils.hpp"
+#include "core/io/gfa_write_utils.hpp"
 #include "core/model/compressed_data.hpp"
 #include "core/model/segment_names.hpp"
 
