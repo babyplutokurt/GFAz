@@ -23,7 +23,9 @@ struct RegionOptions {
   // together with everything between them, when they are at most this many
   // bases apart. This is what pulls in alleles that leave the reference.
   uint64_t max_gap_bp = 100000;
-  // Steps per block of the path index built for the query.
+  // A saved path index (`gfaz index`) to use; empty builds one for the query.
+  std::string index_path;
+  // Steps per block when the index is built for the query.
   uint32_t index_block_steps = 4096;
   int num_threads = kDefaultNumThreads;
 };

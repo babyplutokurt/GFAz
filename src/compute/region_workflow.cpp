@@ -1,10 +1,7 @@
 #include "compute/region_workflow.hpp"
 
-#include "compute/haplotype_catalog.hpp"
-#include "compute/path_access.hpp"
-#include "compute/path_index.hpp"
+#include "compute/indexed_paths.hpp"
 #include "compute/traversal_query.hpp"
-#include "compute/traversal_set.hpp"
 #include "core/codec/codec.hpp"
 #include "core/io/gfa_write_utils.hpp"
 #include "core/utils/threading_utils.hpp"
@@ -23,21 +20,13 @@ namespace gfaz {
 
 namespace {
 
-// Everything a region query reads: decoded traversals, their index, and names.
-struct RegionContext {
-  RegionContext(const CompressedData &data, const RegionOptions &options)
-      : segment_lengths(tquery::load_segment_lengths(data)), traversals(data),
-        index(PathIndex::build(
-            traversals, segment_lengths,
-            PathIndexOptions{options.index_block_steps, options.num_threads})),
-        catalog(data), access(traversals, index, segment_lengths) {}
-
-  std::vector<uint32_t> segment_lengths;
-  TraversalSet traversals;
-  PathIndex index;
-  HaplotypeCatalog catalog;
-  PathAccess access;
-};
+IndexedPathsOptions paths_options(const RegionOptions &options) {
+  IndexedPathsOptions paths;
+  paths.index_path = options.index_path;
+  paths.block_steps = options.index_block_steps;
+  paths.num_threads = options.num_threads;
+  return paths;
+}
 
 struct ContigInterval {
   std::string contig;
@@ -131,7 +120,7 @@ private:
 // Mark the nodes the reference haplotypes visit inside the regions. Returns the
 // smallest and largest marked node id (first > second if nothing was marked).
 std::pair<uint32_t, uint32_t>
-mark_reference_nodes(const RegionContext &ctx, const RegionOptions &options,
+mark_reference_nodes(const IndexedPaths &ctx, const RegionOptions &options,
                      std::vector<uint8_t> &in_region) {
   uint32_t min_node = std::numeric_limits<uint32_t>::max();
   uint32_t max_node = 0;
@@ -166,7 +155,7 @@ mark_reference_nodes(const RegionContext &ctx, const RegionOptions &options,
 
 // Every stretch of every haplotype that visits a marked node, joined across
 // gaps of at most max_gap_bp bases.
-std::vector<StepRun> find_runs(const RegionContext &ctx,
+std::vector<StepRun> find_runs(const IndexedPaths &ctx,
                                const RegionOptions &options,
                                const std::vector<uint8_t> &in_region,
                                uint32_t min_node, uint32_t max_node) {
@@ -223,7 +212,7 @@ std::vector<StepRun> find_runs(const RegionContext &ctx,
   return merged;
 }
 
-RegionSubgraph select_regions(const RegionContext &ctx,
+RegionSubgraph select_regions(const IndexedPaths &ctx,
                               const RegionOptions &options) {
   if (options.regions.empty())
     throw std::runtime_error("region: no region given");
@@ -322,7 +311,7 @@ void write_links(const CompressedData &data,
   }
 }
 
-void write_subpaths(const RegionContext &ctx, const RegionSubgraph &subgraph,
+void write_subpaths(const IndexedPaths &ctx, const RegionSubgraph &subgraph,
                     const SegmentNames &names, std::ostream &out) {
   namespace wu = gfa_write_utils;
   for (const Subpath &subpath : subgraph.subpaths) {
@@ -360,13 +349,13 @@ void write_subpaths(const RegionContext &ctx, const RegionSubgraph &subgraph,
 
 RegionSubgraph select_regions(const CompressedData &data,
                               const RegionOptions &options) {
-  const RegionContext ctx(data, options);
+  const IndexedPaths ctx(data, paths_options(options));
   return select_regions(ctx, options);
 }
 
 void extract_regions_to_gfa(const CompressedData &data,
                             const RegionOptions &options, std::ostream &out) {
-  const RegionContext ctx(data, options);
+  const IndexedPaths ctx(data, paths_options(options));
   const RegionSubgraph subgraph = select_regions(ctx, options);
 
   if (!data.header_line.empty())

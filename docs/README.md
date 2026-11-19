@@ -34,6 +34,9 @@ This directory holds the project documentation. The top-level
   odgi-equivalent node coverage depth.
 - [workflows/REGION_WORKFLOW.md](workflows/REGION_WORKFLOW.md) — `gfaz extract-region`,
   the subgraph around a reference region as GFA.
+- [workflows/LOCATE_WORKFLOW.md](workflows/LOCATE_WORKFLOW.md) — `gfaz locate`
+  (positions of a node on every haplotype) and `gfaz index` (the saved path
+  index both commands use).
 - [workflows/DECONSTRUCT_WORKFLOW.md](workflows/DECONSTRUCT_WORKFLOW.md) —
   `gfaz deconstruct`, the vg-equivalent GFA→VCF workflow.
 

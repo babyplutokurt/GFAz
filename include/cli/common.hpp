@@ -38,6 +38,11 @@ void configure_debug(bool enabled);
 bool parse_ull_arg(const char *name, const char *value,
                    unsigned long long &parsed);
 
+// Where `gfaz index` saves the path index of a container: <input>.pidx.
+std::string default_path_index(const std::string &input_path);
+// That path if the file exists, otherwise empty (build the index in memory).
+std::string existing_path_index(const std::string &input_path);
+
 void print_usage();
 void print_compress_help();
 void print_decompress_help();
@@ -50,6 +55,8 @@ void print_similarity_help();
 void print_stats_help();
 void print_depth_help();
 void print_extract_region_help();
+void print_locate_help();
+void print_index_help();
 void print_deconstruct_help();
 
 } // namespace gfaz::cli

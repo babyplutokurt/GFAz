@@ -48,6 +48,16 @@ void configure_debug(bool enabled) {
 #endif
 }
 
+std::string default_path_index(const std::string &input_path) {
+  return input_path + ".pidx";
+}
+
+std::string existing_path_index(const std::string &input_path) {
+  const std::string path = default_path_index(input_path);
+  std::error_code error;
+  return std::filesystem::is_regular_file(path, error) ? path : std::string();
+}
+
 bool parse_ull_arg(const char *name, const char *value,
                    unsigned long long &parsed) {
   errno = 0;
@@ -79,6 +89,8 @@ USAGE:
     gfaz stats -i <input.gfaz> [OPTIONS]
     gfaz depth -i <input.gfaz> [OPTIONS]
     gfaz extract-region -i <input.gfaz> -r <region> [OPTIONS]
+    gfaz locate -i <input.gfaz> -n <node> [OPTIONS]
+    gfaz index -i <input.gfaz> [OPTIONS]
     gfaz deconstruct -i <input.gfaz> -r <reference-name> [OPTIONS]
 
 SUBCOMMANDS:
@@ -93,6 +105,8 @@ SUBCOMMANDS:
     stats         Graph dimension summary (odgi stats-equivalent)
     depth         Node coverage depth (odgi depth-equivalent)
     extract-region  Subgraph around a reference region, as GFA
+    locate        Positions of nodes on every path and walk
+    index         Save a path index for extract-region and locate
     deconstruct   Derive a VCF (GFA -> VCF) relative to a reference path
 
 OPTIONS (compress):
@@ -380,9 +394,10 @@ OPTIONS:
     -g, --max-gap <BP>      Join two visits of a haplotype to the region, and
                             keep what lies between them, when they are at most
                             this many bases apart [default: 100000].
-    --index-block-steps <N> Steps per block of the path index built for the
-                            query [default: 4096]. Smaller blocks cost memory
-                            and narrow each lookup; the output does not change.
+    -x, --index <FILE>      Path index to use [default: <input>.pidx if it
+                            exists; otherwise one is built for the query].
+    --index-block-steps <N> Steps per block when the index is built for the
+                            query [default: 4096]. The output does not change.
     -t, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP.
     -j, --threads <N>       Alias for -t.
     -h, --help              Show this help message.
@@ -392,6 +407,55 @@ OUTPUT:
     link between two of those segments, and one P- or W-line per stretch.
     W-lines carry the coordinates of the stretch; a partial P-line is named
     NAME:START-END. Segments keep their original GFA names.
+)";
+}
+
+void print_locate_help() {
+  std::cout << R"(
+gfaz locate - Positions of nodes on every path and walk
+
+USAGE:
+    gfaz locate -i <input.gfaz> -n <node> [-n <node> ...] [OPTIONS]
+
+OPTIONS:
+    -i, --input <FILE>      Input .gfaz file.
+    -n, --node <ID>         Node id (the ids `gfaz decompress` writes). May be
+                            given more than once.
+    -x, --index <FILE>      Path index to use [default: <input>.pidx if it
+                            exists; otherwise one is built for the query].
+    -t, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP.
+    -j, --threads <N>       Alias for -t.
+    -h, --help              Show this help message.
+
+OUTPUT:
+    Tab-delimited, one line per visit:
+      #node  path  strand  step  start  end
+    path is the P-line name, or sample#hap#seq of a W-line; step is the 0-based
+    index of the visit in its line; [start, end) are the bases the node covers
+    on that sequence.
+)";
+}
+
+void print_index_help() {
+  std::cout << R"(
+gfaz index - Save a path index next to a GFAZ file
+
+USAGE:
+    gfaz index -i <input.gfaz> [OPTIONS]
+
+OPTIONS:
+    -i, --input <FILE>      Input .gfaz file.
+    -o, --output <FILE>     Index file [default: <input>.pidx].
+    -b, --block-steps <N>   Steps per index block [default: 4096]. Smaller
+                            blocks give a larger index and narrower lookups.
+    -t, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP.
+    -j, --threads <N>       Alias for -t.
+    -h, --help              Show this help message.
+
+NOTES:
+    extract-region and locate pick up <input>.pidx automatically and then skip
+    the pass over all traversals that building the index takes. An index built
+    from another container is rejected.
 )";
 }
 

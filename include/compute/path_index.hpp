@@ -13,7 +13,8 @@
 //     can visit it, and pangenome graphs keep node ids close to genome order, so
 //     those are few.
 // The index is a few tens of bytes per block and is independent of the
-// container format: it is built from a TraversalSet, never stored in the .gfaz.
+// container format: it is built from a TraversalSet and can be saved next to
+// the .gfaz (`gfaz index`), never inside it.
 
 #include "compute/traversal_set.hpp"
 #include "core/defaults.hpp"
@@ -21,6 +22,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace gfaz {
@@ -47,6 +49,17 @@ public:
   static PathIndex build(const TraversalSet &traversals,
                          const std::vector<uint32_t> &segment_lengths,
                          const PathIndexOptions &options = {});
+
+  // A value that changes when the traversals of a container change; stored in
+  // a saved index so a stale file is rejected.
+  static uint64_t fingerprint(const CompressedData &data);
+
+  // Write the index to a file, and read it back. load() throws if the file is
+  // not an index, or was built from a container with another fingerprint.
+  void save(const std::string &path, uint64_t fingerprint) const;
+  static PathIndex load(const std::string &path, uint64_t fingerprint);
+
+  uint32_t block_steps() const { return block_steps_; }
 
   size_t num_haplotypes() const { return first_block_.size() - 1; }
   size_t num_blocks(size_t hap) const {
@@ -114,6 +127,8 @@ private:
   // sentinel. first_block_[hap] indexes blocks_; it has one extra entry.
   std::vector<PathBlock> blocks_;
   std::vector<uint64_t> first_block_{0};
+
+  uint32_t block_steps_ = 0;
 
   // Zone map: node ids are bucketed into zones of 2^zone_shift_ ids, and each
   // zone lists the blocks that span it. Blocks spanning many zones go to

@@ -8,8 +8,10 @@
 #include "compute/path_index.hpp"
 #include "compute/traversal_set.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace gfaz {
@@ -88,6 +90,29 @@ public:
                                   step.bp_end() > bp_begin)
                                 visit(step);
                             });
+  }
+
+  // Call visit(hap, const PathStep &) for every step of every haplotype on a
+  // node in [min_node, max_node], ordered by haplotype and then by step. Only
+  // the blocks whose node range reaches the interval are decoded.
+  template <typename Visitor>
+  void for_each_step_on_nodes(uint32_t min_node, uint32_t max_node,
+                              Visitor &&visit) const {
+    std::vector<std::pair<uint32_t, uint32_t>> blocks;
+    index_.for_each_block_overlapping(
+        min_node, max_node, [&](size_t hap, size_t block) {
+          blocks.emplace_back(static_cast<uint32_t>(hap),
+                              static_cast<uint32_t>(block));
+        });
+    std::sort(blocks.begin(), blocks.end());
+    for (const auto &[hap, block] : blocks) {
+      const size_t h = hap;
+      for_each_step_in_blocks(h, block, block + 1, [&](const PathStep &step) {
+        const uint32_t node = tquery::abs_node_id(step.node);
+        if (node >= min_node && node <= max_node)
+          visit(h, step);
+      });
+    }
   }
 
 private:

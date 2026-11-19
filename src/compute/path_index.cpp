@@ -2,8 +2,11 @@
 
 #include "core/utils/threading_utils.hpp"
 
+#include <cstring>
+#include <fstream>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 
 namespace gfaz {
 
@@ -85,6 +88,7 @@ PathIndex PathIndex::build(const TraversalSet &traversals,
   }
 
   PathIndex index;
+  index.block_steps_ = options.block_steps;
   index.first_block_.assign(num_haps + 1, 0);
   for (size_t h = 0; h < num_haps; ++h)
     index.first_block_[h + 1] = index.first_block_[h] + per_hap[h].size();
@@ -96,16 +100,17 @@ PathIndex PathIndex::build(const TraversalSet &traversals,
     std::vector<PathBlock>().swap(blocks);
   }
 
-  // Zones about as wide as a block is long: on a graph sorted along the genome
-  // a block then spans only a few zones.
-  index.zone_shift_ = 0;
-  while ((uint64_t{1} << index.zone_shift_) < options.block_steps)
-    ++index.zone_shift_;
   index.build_zone_map();
   return index;
 }
 
 void PathIndex::build_zone_map() {
+  // Zones about as wide as a block is long: on a graph sorted along the genome
+  // a block then spans only a few zones.
+  zone_shift_ = 0;
+  while ((uint64_t{1} << zone_shift_) < block_steps_)
+    ++zone_shift_;
+
   uint32_t max_node = 0;
   for (const PathBlock &b : blocks_)
     if (b.min_node <= b.max_node)
@@ -146,6 +151,109 @@ void PathIndex::build_zone_map() {
     for (size_t zone = first; zone <= last; ++zone)
       zone_blocks_[cursor[zone]++] = static_cast<uint32_t>(i);
   }
+}
+
+namespace {
+
+// Saved index layout, little-endian: the header below, first_block_
+// (num_haplotypes + 1 values), then the blocks. The zone map is rebuilt on load.
+constexpr char kIndexMagic[8] = {'G', 'F', 'Z', 'P', 'I', 'D', 'X', '1'};
+
+struct IndexFileHeader {
+  char magic[8];
+  uint64_t fingerprint;
+  uint64_t num_haplotypes;
+  uint64_t num_stored_blocks;
+  uint32_t block_steps;
+  uint32_t block_bytes;
+};
+
+static_assert(std::is_trivially_copyable<PathBlock>::value &&
+                  sizeof(PathBlock) == 40,
+              "PathBlock is written to index files as raw bytes");
+
+void fnv1a(uint64_t &hash, const void *bytes, size_t count) {
+  const unsigned char *p = static_cast<const unsigned char *>(bytes);
+  for (size_t i = 0; i < count; ++i) {
+    hash ^= p[i];
+    hash *= 1099511628211ull;
+  }
+}
+
+template <typename T> void fnv1a_vector(uint64_t &hash, const std::vector<T> &v) {
+  const uint64_t count = v.size();
+  fnv1a(hash, &count, sizeof(count));
+  if (!v.empty())
+    fnv1a(hash, v.data(), v.size() * sizeof(T));
+}
+
+} // namespace
+
+uint64_t PathIndex::fingerprint(const CompressedData &data) {
+  // The per-haplotype lengths and the sizes of the three encoded blocks pin
+  // down the traversals without reading them.
+  uint64_t hash = 14695981039346656037ull;
+  fnv1a_vector(hash, data.sequence_lengths);
+  fnv1a_vector(hash, data.original_path_lengths);
+  fnv1a_vector(hash, data.walk_lengths);
+  fnv1a_vector(hash, data.original_walk_lengths);
+  const uint64_t sizes[] = {
+      data.rules_first_zstd.payload.size(), data.rules_second_zstd.payload.size(),
+      data.paths_zstd.payload.size(),       data.walks_zstd.payload.size(),
+      data.segment_seq_lengths_zstd.original_size,
+      static_cast<uint64_t>(data.delta_round)};
+  fnv1a(hash, sizes, sizeof(sizes));
+  return hash;
+}
+
+void PathIndex::save(const std::string &path, uint64_t fingerprint) const {
+  IndexFileHeader header{};
+  std::memcpy(header.magic, kIndexMagic, sizeof(kIndexMagic));
+  header.fingerprint = fingerprint;
+  header.num_haplotypes = num_haplotypes();
+  header.num_stored_blocks = blocks_.size();
+  header.block_steps = block_steps_;
+  header.block_bytes = sizeof(PathBlock);
+
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  out.write(reinterpret_cast<const char *>(&header), sizeof(header));
+  out.write(reinterpret_cast<const char *>(first_block_.data()),
+            static_cast<std::streamsize>(first_block_.size() * sizeof(uint64_t)));
+  out.write(reinterpret_cast<const char *>(blocks_.data()),
+            static_cast<std::streamsize>(blocks_.size() * sizeof(PathBlock)));
+  out.close();
+  if (!out)
+    throw std::runtime_error("path index: cannot write " + path);
+}
+
+PathIndex PathIndex::load(const std::string &path, uint64_t fingerprint) {
+  std::ifstream in(path, std::ios::binary);
+  IndexFileHeader header{};
+  in.read(reinterpret_cast<char *>(&header), sizeof(header));
+  if (!in || std::memcmp(header.magic, kIndexMagic, sizeof(kIndexMagic)) != 0 ||
+      header.block_bytes != sizeof(PathBlock) || header.block_steps == 0)
+    throw std::runtime_error("path index: " + path +
+                             " is not a readable path index");
+  if (header.fingerprint != fingerprint)
+    throw std::runtime_error("path index: " + path +
+                             " was built from a different container; rebuild "
+                             "it with `gfaz index`");
+
+  PathIndex index;
+  index.block_steps_ = header.block_steps;
+  index.first_block_.resize(header.num_haplotypes + 1);
+  index.blocks_.resize(header.num_stored_blocks);
+  in.read(reinterpret_cast<char *>(index.first_block_.data()),
+          static_cast<std::streamsize>(index.first_block_.size() *
+                                       sizeof(uint64_t)));
+  in.read(reinterpret_cast<char *>(index.blocks_.data()),
+          static_cast<std::streamsize>(index.blocks_.size() *
+                                       sizeof(PathBlock)));
+  if (!in || index.first_block_.front() != 0 ||
+      index.first_block_.back() != index.blocks_.size())
+    throw std::runtime_error("path index: " + path + " is truncated");
+  index.build_zone_map();
+  return index;
 }
 
 size_t PathIndex::haplotype_of(uint32_t stored_block) const {

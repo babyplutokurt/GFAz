@@ -161,6 +161,8 @@ set(GFAZ_COMPUTE_SOURCES
   src/compute/stats_workflow.cpp
   src/compute/depth_workflow.cpp
   src/compute/region_workflow.cpp
+  src/compute/locate_workflow.cpp
+  src/compute/indexed_paths.cpp
   src/compute/traversal_set.cpp
   src/compute/path_index.cpp
   src/compute/haplotype_catalog.cpp
@@ -287,6 +289,7 @@ if(BUILD_CLI)
     src/cli/stats_command.cpp
     src/cli/depth_command.cpp
     src/cli/extract_region_command.cpp
+    src/cli/locate_command.cpp
     src/cli/deconstruct_command.cpp
   )
   set_target_properties(gfaz PROPERTIES

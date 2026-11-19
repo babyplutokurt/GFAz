@@ -47,14 +47,16 @@ The command builds a `PathIndex` (see
 pass over the traversals that records, for every block of about 4096 steps,
 where it starts and which node-id range it visits. The region is then answered
 by decoding only the blocks whose range reaches the marked nodes. Building the
-index dominates the run time; the lookup itself is milliseconds.
+index dominates the run time; the lookup itself is milliseconds. Save the
+index once with `gfaz index` (see [LOCATE_WORKFLOW.md](LOCATE_WORKFLOW.md)) and
+later runs load it instead.
 
 Measured at 16 threads for a 100 kb window with 90 haplotypes:
 
-| Graph | Time | Peak RSS |
-|---|---|---|
-| HPRC chr6 (4.1 GB GFA) | 0.6 s | 0.55 GB |
-| HPRC v1.1 (50.8 GB GFA) | 11.2 s | 11.2 GB |
+| Graph | Time | Time with a saved index | Peak RSS |
+|---|---|---|---|
+| HPRC chr6 (4.1 GB GFA) | 0.6 s | 0.36 s | 0.55 GB |
+| HPRC v1.1 (50.8 GB GFA) | 11.2 s | 7.4 s | 11.2 GB |
 
 ## Validation
 

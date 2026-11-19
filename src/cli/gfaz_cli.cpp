@@ -40,6 +40,10 @@ int main(int argc, char *argv[]) {
     return gfaz::cli::do_depth(argc - 1, argv + 1);
   } else if (command == "extract-region") {
     return gfaz::cli::do_extract_region(argc - 1, argv + 1);
+  } else if (command == "locate") {
+    return gfaz::cli::do_locate(argc - 1, argv + 1);
+  } else if (command == "index") {
+    return gfaz::cli::do_index(argc - 1, argv + 1);
   } else if (command == "deconstruct") {
     return gfaz::cli::do_deconstruct(argc - 1, argv + 1);
   } else {

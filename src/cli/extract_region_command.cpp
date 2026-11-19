@@ -13,11 +13,14 @@ namespace gfaz::cli {
 int do_extract_region(int argc, char *argv[]) {
   gfaz::RegionOptions options;
   std::string input_path;
+  bool index_given = false;
+  bool build_index = false; // --index-block-steps asks for a fresh index
 
   static struct option long_options[] = {
       {"input", required_argument, 0, 'i'},
       {"region", required_argument, 0, 'r'},
       {"max-gap", required_argument, 0, 'g'},
+      {"index", required_argument, 0, 'x'},
       {"index-block-steps", required_argument, 0, 'b'},
       {"threads", required_argument, 0, 't'},
       {"help", no_argument, 0, 'h'},
@@ -25,7 +28,7 @@ int do_extract_region(int argc, char *argv[]) {
 
   int opt;
   optind = 1;
-  while ((opt = getopt_long(argc, argv, "i:r:g:b:t:j:h", long_options,
+  while ((opt = getopt_long(argc, argv, "i:r:g:x:b:t:j:h", long_options,
                             nullptr)) != -1) {
     switch (opt) {
     case 'i':
@@ -37,8 +40,13 @@ int do_extract_region(int argc, char *argv[]) {
     case 'g':
       options.max_gap_bp = std::stoull(optarg);
       break;
+    case 'x':
+      options.index_path = optarg;
+      index_given = true;
+      break;
     case 'b':
       options.index_block_steps = static_cast<uint32_t>(std::stoul(optarg));
+      build_index = true;
       break;
     case 't':
     case 'j':
@@ -60,6 +68,9 @@ int do_extract_region(int argc, char *argv[]) {
     print_extract_region_help();
     return 1;
   }
+
+  if (!index_given && !build_index)
+    options.index_path = existing_path_index(input_path);
 
   try {
     const gfaz::CompressedData data =
