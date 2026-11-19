@@ -13,11 +13,13 @@ public:
     // Encode paths using 2-mer rules.
     // `min_new_id` > 0: the rules were generated with the same min_new_id
     // (see RuleGenerator), so pairs of two IDs below it are not looked up.
+    // `collect`, when given, sees each traversal right after it was encoded.
     void encode_paths_2mer(
         std::vector<std::vector<gfaz::NodeId>>& paths, 
         const CompressionRules2Mer& rules, 
         std::vector<uint8_t>& rules_used,
-        uint32_t min_new_id = 0);
+        uint32_t min_new_id = 0,
+        NextRoundScan *collect = nullptr);
 
     // Encodes one traversal in place.
     using EncodeOne = std::function<void(std::vector<gfaz::NodeId> &)>;

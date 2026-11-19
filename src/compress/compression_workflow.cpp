@@ -730,6 +730,16 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
   const bool filter_new_symbols =
       filter_switch == nullptr || std::string_view(filter_switch) != "0";
   uint32_t min_new_id = 0;
+  // While a round is encoded, the next round's 2-mers are collected from the
+  // freshly encoded traversals (NextRoundScan), which saves that round a pass
+  // over all of them. Used for rounds with spilled traversals;
+  // GFAZ_FUSED_SCAN=0 turns it off and =1 does it in every round.
+  const char *fused_switch = std::getenv("GFAZ_FUSED_SCAN");
+  const bool fuse_scans =
+      fused_switch == nullptr || std::string_view(fused_switch) != "0";
+  const bool fuse_always =
+      fused_switch != nullptr && std::string_view(fused_switch) == "1";
+  std::unique_ptr<NextRoundScan::Keys> collected_keys;
   for (int round = 0; round < num_rounds; ++round) {
     auto t0 = std::chrono::high_resolution_clock::now();
     const bool spilled_round = spill != nullptr && spill->spilled_count() > 0;
@@ -737,7 +747,9 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
     CompressionRules2Mer rules = gen.generate_rules_2mer_combined(
         paths, walks, next_id, freq_threshold, num_threads,
         spilled_round ? &fetch_traversal : nullptr, &scan_keys,
-        spilled_round ? &traversal_length : nullptr, min_new_id);
+        spilled_round ? &traversal_length : nullptr, min_new_id,
+        collected_keys.get());
+    collected_keys.reset();
     if (spill) {
       spill->throw_if_failed();
       spill->release_thread_buffers();
@@ -752,6 +764,21 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
     actual_rounds++;
 
     t0 = std::chrono::high_resolution_clock::now();
+    // Collect the next round's 2-mers only when that saves a read of the
+    // spill file (in memory the extra pass costs about what the collecting
+    // does) and only while that round would use the hash tables anyway: with
+    // the 2-mer count about halving per round, it switches to sorting all
+    // 2-mers once a quarter of this round's elements is no more than this
+    // round's keys. The tables need IDs below 2^30.
+    std::unique_ptr<NextRoundScan> next_scan;
+    if (fuse_scans && round + 1 < num_rounds &&
+        (fuse_always ||
+         (spilled_round && std::getenv("GFAZ_RULE_SCAN") == nullptr &&
+          current_elements / 4 > scan_keys)) &&
+        NextRoundScan::ids_fit(rules.next_available_id)) {
+      next_scan = std::make_unique<NextRoundScan>(
+          filter_new_symbols ? next_id : 0, scan_keys);
+    }
     PathEncoder encoder;
     std::vector<uint8_t> rules_used;
     if (spilled_round) {
@@ -764,6 +791,8 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
             if (!spill->is_spilled(index)) {
               const size_t before = slot.size();
               encode(slot);
+              if (next_scan)
+                next_scan->add(slot);
               spill->note_memory_shrink(before - slot.size());
               PathEncoder::release_unused_capacity(slot);
               return;
@@ -773,14 +802,18 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
             auto &scratch = spill->scratch();
             spill->load(index, scratch);
             encode(scratch);
+            if (next_scan)
+              next_scan->add(scratch);
             spill->store(index, scratch, slot);
           },
           min_new_id);
       spill->end_rewrite();
       spill->throw_if_failed();
     } else {
-      encoder.encode_paths_2mer(paths, rules, rules_used, min_new_id);
-      encoder.encode_paths_2mer(walks, rules, rules_used, min_new_id);
+      encoder.encode_paths_2mer(paths, rules, rules_used, min_new_id,
+                                next_scan.get());
+      encoder.encode_paths_2mer(walks, rules, rules_used, min_new_id,
+                                next_scan.get());
     }
 #if defined(__GLIBC__)
     // The encoder released each traversal's unused tail; hand those pages
@@ -789,9 +822,8 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
 #endif
     t1 = std::chrono::high_resolution_clock::now();
     const size_t elements_before = current_elements;
-    if (gfaz_debug_enabled())
-      current_elements = total_node_count(paths) + total_node_count(walks) +
-                         (spill ? spill->spilled_steps() : 0);
+    current_elements = total_node_count(paths) + total_node_count(walks) +
+                       (spill ? spill->spilled_steps() : 0);
     const double round_encode_ms = elapsed_ms(t0, t1);
     time_encode_paths_ms += round_encode_ms;
 
@@ -873,6 +905,11 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
       id_map[idx] = new_id++;
     }
     rules_used.clear();
+    if (next_scan) {
+      collected_keys = std::make_unique<NextRoundScan::Keys>(
+          next_scan->finish(rules.rules_start_id, id_map));
+      next_scan.reset();
+    }
     remap_rule_ids(paths, rules.rules_start_id, id_map);
     remap_rule_ids(walks, rules.rules_start_id, id_map);
 

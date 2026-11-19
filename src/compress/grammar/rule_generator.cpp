@@ -23,6 +23,118 @@
 
 RuleGenerator::RuleGenerator() {}
 
+namespace {
+
+inline uint32_t abs_node_id(gfaz::NodeId id) {
+  return id < 0 ? 0u - static_cast<uint32_t>(id) : static_cast<uint32_t>(id);
+}
+
+// Inserts the 2-mers of `seq` that contain an ID >= min_new_id and returns
+// how many were left out. Inserts are independent of each other, so a block
+// of 2-mers is hashed and its slots start loading before the inserts.
+size_t insert_2mers(KmerSeenTable &table, const std::vector<gfaz::NodeId> &seq,
+                    uint32_t min_new_id) {
+  if (seq.size() < 2)
+    return 0;
+  constexpr size_t kBlock = 32;
+  Packed2mer keys[kBlock];
+  uint64_t hashes[kBlock];
+  size_t skipped = 0;
+  const size_t pairs = seq.size() - 1;
+  for (size_t begin = 0; begin < pairs; begin += kBlock) {
+    const size_t block_end = std::min(begin + kBlock, pairs);
+    size_t count = 0;
+    for (size_t i = begin; i < block_end; ++i) {
+      if (std::max(abs_node_id(seq[i]), abs_node_id(seq[i + 1])) < min_new_id)
+        continue;
+      keys[count] = canonical_2mer(pack_2mer(seq[i], seq[i + 1]));
+      hashes[count] = KmerSeenTable::hash(keys[count]);
+      table.prefetch(hashes[count]);
+      ++count;
+    }
+    skipped += block_end - begin - count;
+    for (size_t k = 0; k < count; ++k)
+      table.insert(keys[k], hashes[k]);
+  }
+  return skipped;
+}
+
+} // namespace
+
+struct NextRoundScan::ThreadState {
+  KmerSeenTable table;
+  size_t skipped = 0;
+  bool reserved = false;
+};
+
+NextRoundScan::NextRoundScan(uint32_t min_new_id, size_t expected_keys)
+    : min_new_id_(min_new_id) {
+  int threads = 1;
+#ifdef _OPENMP
+  threads = std::max(1, omp_get_max_threads());
+#endif
+  expected_per_thread_ = expected_keys / static_cast<size_t>(threads) / 2;
+  threads_.resize(static_cast<size_t>(threads));
+  for (auto &state : threads_)
+    state = std::make_unique<ThreadState>();
+}
+
+NextRoundScan::~NextRoundScan() = default;
+
+bool NextRoundScan::ids_fit(uint32_t id_limit) {
+  return KmerSeenTable::ids_fit(id_limit);
+}
+
+void NextRoundScan::add(const std::vector<gfaz::NodeId> &sequence) {
+  size_t thread = 0;
+#ifdef _OPENMP
+  thread = static_cast<size_t>(omp_get_thread_num());
+#endif
+  ThreadState &state = *threads_[thread];
+  if (!state.reserved) {
+    state.table.reserve(expected_per_thread_);
+    state.reserved = true;
+  }
+  state.skipped += insert_2mers(state.table, sequence, min_new_id_);
+}
+
+NextRoundScan::Keys NextRoundScan::finish(uint32_t rules_start_id,
+                                          const std::vector<uint32_t> &id_map) {
+  Keys result;
+  std::vector<size_t> offsets(threads_.size() + 1, 0);
+  size_t skipped = 0;
+  for (size_t t = 0; t < threads_.size(); ++t) {
+    offsets[t + 1] = offsets[t] + threads_[t]->table.size() +
+                     threads_[t]->table.repeated();
+    skipped += threads_[t]->skipped;
+  }
+  result.count = offsets.back();
+  result.unfiltered_count = result.count + skipped;
+  result.keys.reset(new Packed2mer[result.count]);
+
+  const auto final_id = [&](gfaz::NodeId id) -> gfaz::NodeId {
+    const uint32_t abs_id = abs_node_id(id);
+    if (abs_id < rules_start_id)
+      return id;
+    const uint32_t mapped = id_map[abs_id - rules_start_id];
+    return id > 0 ? static_cast<gfaz::NodeId>(mapped)
+                  : -static_cast<gfaz::NodeId>(mapped);
+  };
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static, 1)
+#endif
+  for (size_t t = 0; t < threads_.size(); ++t) {
+    Packed2mer *out = result.keys.get() + offsets[t];
+    const size_t written = threads_[t]->table.emit(out);
+    threads_[t]->table.release();
+    for (size_t k = 0; k < written; ++k)
+      out[k] = pack_2mer(final_id(unpack_first(out[k])),
+                         final_id(unpack_second(out[k])));
+  }
+  threads_.clear();
+  return result;
+}
+
 // DEPRECATED: This function is kept for legacy compatibility but is not used in
 // the current workflow. See generate_rules_2mer_combined below.
 CompressionRules2Mer RuleGenerator::generate_rules_2mer(
@@ -156,7 +268,7 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
     const std::vector<std::vector<gfaz::NodeId>> &walks, uint32_t starting_id,
     size_t freq_threshold, int num_threads, const TraversalFetch *fetch,
     size_t *scan_keys, const TraversalLength *fetch_length,
-    uint32_t min_new_id) {
+    uint32_t min_new_id, NextRoundScan::Keys *collected) {
 
   CompressionRules2Mer rules;
   rules.rules_start_id = starting_id;
@@ -201,7 +313,8 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
   const bool force_all =
       forced_scan != nullptr && std::string_view(forced_scan) == "all";
   // With fetched traversals the offsets need each length up front.
-  if ((fetch == nullptr || fetch_length != nullptr) && !force_sets &&
+  if (collected == nullptr &&
+      (fetch == nullptr || fetch_length != nullptr) && !force_sets &&
       (force_all || (scan_keys != nullptr && *scan_keys > 0))) {
     for (size_t p = 0; p < total_sequences; ++p) {
       const size_t length =
@@ -215,9 +328,11 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
   // per 2-mer but only holds IDs below 2^30; beyond that (or with
   // GFAZ_RULE_SCAN=sets-legacy) two robin_hood sets per thread do the same.
   // Every ID in the sequences is below starting_id.
-  const bool use_seen_tables = !emit_all && !force_legacy_sets &&
+  const bool use_seen_tables = collected == nullptr && !emit_all &&
+                               !force_legacy_sets &&
                                KmerSeenTable::ids_fit(starting_id);
-  const bool use_legacy_sets = !emit_all && !use_seen_tables;
+  const bool use_legacy_sets =
+      collected == nullptr && !emit_all && !use_seen_tables;
   std::vector<KmerSeenTable> thread_tables(use_seen_tables ? actual_threads : 0);
   std::vector<robin_hood::unordered_flat_set<Packed2mer>> thread_seen(
       use_legacy_sets ? actual_threads : 0);
@@ -231,7 +346,11 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
   std::unique_ptr<Packed2mer[]> merge_keys;
 
   const auto t_scan0 = std::chrono::high_resolution_clock::now();
-  if (emit_all) {
+  if (collected != nullptr) {
+    merge_keys = std::move(collected->keys);
+    num_keys = collected->count;
+    skipped_keys = collected->unfiltered_count - collected->count;
+  } else if (emit_all) {
     // Threads take fixed-size pieces of the buffer as they go, so 2-mers that
     // are filtered out cost no space; the sort does not care about the order.
     // The buffer is sized for every 2-mer but only written pages get mapped.
@@ -299,35 +418,12 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
       KmerSeenTable &table = thread_tables[omp_get_thread_num()];
       table.reserve(expected_per_thread);
       std::vector<gfaz::NodeId> scratch;
-      // Inserts are independent of each other, so hash a block of 2-mers,
-      // start loading their slots, then insert them.
-      constexpr size_t kBlock = 32;
-      Packed2mer keys[kBlock];
-      uint64_t hashes[kBlock];
 
 #pragma omp for schedule(dynamic)
       for (size_t p = 0; p < total_sequences; ++p) {
         const auto &seq =
             fetch != nullptr ? (*fetch)(p, scratch) : sequence_at(p);
-        if (seq.size() < 2)
-          continue;
-
-        const size_t pairs = seq.size() - 1;
-        for (size_t begin = 0; begin < pairs; begin += kBlock) {
-          const size_t block_end = std::min(begin + kBlock, pairs);
-          size_t count = 0;
-          for (size_t i = begin; i < block_end; ++i) {
-            if (!may_repeat(seq[i], seq[i + 1]))
-              continue;
-            keys[count] = canonical_2mer(pack_2mer(seq[i], seq[i + 1]));
-            hashes[count] = KmerSeenTable::hash(keys[count]);
-            table.prefetch(hashes[count]);
-            ++count;
-          }
-          skipped_keys += block_end - begin - count;
-          for (size_t k = 0; k < count; ++k)
-            table.insert(keys[k], hashes[k]);
-        }
+        skipped_keys += insert_2mers(table, seq, min_new_id);
       }
     }
   } else {
@@ -362,7 +458,7 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
   }
   const auto t_scan1 = std::chrono::high_resolution_clock::now();
 
-  if (!emit_all) {
+  if (!emit_all && collected == nullptr) {
     std::vector<size_t> offsets(static_cast<size_t>(actual_threads) + 1, 0);
     for (int t = 0; t < actual_threads; ++t) {
       offsets[static_cast<size_t>(t) + 1] =
@@ -459,7 +555,9 @@ CompressionRules2Mer RuleGenerator::generate_rules_2mer_combined(
     std::cerr << "    [generate sub] scan=" << ms(t_scan0, t_scan1)
               << " ms, collect=" << ms(t_scan1, t_collect)
               << " ms (keys=" << num_keys
-              << (emit_all ? ", all 2-mers)" : ")")
+              << (emit_all ? ", all 2-mers)"
+                           : collected != nullptr ? ", collected in encode)"
+                                                  : ")")
               << ", sort=" << ms(t_collect, t_sort)
               << " ms, dedup=" << ms(t_sort, t_dedup) << " ms" << std::endl;
   }

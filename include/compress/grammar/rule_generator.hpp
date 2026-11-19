@@ -6,7 +6,10 @@
 #include "core/model/gfa_graph.hpp"
 #include "robin_hood.h"
 #include <functional>
+#include <memory>
 #include <vector>
+
+class KmerSeenTable;
 
 
 // Struct to hold the generated compression rules for 2-mers
@@ -35,6 +38,45 @@ using TraversalFetch = std::function<const std::vector<gfaz::NodeId> &(
 // Length of traversal `index` without loading it.
 using TraversalLength = std::function<size_t(size_t index)>;
 
+// Collects the 2-mers of the next round while the current round is encoded,
+// so that round does not have to read every traversal again for its scan.
+//
+// add() is called from the encode loop with each traversal as encoded; it then
+// holds rule IDs that are not final yet (unused rules are dropped and the rest
+// renumbered after the round). finish() applies that renumbering to the
+// collected 2-mers. The renumbering keeps the order of IDs, so a 2-mer's
+// canonical form and the sorted order of the keys are the same as if the
+// traversals had been renumbered first.
+class NextRoundScan {
+public:
+  // `id_limit`: every ID in the traversals is below this. `min_new_id`: as in
+  // RuleGenerator::generate_rules_2mer_combined, in not-yet-final IDs.
+  // `expected_keys`: the previous round's key count, to size the tables.
+  NextRoundScan(uint32_t min_new_id, size_t expected_keys);
+  ~NextRoundScan();
+
+  // Whether the tables can hold IDs below `id_limit`.
+  static bool ids_fit(uint32_t id_limit);
+
+  // Thread-safe when called from inside an OpenMP parallel region.
+  void add(const std::vector<gfaz::NodeId> &sequence);
+
+  // The keys the scan of generate_rules_2mer_combined would have collected.
+  struct Keys {
+    std::unique_ptr<Packed2mer[]> keys;
+    size_t count = 0;
+    size_t unfiltered_count = 0; // count if min_new_id had been 0
+  };
+  // `id_map[id - rules_start_id]` is the final ID of rule `id`.
+  Keys finish(uint32_t rules_start_id, const std::vector<uint32_t> &id_map);
+
+private:
+  struct ThreadState;
+  uint32_t min_new_id_;
+  size_t expected_per_thread_;
+  std::vector<std::unique_ptr<ThreadState>> threads_;
+};
+
 class RuleGenerator {
 public:
   RuleGenerator();
@@ -55,6 +97,9 @@ public:
   // already adjacent before that round and was not replaced, so it occurred
   // once and still does: only 2-mers containing an ID >= min_new_id are
   // looked at. The rules are the same as with min_new_id = 0.
+  //
+  // `collected`, when given, holds this round's keys already (NextRoundScan)
+  // and the traversals are not read.
   CompressionRules2Mer
   generate_rules_2mer_combined(const std::vector<std::vector<gfaz::NodeId>> &paths,
                                const std::vector<std::vector<gfaz::NodeId>> &walks,
@@ -63,7 +108,8 @@ public:
                                const TraversalFetch *fetch = nullptr,
                                size_t *scan_keys = nullptr,
                                const TraversalLength *fetch_length = nullptr,
-                               uint32_t min_new_id = 0);
+                               uint32_t min_new_id = 0,
+                               NextRoundScan::Keys *collected = nullptr);
 };
 
 #endif // RULE_GENERATOR_HPP

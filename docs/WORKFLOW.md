@@ -103,6 +103,9 @@ exist for the equivalence tests and for A/B timing:
   two-set fallback, or always sort every 2-mer.
 - `GFAZ_NEW_SYMBOL_FILTER=0`: look at every 2-mer in every round instead of
   only those that contain a rule from the previous round.
+- `GFAZ_FUSED_SCAN=0|1`: never, or in every round, collect a round's 2-mers
+  while the previous round is encoded (default: only in rounds with spilled
+  traversals).
 - `GFAZ_SPILL_CODEC=raw|varint`: store every spilled traversal as plain `int32`
   or as varints instead of choosing per record.
 - `GFAZ_SPILL_DROP_CACHE=1`: evict spill-file pages from the page cache as they
@@ -129,8 +132,10 @@ caps that:
   numbers but few distinct ones in the early rounds, so rewritten records
   code each step as its rank in a per-thread table of frequent symbols (1 or
   2 bytes per step) and fall back to varints or plain `int32` when that does
-  not pay. On HPRC v2.1 this cuts the bytes written to the temp file from
-  211 GB to 82 GB. The rule-ID remap for spilled traversals is applied when
+  not pay. The encode pass also collects the next round's 2-mers from each
+  traversal it has just encoded, so that round's rule scan does not read the
+  temp file again. On HPRC v2.1 the table coding cuts the bytes written to
+  the temp file from 211 GB to 82 GB. The rule-ID remap for spilled traversals is applied when
   they are next loaded rather than in a separate pass.
 - Traversals roughly halve per round in the early rounds, so after a few rounds
   everything is in memory and the remaining rounds run the normal in-memory

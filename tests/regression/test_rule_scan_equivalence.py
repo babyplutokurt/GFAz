@@ -12,8 +12,10 @@ The .gfaz must be byte-identical for both pinned routes and the default.
 
 From the second round on, the scan and the encoder skip 2-mers made of two
 symbols older than the previous round, because those cannot repeat.
-`GFAZ_NEW_SYMBOL_FILTER=0` turns that off; the reference output is made that
-way, so every other run also checks the filter.
+`GFAZ_NEW_SYMBOL_FILTER=0` turns that off. By default a round's 2-mers are also
+collected while the previous round is encoded; `GFAZ_FUSED_SCAN=0` turns that
+off and `=1` does it in every round. The reference output is made with both
+off; the other runs have the filter on and collect in every round.
 """
 
 import os
@@ -40,10 +42,14 @@ def compress(cli: Path, src: Path, dst: Path, extra, scan, new_filter=True):
   env = dict(os.environ)
   env.pop("GFAZ_RULE_SCAN", None)
   env.pop("GFAZ_NEW_SYMBOL_FILTER", None)
+  env.pop("GFAZ_FUSED_SCAN", None)
   if scan:
     env["GFAZ_RULE_SCAN"] = scan
   if not new_filter:
     env["GFAZ_NEW_SYMBOL_FILTER"] = "0"
+    env["GFAZ_FUSED_SCAN"] = "0"
+  else:
+    env["GFAZ_FUSED_SCAN"] = "1"
   result = subprocess.run(
       [str(cli), "compress", *extra, str(src), str(dst)],
       cwd=str(REPO_ROOT), text=True, capture_output=True, check=False, env=env)

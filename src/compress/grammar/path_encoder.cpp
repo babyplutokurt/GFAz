@@ -190,11 +190,13 @@ void PathEncoder::release_unused_capacity(std::vector<gfaz::NodeId> &path) {
 void PathEncoder::encode_paths_2mer(
     std::vector<std::vector<gfaz::NodeId>> &paths,
     const CompressionRules2Mer &rules, std::vector<uint8_t> &rules_used,
-    uint32_t min_new_id) {
+    uint32_t min_new_id, NextRoundScan *collect) {
   encode_range_2mer(paths.size(), rules, rules_used,
                     [&](size_t p, const auto &mark_rule) {
                       encode_path_2mer_dispatch(paths[p], rules, min_new_id,
                                                 mark_rule);
+                      if (collect != nullptr)
+                        collect->add(paths[p]);
                       release_unused_capacity(paths[p]);
                     });
 }
