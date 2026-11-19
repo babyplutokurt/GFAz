@@ -9,7 +9,6 @@
 #include <handlegraph/util.hpp>
 
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <fstream>
 #include <stdexcept>
@@ -27,10 +26,6 @@ using handlegraph::subrange_t;
 namespace {
 
 std::atomic<uint64_t> next_instance_id{1};
-
-// Number of decoded blocks each thread keeps. Walking one path needs one;
-// a few more let an algorithm follow several paths at once without thrashing.
-constexpr size_t kCachedBlocksPerThread = 4;
 
 uint32_t packed(const handlegraph::handle_t &handle) {
   return static_cast<uint32_t>(as_integer(handle));
@@ -78,17 +73,49 @@ void add_header_reference_samples(const std::string &header,
 
 // One index block of one path, decoded: its nodes and where each one starts.
 struct GfazHandleGraph::DecodedBlock {
-  uint64_t instance_id = 0;
-  size_t path = 0;
-  size_t block = 0;
+  uint64_t key = 0; // (path, block), see block_key; 0 is "empty"
   uint32_t step_begin = 0;
   std::vector<NodeId> nodes;
   std::vector<uint64_t> positions;
+};
 
-  bool holds(uint64_t instance, size_t p, uint32_t step) const {
-    return instance_id == instance && path == p && step >= step_begin &&
-           step - step_begin < nodes.size();
+namespace {
+
+uint64_t block_key(size_t path, size_t block) {
+  // +1 keeps a valid key different from the empty key 0.
+  return ((static_cast<uint64_t>(path) + 1) << 32) | static_cast<uint64_t>(block);
+}
+
+} // namespace
+
+// The decoded blocks one thread keeps for one graph. Walking a path touches
+// one block at a time; asking for the steps on neighbouring nodes touches the
+// same block of every haplotype over and over, which is what the capacity is
+// sized for. Slots are recycled in rotation.
+class GfazHandleGraph::BlockCache {
+public:
+  explicit BlockCache(size_t capacity) : slots_(std::max<size_t>(capacity, 1)) {}
+
+  DecodedBlock *find(uint64_t key) {
+    const auto it = slot_of_.find(key);
+    return it == slot_of_.end() ? nullptr : &slots_[it->second];
   }
+
+  // A slot to decode `key` into; whatever it held is forgotten.
+  DecodedBlock &recycle(uint64_t key) {
+    DecodedBlock &slot = slots_[next_];
+    if (slot.key != 0)
+      slot_of_.erase(slot.key);
+    slot.key = key;
+    slot_of_[key] = next_;
+    next_ = (next_ + 1) % slots_.size();
+    return slot;
+  }
+
+private:
+  std::vector<DecodedBlock> slots_;
+  std::unordered_map<uint64_t, size_t> slot_of_;
+  size_t next_ = 0;
 };
 
 GfazHandleGraph::GfazHandleGraph(const CompressedData &data,
@@ -96,7 +123,8 @@ GfazHandleGraph::GfazHandleGraph(const CompressedData &data,
     : paths_(data,
              IndexedPathsOptions{options.index_path, options.block_steps,
                                  options.num_threads}),
-      instance_id_(next_instance_id.fetch_add(1)) {
+      instance_id_(next_instance_id.fetch_add(1)),
+      cached_blocks_(options.cached_blocks) {
   // A step on a node without an S-line cannot be given a handle.
   for (size_t hap = 0; hap < paths_.index.num_haplotypes(); ++hap)
     for (size_t b = 0; b < paths_.index.num_blocks(hap); ++b) {
@@ -384,20 +412,24 @@ bool GfazHandleGraph::for_each_handle_impl(
 // PathHandleGraph
 // ---------------------------------------------------------------------------
 
+GfazHandleGraph::BlockCache &GfazHandleGraph::thread_cache() const {
+  // One cache per thread and per graph. A thread that reads several graphs
+  // keeps a cache for each; they are dropped when the thread ends.
+  thread_local std::unordered_map<uint64_t, std::unique_ptr<BlockCache>> caches;
+  std::unique_ptr<BlockCache> &cache = caches[instance_id_];
+  if (!cache)
+    cache = std::make_unique<BlockCache>(cached_blocks_);
+  return *cache;
+}
+
 const GfazHandleGraph::DecodedBlock &
 GfazHandleGraph::decoded_block(size_t path, size_t block) const {
-  thread_local std::array<DecodedBlock, kCachedBlocksPerThread> cache;
-  thread_local size_t next_slot = 0;
-  for (const DecodedBlock &entry : cache)
-    if (entry.instance_id == instance_id_ && entry.path == path &&
-        entry.block == block)
-      return entry;
+  BlockCache &cache = thread_cache();
+  const uint64_t key = block_key(path, block);
+  if (const DecodedBlock *hit = cache.find(key))
+    return *hit;
 
-  DecodedBlock &entry = cache[next_slot];
-  next_slot = (next_slot + 1) % kCachedBlocksPerThread;
-  entry.instance_id = instance_id_;
-  entry.path = path;
-  entry.block = block;
+  DecodedBlock &entry = cache.recycle(key);
   entry.step_begin = paths_.index.block(path, block).step_begin;
   entry.nodes.clear();
   entry.positions.clear();
@@ -551,16 +583,40 @@ bool GfazHandleGraph::for_each_step_position_on_handle(
                              const size_t &)> &iteratee) const {
   const uint32_t node = static_cast<uint32_t>(get_id(handle));
   const bool handle_reverse = get_is_reverse(handle);
-  bool keep_going = true;
-  paths_.access.for_each_step_on_nodes(
-      node, node, [&](size_t path, const PathStep &step) {
-        if (!keep_going)
-          return;
-        const bool reverse = (step.node < 0) != handle_reverse;
-        const size_t position = step.bp_begin;
-        keep_going = iteratee(make_step(path, step.step), reverse, position);
+
+  // Only blocks whose node-id range covers the node can visit it. They go
+  // through the block cache, so asking about a run of neighbouring nodes
+  // decodes each block once.
+  std::vector<std::pair<uint32_t, uint32_t>> blocks;
+  paths_.index.for_each_block_overlapping(
+      node, node, [&](size_t path, size_t block) {
+        blocks.emplace_back(static_cast<uint32_t>(path),
+                            static_cast<uint32_t>(block));
       });
-  return keep_going;
+  std::sort(blocks.begin(), blocks.end());
+
+  // Collect the visits before calling back: the callback may use the graph and
+  // recycle the cached blocks being read here.
+  struct Visit {
+    step_handle_t step;
+    size_t position;
+    bool reverse;
+  };
+  std::vector<Visit> visits;
+  for (const auto &[path, block] : blocks) {
+    const DecodedBlock &decoded = decoded_block(path, block);
+    for (size_t i = 0; i < decoded.nodes.size(); ++i) {
+      const NodeId visited = decoded.nodes[i];
+      if (tquery::abs_node_id(visited) == node)
+        visits.push_back({make_step(path, decoded.step_begin + i),
+                          decoded.positions[i],
+                          (visited < 0) != handle_reverse});
+    }
+  }
+  for (const Visit &visit : visits)
+    if (!iteratee(visit.step, visit.reverse, visit.position))
+      return false;
+  return true;
 }
 
 } // namespace gfaz

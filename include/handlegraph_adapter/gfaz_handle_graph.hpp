@@ -15,9 +15,10 @@
 //     one block decode per `block_steps` steps (decoded blocks are cached per
 //     thread);
 //   - a step by position, or the position of a step: one block decode;
-//   - the steps on a node (for_each_step_on_handle): one block decode per
-//     haplotype block whose node-id range covers the node. Cheap for a few
-//     nodes, slow as an inner loop over every node of a large graph.
+//   - the steps on a node (for_each_step_on_handle): a scan of every haplotype
+//     block whose node-id range covers the node, decoding the ones not in the
+//     thread's cache. Neighbouring nodes share blocks, so a local neighbourhood
+//     is cheap; a loop over every node of a large graph is still slow.
 //
 // Node ids are the container's 1-based ids. Built only with
 // -DGFAZ_BUILD_HANDLEGRAPH=ON; see docs/HANDLEGRAPH_ADAPTER.md.
@@ -44,6 +45,10 @@ struct GfazHandleGraphOptions {
   // Steps per index block when the index is built at load. Smaller blocks make
   // random access and for_each_step_on_handle cheaper and the index larger.
   uint32_t block_steps = 1024;
+  // Decoded blocks each thread keeps. Should exceed the number of haplotypes
+  // crossing one locus, so that asking for the steps on a run of neighbouring
+  // nodes decodes each block once. One block is about 12 bytes per step.
+  size_t cached_blocks = 1024;
   // Samples whose W-lines (and PanSN-named P-lines) are reference paths, in
   // addition to those listed in the header's RS:Z tag.
   std::unordered_set<std::string> reference_samples;
@@ -133,6 +138,8 @@ protected:
 
 private:
   struct DecodedBlock;
+  class BlockCache;
+  BlockCache &thread_cache() const;
 
   void load_sequences(const CompressedData &data);
   void build_adjacency(const CompressedData &data, int num_threads);
@@ -144,6 +151,7 @@ private:
 
   IndexedPaths paths_;
   uint64_t instance_id_ = 0; // tells cached blocks of different graphs apart
+  size_t cached_blocks_ = 0;
 
   // Node n occupies sequences_[sequence_offsets_[n - 1], sequence_offsets_[n]).
   std::string sequences_;

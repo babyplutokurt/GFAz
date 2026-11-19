@@ -52,10 +52,14 @@ def main():
                       f"compress {gfa.name}")
       require_success(run_command([cli, "decompress", str(gfaz), str(full)]),
                       f"decompress {gfa.name}")
-      for block_steps in (1, 7, 1024):
+      # A tiny block cache forces constant recycling, which is where a stale
+      # reference to a decoded block would show up.
+      for block_steps, cached_blocks in ((1, 1), (7, 2), (1024, 1024)):
         require_success(
-            run_command([str(CHECKER), str(gfaz), str(full), str(block_steps)]),
-            f"adapter check {gfa.name} block_steps={block_steps}")
+            run_command([str(CHECKER), str(gfaz), str(full), str(block_steps),
+                         str(cached_blocks)]),
+            f"adapter check {gfa.name} block_steps={block_steps} "
+            f"cached_blocks={cached_blocks}")
   print("✅ libhandlegraph adapter checks passed")
 
 

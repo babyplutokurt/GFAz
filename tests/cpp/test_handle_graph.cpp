@@ -1,6 +1,6 @@
 // Cross-checks GfazHandleGraph against a plain reading of the decompressed GFA.
 //
-//   gfaz_handle_graph_test <graph.gfaz> <graph.gfa> [block_steps]
+//   gfaz_handle_graph_test <graph.gfaz> <graph.gfa> [block_steps] [cached_blocks]
 //
 // The GFA must be the `gfaz decompress` output of the container, so node ids
 // agree. Every interface method is compared with a brute-force answer.
@@ -270,12 +270,15 @@ void check_steps_on_nodes(const gfaz::GfazHandleGraph &graph,
 
 int main(int argc, char **argv) {
   if (argc < 3) {
-    std::cerr << "usage: " << argv[0] << " <graph.gfaz> <graph.gfa> [block_steps]\n";
+    std::cerr << "usage: " << argv[0]
+              << " <graph.gfaz> <graph.gfa> [block_steps] [cached_blocks]\n";
     return 2;
   }
   gfaz::GfazHandleGraphOptions options;
   if (argc > 3)
     options.block_steps = static_cast<uint32_t>(std::stoul(argv[3]));
+  if (argc > 4)
+    options.cached_blocks = std::stoul(argv[4]);
   const std::unique_ptr<gfaz::GfazHandleGraph> graph =
       gfaz::GfazHandleGraph::load(argv[1], options);
   const ExpectedGraph want = read_gfa(argv[2]);
