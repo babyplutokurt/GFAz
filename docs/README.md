@@ -20,6 +20,14 @@ This directory holds the project documentation. The top-level
   adding a new compute app: the shared extension surface, the canonical app
   skeleton, every wiring touch point, and the determinism/memory conventions.
 
+## Using GFAz from other tools
+
+- [HANDLEGRAPH_ADAPTER.md](HANDLEGRAPH_ADAPTER.md) — `GfazHandleGraph`, a
+  read-only libhandlegraph graph over a `.gfaz`, so vg, odgi and other
+  libhandlegraph tools can run on a container without converting it.
+- [VG_INTEGRATION.md](VG_INTEGRATION.md) — what running vg directly on a `.gfaz`
+  looks like: supported commands, measurements, limits.
+
 ## Compute-engine workflows (`reference` specs for shipped subcommands)
 
 - [workflows/GROWTH_WORKFLOW.md](workflows/GROWTH_WORKFLOW.md) — `gfaz growth`,
