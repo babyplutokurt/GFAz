@@ -174,6 +174,27 @@ inline bool parse_numeric_path_token(const char *begin, const char *end,
 }
 
 __attribute__((target("avx2")))
+size_t count_walk_steps_avx2(std::string_view walk) {
+  const char *data = walk.data();
+  const size_t size = walk.size();
+  const __m256i forward = _mm256_set1_epi8('>');
+  const __m256i reverse = _mm256_set1_epi8('<');
+  size_t steps = 0;
+  size_t offset = 0;
+  for (; offset + 32 <= size; offset += 32) {
+    const __m256i chars =
+        _mm256_loadu_si256(reinterpret_cast<const __m256i *>(data + offset));
+    const __m256i hits = _mm256_or_si256(_mm256_cmpeq_epi8(chars, forward),
+                                         _mm256_cmpeq_epi8(chars, reverse));
+    steps += static_cast<size_t>(__builtin_popcount(
+        static_cast<uint32_t>(_mm256_movemask_epi8(hits))));
+  }
+  for (; offset < size; ++offset)
+    steps += data[offset] == '>' || data[offset] == '<';
+  return steps;
+}
+
+__attribute__((target("avx2")))
 bool parse_numeric_path_avx2(std::string_view nodes,
                              std::vector<gfaz::NodeId> &path) {
   const char *data = nodes.data();
@@ -278,6 +299,61 @@ bool try_parse_numeric_path_simd(std::string_view,
                                  std::vector<gfaz::NodeId> &) {
   return false;
 }
+#endif
+
+// Number of '>' and '<' characters, i.e. an upper bound on the walk's steps.
+size_t count_walk_steps(std::string_view walk) {
+#ifdef GFAZ_X86_SIMD
+  static const bool has_avx2 = __builtin_cpu_supports("avx2");
+  if (has_avx2)
+    return count_walk_steps_avx2(walk);
+#endif
+  size_t steps = 0;
+  for (char c : walk) {
+    if (c == '>' || c == '<')
+      ++steps;
+  }
+  return steps;
+}
+
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+// Value of the first `digits` (1..8) ASCII digits of an 8-byte little-endian
+// load; the other bytes are ignored.
+inline uint32_t parse_up_to_8_digits(uint64_t word, unsigned digits) {
+  uint64_t t = (word ^ 0x3030303030303030ull) << (64 - 8 * digits);
+  t = ((t * 2561) >> 8) & 0x00FF00FF00FF00FFull;
+  t = ((t * 6553601) >> 16) & 0x0000FFFF0000FFFFull;
+  return static_cast<uint32_t>((t * 42949672960001ull) >> 32);
+}
+
+// Parses the digits at `name`, where at least 10 bytes are readable. Returns
+// the digit count (1..9) with the value in `value`, or 0 when the name is not
+// 1 to 9 digits followed by '>' or '<'.
+inline unsigned parse_simple_walk_name(const char *name, uint32_t &value) {
+  uint64_t word;
+  std::memcpy(&word, name, sizeof(word));
+  const uint64_t t = word ^ 0x3030303030303030ull;
+  const uint64_t non_digit =
+      ((t + 0x7676767676767676ull) | t) & 0x8080808080808080ull;
+  const unsigned leading =
+      non_digit != 0 ? static_cast<unsigned>(__builtin_ctzll(non_digit)) >> 3
+                     : 8;
+  if (leading == 0)
+    return 0;
+  uint32_t parsed = parse_up_to_8_digits(word, leading);
+  const unsigned ninth = static_cast<unsigned char>(name[8] - '0');
+  const bool has_ninth = (leading == 8) & (ninth <= 9);
+  parsed = has_ninth ? parsed * 10 + ninth : parsed;
+  const unsigned digits = leading + (has_ninth ? 1 : 0);
+  const char next = name[digits];
+  if (next != '>' && next != '<')
+    return 0;
+  value = parsed;
+  return digits;
+}
+#define GFAZ_HAVE_SWAR_WALK_NAME 1
+#else
+#define GFAZ_HAVE_SWAR_WALK_NAME 0
 #endif
 
 inline uint32_t parse_overlap_num(std::string_view overlap_view, char &op) {
@@ -2696,12 +2772,7 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
   std::vector<gfaz::NodeId> &walk =
       traversal_sink_ ? traversal_sink_->scratch() : local_walk;
   walk.clear();
-  size_t walk_steps = 0;
-  for (char c : walk_str) {
-    if (c == '>' || c == '<')
-      ++walk_steps;
-  }
-  walk.reserve(walk_steps);
+  walk.reserve(count_walk_steps(walk_str));
   size_t walk_pos = 0;
 
   // Fast path for numeric segment names: one pass over the digits, no call
@@ -2720,12 +2791,27 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
         continue;
       const char *const name = p;
       uint32_t node_id = 0;
-      while (p < end && static_cast<unsigned char>(*p - '0') <= 9)
-        node_id = node_id * 10 + static_cast<uint32_t>(*p++ - '0');
-      const size_t digits = static_cast<size_t>(p - name);
-      const bool simple = digits != 0 && digits <= 9 &&
-                          (p == end || *p == '>' || *p == '<') &&
-                          !(table_names && *name == '0');
+      bool simple = false;
+#if GFAZ_HAVE_SWAR_WALK_NAME
+      // Common case, eight bytes at a time; anything it rejects is parsed
+      // again by the loop below.
+      if (end - name >= 10) {
+        const unsigned digits = parse_simple_walk_name(name, node_id);
+        if (digits != 0 && !(table_names && *name == '0')) {
+          simple = true;
+          p = name + digits;
+        }
+      }
+#endif
+      if (!simple) {
+        node_id = 0;
+        while (p < end && static_cast<unsigned char>(*p - '0') <= 9)
+          node_id = node_id * 10 + static_cast<uint32_t>(*p++ - '0');
+        const size_t digits = static_cast<size_t>(p - name);
+        simple = digits != 0 && digits <= 9 &&
+                 (p == end || *p == '>' || *p == '<') &&
+                 !(table_names && *name == '0');
+      }
       if (simple) {
         if (table_names)
           node_id = node_id < table_size ? table[node_id] : 0;
