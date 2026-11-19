@@ -5,7 +5,7 @@ decompressing Graphical Fragment Assembly (GFA) files.
 
 In our current benchmarks, GFAz reaches up to 20x higher compression ratio than
 Gzip and 13x higher compression ratio than Zstd. At 16 CPU threads it reaches
-up to 3.1 GB/s compression and 7.4 GB/s decompression; the experimental GPU
+up to 3.4 GB/s compression and 8.5 GB/s decompression; the experimental GPU
 backend reaches up to 4.8 GB/s compression and 9.4 GB/s decompression.
 
 It has two execution backends:
@@ -26,7 +26,7 @@ writes to `/dev/null`.
 
 - Compression ratio: up to 84x on whole-genome HPRC graphs, up to 20x higher
   than Gzip and 13x higher than Zstd.
-- CPU throughput: up to 3.1 GB/s compression and 7.4 GB/s decompression.
+- CPU throughput: up to 3.4 GB/s compression and 8.5 GB/s decompression.
   The 396 GB HPRC v2.1 graph compresses in under 2.5 minutes.
 - CPU memory: `--memory-budget` cuts compression peak memory by 2.6-5.5x on
   whole-genome graphs (HPRC v2.1: 161 GB to 30 GB) for the same output; see
