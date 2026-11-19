@@ -869,40 +869,73 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
       break;
     }
 
-    // Extract used rules with original IDs
-    std::vector<std::pair<Packed2mer, uint32_t>> used(total_used);
+    // The generator hands out rule IDs in sorted 2-mer order (the parallel
+    // build). The used rules are then already in their final order: the new
+    // ID is the rank among the used rules, and no sort is needed. A serial
+    // build numbers rules in hash order and takes the sorting path below.
+    bool rules_sorted = true;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) reduction(&& : rules_sorted)
+#endif
+    for (size_t idx = 1; idx < num_rules; ++idx)
+      rules_sorted = rules_sorted &&
+                     rules.rule_id_to_kmer[idx - 1] < rules.rule_id_to_kmer[idx];
+
+    std::vector<uint32_t> id_map(rules_used.size(), 0);
+    const uint32_t new_id = next_id + total_used;
+    const size_t rulebook_base = next_id - layer_start;
+    if (rulebook.size() < rulebook_base + total_used)
+      rulebook.resize(rulebook_base + total_used);
+
+    if (rules_sorted) {
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
-    for (size_t idx = 0; idx < num_rules; ++idx) {
-      if (idx < rules_used.size() && rules_used[idx]) {
-        uint32_t pos = prefix[idx];
-        uint32_t old_id = rules.rules_start_id + static_cast<uint32_t>(idx);
-        used[pos] = {rules.rule_id_to_kmer[idx], old_id};
+      for (size_t idx = 0; idx < num_rules; ++idx) {
+        if (idx < rules_used.size() && rules_used[idx]) {
+          id_map[idx] = next_id + prefix[idx];
+          rulebook[rulebook_base + prefix[idx]] = rules.rule_id_to_kmer[idx];
+        }
       }
-    }
+      rules.rule_id_to_kmer.clear();
+      rules.rule_id_to_kmer.shrink_to_fit();
+      prefix.clear();
+      prefix.shrink_to_fit();
+    } else {
+      // Extract used rules with original IDs
+      std::vector<std::pair<Packed2mer, uint32_t>> used(total_used);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+      for (size_t idx = 0; idx < num_rules; ++idx) {
+        if (idx < rules_used.size() && rules_used[idx]) {
+          uint32_t pos = prefix[idx];
+          uint32_t old_id = rules.rules_start_id + static_cast<uint32_t>(idx);
+          used[pos] = {rules.rule_id_to_kmer[idx], old_id};
+        }
+      }
 
-    rules.rule_id_to_kmer.clear();
-    rules.rule_id_to_kmer.shrink_to_fit();
-    prefix.clear();
-    prefix.shrink_to_fit();
+      rules.rule_id_to_kmer.clear();
+      rules.rule_id_to_kmer.shrink_to_fit();
+      prefix.clear();
+      prefix.shrink_to_fit();
 
-    // Sort by 2-mer value for better ZSTD compression
+      // Sort by 2-mer value for better ZSTD compression
 #if defined(_OPENMP) && defined(__GLIBCXX__)
-    __gnu_parallel::sort(
-        used.begin(), used.end(),
-        [](const auto &a, const auto &b) { return a.first < b.first; });
+      __gnu_parallel::sort(
+          used.begin(), used.end(),
+          [](const auto &a, const auto &b) { return a.first < b.first; });
 #else
-    std::sort(used.begin(), used.end(),
-              [](const auto &a, const auto &b) { return a.first < b.first; });
+      std::sort(used.begin(), used.end(),
+                [](const auto &a, const auto &b) { return a.first < b.first; });
 #endif
 
-    // Build unified ID mapping: old_id → new_sorted_id
-    std::vector<uint32_t> id_map(rules_used.size(), 0);
-    uint32_t new_id = next_id;
-    for (const auto &[kmer, old_id] : used) {
-      uint32_t idx = old_id - rules.rules_start_id;
-      id_map[idx] = new_id++;
+      // Unified ID mapping (old_id -> new sorted ID) and the rulebook entries
+      for (size_t i = 0; i < used.size(); ++i) {
+        id_map[used[i].second - rules.rules_start_id] =
+            next_id + static_cast<uint32_t>(i);
+        rulebook[rulebook_base + i] = used[i].first;
+      }
     }
     rules_used.clear();
     if (next_scan) {
@@ -919,15 +952,6 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
     }
     id_map.clear();
     id_map.shrink_to_fit();
-
-    // Add sorted rules to rulebook
-    for (size_t i = 0; i < used.size(); ++i) {
-      uint32_t final_id = next_id + static_cast<uint32_t>(i);
-      size_t idx = final_id - layer_start;
-      if (idx >= rulebook.size())
-        rulebook.resize(idx + 1);
-      rulebook[idx] = used[i].first;
-    }
 
     if (filter_new_symbols)
       min_new_id = next_id;
