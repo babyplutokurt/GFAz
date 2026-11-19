@@ -95,7 +95,9 @@ def compress(cli: Path, src: Path, dst: Path, extra, spill_codec=None):
   if spill_codec:
     env["GFAZ_SPILL_CODEC"] = spill_codec
   result = subprocess.run(
-      [str(cli), "compress", *extra, str(src), str(dst)],
+      # append_mixed.gfa has paths and walks but no segments.
+      [str(cli), "compress", "--allow-missing-segments", *extra, str(src),
+       str(dst)],
       text=True, capture_output=True, check=False, env=env)
   if result.returncode != 0:
     raise AssertionError(

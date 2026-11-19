@@ -130,6 +130,15 @@ Lower-memory CPU compression (same output, byte for byte):
 build/bin/gfaz compress --memory-budget 2G --tmp-dir /path/on/nvme example.gfa
 ```
 
+A path, walk, link, jump or containment that references a segment with no
+S-line is reported as an error. To compress such a file anyway:
+
+```bash
+# Unknown segment names are dropped (with a warning); in a graph whose
+# segments are named 1..N, numbers above N are kept
+build/bin/gfaz compress --allow-missing-segments example.gfa
+```
+
 Decompression:
 
 ```bash

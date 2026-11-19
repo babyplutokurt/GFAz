@@ -142,6 +142,7 @@ inline std::string_view next_field(std::string_view line, size_t &pos) {
 
 #ifdef GFAZ_X86_SIMD
 inline bool parse_numeric_path_token(const char *begin, const char *end,
+                                     uint64_t max_id,
                                      std::vector<gfaz::NodeId> &path) {
   if (begin == end)
     return true;
@@ -163,10 +164,11 @@ inline bool parse_numeric_path_token(const char *begin, const char *end,
       return false;
     value = value * 10 + digit;
   }
-  if (value > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()))
+  // An ID outside 1..max_id names no segment: hand the path back so the
+  // general parser reports it.
+  if (value == 0 || value > max_id ||
+      value > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()))
     return false;
-  if (value == 0)
-    return true;
 
   const auto node = static_cast<gfaz::NodeId>(value);
   path.push_back(orientation == '-' ? -node : node);
@@ -195,7 +197,7 @@ size_t count_walk_steps_avx2(std::string_view walk) {
 }
 
 __attribute__((target("avx2")))
-bool parse_numeric_path_avx2(std::string_view nodes,
+bool parse_numeric_path_avx2(std::string_view nodes, uint64_t max_id,
                              std::vector<gfaz::NodeId> &path) {
   const char *data = nodes.data();
   const size_t size = nodes.size();
@@ -225,7 +227,7 @@ bool parse_numeric_path_avx2(std::string_view nodes,
     while (mask != 0) {
       const size_t delimiter =
           offset + static_cast<size_t>(__builtin_ctz(mask));
-      if (!parse_numeric_path_token(token_begin, data + delimiter, path))
+      if (!parse_numeric_path_token(token_begin, data + delimiter, max_id, path))
         return false;
       token_begin = data + delimiter + 1;
       mask &= mask - 1;
@@ -234,15 +236,15 @@ bool parse_numeric_path_avx2(std::string_view nodes,
   for (size_t i = offset; i < size; ++i) {
     if (data[i] != ',')
       continue;
-    if (!parse_numeric_path_token(token_begin, data + i, path))
+    if (!parse_numeric_path_token(token_begin, data + i, max_id, path))
       return false;
     token_begin = data + i + 1;
   }
-  return parse_numeric_path_token(token_begin, data + size, path);
+  return parse_numeric_path_token(token_begin, data + size, max_id, path);
 }
 
 __attribute__((target("avx512f,avx512bw")))
-bool parse_numeric_path_avx512(std::string_view nodes,
+bool parse_numeric_path_avx512(std::string_view nodes, uint64_t max_id,
                                std::vector<gfaz::NodeId> &path) {
   const char *data = nodes.data();
   const size_t size = nodes.size();
@@ -270,7 +272,7 @@ bool parse_numeric_path_avx512(std::string_view nodes,
     while (mask != 0) {
       const size_t delimiter =
           offset + static_cast<size_t>(__builtin_ctzll(mask));
-      if (!parse_numeric_path_token(token_begin, data + delimiter, path))
+      if (!parse_numeric_path_token(token_begin, data + delimiter, max_id, path))
         return false;
       token_begin = data + delimiter + 1;
       mask &= mask - 1;
@@ -279,23 +281,23 @@ bool parse_numeric_path_avx512(std::string_view nodes,
   for (size_t i = offset; i < size; ++i) {
     if (data[i] != ',')
       continue;
-    if (!parse_numeric_path_token(token_begin, data + i, path))
+    if (!parse_numeric_path_token(token_begin, data + i, max_id, path))
       return false;
     token_begin = data + i + 1;
   }
-  return parse_numeric_path_token(token_begin, data + size, path);
+  return parse_numeric_path_token(token_begin, data + size, max_id, path);
 }
 
-bool try_parse_numeric_path_simd(std::string_view nodes,
+bool try_parse_numeric_path_simd(std::string_view nodes, uint64_t max_id,
                                  std::vector<gfaz::NodeId> &path) {
   static const bool has_avx512bw = __builtin_cpu_supports("avx512bw");
   static const bool has_avx2 = __builtin_cpu_supports("avx2");
   if (has_avx512bw)
-    return parse_numeric_path_avx512(nodes, path);
-  return has_avx2 && parse_numeric_path_avx2(nodes, path);
+    return parse_numeric_path_avx512(nodes, max_id, path);
+  return has_avx2 && parse_numeric_path_avx2(nodes, max_id, path);
 }
 #else
-bool try_parse_numeric_path_simd(std::string_view,
+bool try_parse_numeric_path_simd(std::string_view, uint64_t,
                                  std::vector<gfaz::NodeId> &) {
   return false;
 }
@@ -1036,6 +1038,8 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   traversal_sink_ = traversal_sink;
   ScopedOMPThreads omp_scope(num_threads);
   const auto parse_start = Clock::now();
+  missing_segment_refs_.store(0);
+  first_missing_segment_.clear();
   auto phase_start = parse_start;
   gfaz::GfaGraph graph;
   segment_field_meta_.clear();
@@ -1480,6 +1484,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
       num_links_hint_ = link_bases.back();
       all_segment_names_numeric_ = true;
       std::atomic<bool> direct_fill_failed{false};
+      const size_t direct_dense_limit = dense_id_limit();
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -1556,6 +1561,8 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
                 const std::string_view to_orient = next_field(line, pos);
                 const std::string_view overlap = next_field(line, pos);
                 if (from_id == 0 || to_id == 0 ||
+                    from_id > direct_dense_limit ||
+                    to_id > direct_dense_limit ||
                     !assign_fixed_optional_fields(
                         line, pos, link_index,
                         direct_graph.link_optional_fields,
@@ -1595,7 +1602,9 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
                 const uint32_t to_id = parse_uint32(next_field(line, pos));
                 const std::string_view to_orient = next_field(line, pos);
                 const std::string_view distance = next_field(line, pos);
-                if (from_id == 0 || to_id == 0) {
+                if (from_id == 0 || to_id == 0 ||
+                    from_id > direct_dense_limit ||
+                    to_id > direct_dense_limit) {
                   direct_fill_failed.store(true, std::memory_order_relaxed);
                   break;
                 }
@@ -1632,7 +1641,9 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
                     next_field(line, pos);
                 const std::string_view position = next_field(line, pos);
                 const std::string_view overlap = next_field(line, pos);
-                if (container_id == 0 || contained_id == 0) {
+                if (container_id == 0 || contained_id == 0 ||
+                    container_id > direct_dense_limit ||
+                    contained_id > direct_dense_limit) {
                   direct_fill_failed.store(true, std::memory_order_relaxed);
                   break;
                 }
@@ -1737,8 +1748,13 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   return false;
   };
 
-  if (try_parse_direct())
+  if (try_parse_direct()) {
+    report_missing_segments();
     return graph;
+  }
+  // The general parser starts over, so forget what the direct pass noted.
+  missing_segment_refs_.store(0);
+  first_missing_segment_.clear();
 
   // Parallel line classification. Split the mapping at newline boundaries so
   // each worker owns complete lines, then concatenate the per-range offsets in
@@ -2184,6 +2200,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
       graph.link_optional_fields = std::move(fixed_columns);
       link_field_meta_ = fixed_meta;
       std::atomic<bool> failed{false};
+      const size_t dense_limit = dense_id_limit();
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -2200,7 +2217,8 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
           const uint32_t to_id = parse_uint32(next_field(line, pos));
           const std::string_view to_orient = next_field(line, pos);
           const std::string_view overlap = next_field(line, pos);
-          if (from_id == 0 || to_id == 0 ||
+          if (from_id == 0 || to_id == 0 || from_id > dense_limit ||
+              to_id > dense_limit ||
               !assign_fixed_optional_fields(
                   line, pos, i, graph.link_optional_fields, fixed_meta)) {
             failed.store(true, std::memory_order_relaxed);
@@ -2315,23 +2333,53 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     }
   };
 
+  // An exception must not leave a parallel region: keep the first one and
+  // report it once the loops are done.
+  std::atomic<bool> traversal_failed{false};
+  std::string traversal_error;
+  auto record_traversal_error = [&](char record, size_t index,
+                                    const char *what) {
+    if (traversal_failed.exchange(true))
+      return;
+    traversal_error = std::string("malformed ") + record + "-line (record " +
+                      std::to_string(index + 1) + "): " + what;
+  };
+
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
   for (size_t i = 0; i < p_offsets.size(); ++i) {
-    std::string_view line(mmap_data + p_offsets[i].offset, p_offsets[i].length);
-    parse_p_line(line, graph, i);
+    if (traversal_failed.load(std::memory_order_relaxed))
+      continue;
+    try {
+      std::string_view line(mmap_data + p_offsets[i].offset,
+                            p_offsets[i].length);
+      parse_p_line(line, graph, i);
+    } catch (const std::exception &e) {
+      record_traversal_error('P', i, e.what());
+    }
     release_line_pages(p_offsets[i]);
   }
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
-
 #endif
   for (size_t i = 0; i < w_offsets.size(); ++i) {
-    std::string_view line(mmap_data + w_offsets[i].offset, w_offsets[i].length);
-    parse_w_line(line, graph, i);
+    if (traversal_failed.load(std::memory_order_relaxed))
+      continue;
+    try {
+      std::string_view line(mmap_data + w_offsets[i].offset,
+                            w_offsets[i].length);
+      parse_w_line(line, graph, i);
+    } catch (const std::exception &e) {
+      record_traversal_error('W', i, e.what());
+    }
     release_line_pages(w_offsets[i]);
+  }
+  if (traversal_failed.load()) {
+    munmap(const_cast<char *>(mmap_data), file_size);
+    close(fd);
+    throw std::runtime_error(std::string(kParserErrorPrefix) + traversal_error);
   }
   p_offsets.clear();
   p_offsets.shrink_to_fit();
@@ -2389,6 +2437,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     print_graph_memory_breakdown(graph);
   }
 
+  report_missing_segments();
   return graph;
 }
 
@@ -2738,8 +2787,10 @@ void GfaParser::parse_l_line(std::string_view line, gfaz::GfaGraph &graph) {
 
   uint32_t from_id = resolve_node_id(from_name_view);
   uint32_t to_id = resolve_node_id(to_name_view);
-  if (from_id == 0 || to_id == 0)
+  if (from_id == 0 || to_id == 0) {
+    note_missing_segment('L', from_id == 0 ? from_name_view : to_name_view);
     return;
+  }
 
   graph.links.from_ids.push_back(from_id);
   graph.links.to_ids.push_back(to_id);
@@ -2795,7 +2846,7 @@ void GfaParser::parse_p_line(std::string_view line, gfaz::GfaGraph &graph,
   std::vector<gfaz::NodeId> &path =
       traversal_sink_ ? traversal_sink_->scratch() : local_path;
   if (!(all_segment_names_numeric_ &&
-        try_parse_numeric_path_simd(nodes_str, path))) {
+        try_parse_numeric_path_simd(nodes_str, dense_id_limit(), path))) {
     path.clear();
     path.reserve(1 + std::count(nodes_str.begin(), nodes_str.end(), ','));
     size_t node_start = 0;
@@ -2811,6 +2862,8 @@ void GfaParser::parse_p_line(std::string_view line, gfaz::GfaGraph &graph,
                 node_with_orient.substr(0, node_with_orient.size() - 1);
 
             uint32_t node_id = resolve_node_id(node_name_view);
+            if (node_id == 0)
+              note_missing_segment('P', node_name_view);
             if (node_id != 0) {
               gfaz::NodeId oriented_node_id = node_id;
               if (orientation == '-')
@@ -2859,6 +2912,7 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
   if (all_segment_names_numeric_ || table_names) {
     const uint32_t *table = numeric_name_table_.data();
     const size_t table_size = numeric_name_table_.size();
+    const size_t dense_limit = dense_id_limit();
     const char *p = walk_str.data();
     const char *const end = p + walk_str.size();
     while (p < end) {
@@ -2888,6 +2942,10 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
                  (p == end || *p == '>' || *p == '<') &&
                  !(table_names && *name == '0');
       }
+      // With segments named 1..N a larger number names none; resolve_node_id()
+      // below turns it into an unknown segment.
+      if (simple && !table_names && node_id > dense_limit)
+        simple = false;
       if (simple) {
         if (table_names)
           node_id = node_id < table_size ? table[node_id] : 0;
@@ -2904,6 +2962,9 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
         if (orient_char == '<')
           oriented_node_id = -node_id;
         walk.push_back(oriented_node_id);
+      } else {
+        note_missing_segment(
+            'W', std::string_view(name, static_cast<size_t>(p - name)));
       }
     }
     walk_pos = walk_str.size();
@@ -2927,6 +2988,8 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
           walk_str.substr(name_start, name_end - name_start);
 
       uint32_t node_id = resolve_node_id(node_name_view);
+      if (node_id == 0)
+        note_missing_segment('W', node_name_view);
       if (node_id != 0) {
         gfaz::NodeId oriented_node_id = node_id;
         if (orient_char == '<')
@@ -3048,8 +3111,10 @@ void GfaParser::parse_j_line(std::string_view line, gfaz::GfaGraph &graph) {
 
   uint32_t from_id = resolve_node_id(from_name_view);
   uint32_t to_id = resolve_node_id(to_name_view);
-  if (from_id == 0 || to_id == 0)
+  if (from_id == 0 || to_id == 0) {
+    note_missing_segment('J', from_id == 0 ? from_name_view : to_name_view);
     return;
+  }
 
   graph.jumps.from_ids.push_back(from_id);
   graph.jumps.from_orients.push_back(
@@ -3085,8 +3150,11 @@ void GfaParser::parse_c_line(std::string_view line, gfaz::GfaGraph &graph) {
 
   uint32_t container_id = resolve_node_id(container_view);
   uint32_t contained_id = resolve_node_id(contained_view);
-  if (container_id == 0 || contained_id == 0)
+  if (container_id == 0 || contained_id == 0) {
+    note_missing_segment('C',
+                         container_id == 0 ? container_view : contained_view);
     return;
+  }
 
   graph.containments.container_ids.push_back(container_id);
   graph.containments.container_orients.push_back(
@@ -3110,12 +3178,56 @@ void GfaParser::parse_c_line(std::string_view line, gfaz::GfaGraph &graph) {
   graph.containments.rest_fields.push_back(std::move(rest));
 }
 
+void GfaParser::note_missing_segment(char record,
+                                     std::string_view name) const {
+  if (missing_segment_refs_.fetch_add(1, std::memory_order_relaxed) != 0)
+    return;
+  constexpr size_t kMaxShown = 64;
+  first_missing_segment_ = std::string(1, record) + "-line references '" +
+                           std::string(name.substr(0, kMaxShown)) +
+                           (name.size() > kMaxShown ? "..." : "") + "'";
+}
+
+void GfaParser::report_missing_segments() const {
+  const uint64_t count = missing_segment_refs_.load();
+  if (count == 0)
+    return;
+  const std::string summary =
+      std::to_string(count) +
+      (count == 1 ? " reference" : " references") +
+      " to segments that no S-line defines (first: " + first_missing_segment_ +
+      ")";
+  if (!allow_missing_segments_) {
+    throw std::runtime_error(
+        std::string(kParserErrorPrefix) + summary +
+        "; pass --allow-missing-segments (allow_missing_segments in the API) "
+        "to drop them");
+  }
+  std::cerr << "Warning: dropped " << summary << std::endl;
+}
+
 uint32_t GfaParser::resolve_node_id(std::string_view node_name_view) const {
   if (node_name_view.empty())
     return 0;
 
-  if (all_segment_names_numeric_)
-    return parse_uint32(node_name_view);
+  if (all_segment_names_numeric_) {
+    // Same reading as parse_uint32(), except that a name with no leading
+    // digits or one that overflows is an unknown segment (0), as in the other
+    // naming modes, instead of an exception.
+    uint32_t value = 0;
+    bool any = false;
+    for (char c : node_name_view) {
+      if (c < '0' || c > '9')
+        break;
+      const uint32_t digit = static_cast<uint32_t>(c - '0');
+      if (value > (std::numeric_limits<uint32_t>::max() - digit) / 10)
+        return 0;
+      value = value * 10 + digit;
+      any = true;
+    }
+    // Segments are named 1..N here, so a larger number names none.
+    return any && value <= dense_id_limit() ? value : 0;
+  }
 
   if (!numeric_name_table_.empty()) {
     uint32_t number = 0;

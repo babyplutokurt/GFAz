@@ -9,7 +9,9 @@ Covers gaps hardened in the audit:
   - record families may be arbitrarily interleaved, including references that
     appear before their segment definitions;
   - a 0-byte .gfa is a valid empty graph (compress+decompress succeed);
-  - a truncated .gfaz fails with a clean non-zero exit, never a crash/signal.
+  - a truncated .gfaz fails with a clean non-zero exit, never a crash/signal;
+  - a record that references an undefined segment is a clean error by default
+    and is accepted with --allow-missing-segments, never a crash/signal.
 """
 
 import subprocess
@@ -261,6 +263,94 @@ def test_unseekable_stdin_round_trip_and_truncation(cli: Path):
           f"{result.returncode} (<=0 indicates a crash/signal)")
 
 
+def _write_graph(path: Path, segment_names, records):
+  path.write_text(
+      "H\tVN:Z:1.1\n" +
+      "".join(f"S\t{name}\tACGT\n" for name in segment_names) + records)
+
+
+def test_missing_segment_references(cli: Path):
+  # A record that references a segment no S-line defines is an error by
+  # default. --allow-missing-segments accepts the input as before the check:
+  # a reference by an unknown name is dropped, and with segments named 1..N a
+  # number above N is kept. Covered for the three ways the parser names
+  # segments (1..N, other numbers, strings) at 1 and 4 threads. The overlong
+  # and non-numeric step names used to throw inside a parallel loop and abort
+  # the process when segments are 1..N.
+  filler = ">{a}>{b}" * 16
+  cases = {
+      "dense": ([str(i) for i in range(1, 9)], "1", "2", "9"),
+      "sparse": (["5", "9", "40", "77"], "5", "9", "6"),
+      "named": (["sa", "sb", "sc"], "sa", "sb", "zz"),
+  }
+  with tempfile.TemporaryDirectory(prefix="gfaz_missing_segment_") as tmp:
+    d = Path(tmp)
+    for tag, (names, a, b, missing) in cases.items():
+      body = filler.format(a=a, b=b)
+      good_records = (
+          f"L\t{a}\t+\t{b}\t+\t0M\n"
+          f"P\tp1\t{a}+,{b}-\t*\n"
+          f"W\ts1\t0\tc1\t0\t9\t{body}>{a}{body}\n"
+          f"W\ts2\t0\tc1\t0\t9\t>{a}<{b}\n")
+      # Names that no naming mode can resolve.
+      never_records = (
+          f"L\t{a}\t+\t{b}\t+\t0M\n"
+          f"L\t{a}\t+\tx1\t+\t0M\n"
+          f"P\tp1\t{a}+,x1+,{b}-\t*\n"
+          f"W\ts1\t0\tc1\t0\t9\t{body}>999999999999<x1"
+          f">{a}{body}\n"
+          f"W\ts2\t0\tc1\t0\t9\t>{a}<{b}>99999999999999999999<0\n")
+      # A plausible name that just is not defined.
+      undefined_records = (
+          good_records +
+          f"L\t{a}\t+\t{missing}\t+\t0M\n"
+          f"P\tp2\t{a}+,{missing}+,{b}-\t*\n"
+          f"W\ts3\t0\tc1\t0\t9\t{body}>{missing}{body}\n")
+      good = d / f"{tag}.good.gfa"
+      never = d / f"{tag}.never.gfa"
+      undefined = d / f"{tag}.undefined.gfa"
+      _write_graph(good, names, good_records)
+      _write_graph(never, names, never_records)
+      _write_graph(undefined, names, undefined_records)
+      for threads in ("1", "4"):
+        for bad in (never, undefined):
+          strict = run_command([str(cli), "compress", "-j", threads, str(bad),
+                                str(d / "strict.gfaz")])
+          if (strict.returncode != 1 or
+              "no S-line defines" not in strict.stderr):
+            raise AssertionError(
+                f"{bad.name} -j {threads}: expected a clean error for "
+                f"missing segments, got exit {strict.returncode}:\n"
+                f"{strict.stderr}")
+        allow = ["-j", threads, "--allow-missing-segments"]
+        expected = _round_trip_with(cli, good, d, f"{tag}.good{threads}",
+                                    ["-j", threads])
+        dropped = _round_trip_with(cli, never, d, f"{tag}.never{threads}",
+                                   allow)
+        if dropped != expected:
+          raise AssertionError(
+              f"{tag} -j {threads}: --allow-missing-segments did not drop "
+              "exactly the unresolvable references")
+        kept = _round_trip_with(cli, undefined, d,
+                                f"{tag}.undefined{threads}", allow)
+        has_missing_step = f">{missing}>" in kept
+        if has_missing_step != (tag == "dense"):
+          raise AssertionError(
+              f"{tag} -j {threads}: --allow-missing-segments should keep an "
+              "undefined number only when segments are named 1..N")
+
+
+def _round_trip_with(cli: Path, gfa: Path, d: Path, tag: str, extra) -> str:
+  gfaz = d / f"{tag}.gfaz"
+  out = d / f"{tag}.out.gfa"
+  require_success(
+      run_command([str(cli), "compress", *extra, str(gfa), str(gfaz)]),
+      f"compress {tag}")
+  require_success(run_command([str(cli), "decompress", str(gfaz), str(out)]),
+                  f"decompress {tag}")
+  return out.read_text()
+
+
 def main():
   cli = Path(CLI_PATH)
   ensure_cli_exists(cli)
@@ -270,6 +360,7 @@ def main():
   test_empty_file_is_empty_graph(cli)
   test_truncated_gfaz_fails_cleanly(cli)
   test_unseekable_stdin_round_trip_and_truncation(cli)
+  test_missing_segment_references(cli)
   print("✅ PASS input_robustness")
 
 

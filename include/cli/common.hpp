@@ -23,6 +23,7 @@ constexpr int kOptGpuLegacy = 1001;
 constexpr int kOptDebug = 1003;
 constexpr int kOptMemoryBudget = 1004;
 constexpr int kOptTmpDir = 1005;
+constexpr int kOptAllowMissingSegments = 1006;
 constexpr int kOptGpuRollingOutputChunkMb = 1004;
 
 // Default GPU rolling-output chunk size (MiB) used by `decompress --gpu`. Kept

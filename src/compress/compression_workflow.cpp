@@ -1046,6 +1046,7 @@ gfaz::CompressedData compress_gfa_with_options(const std::string &gfa_file_path,
 
   {
     GfaParser parser;
+    parser.set_allow_missing_segments(options.allow_missing_segments);
     ctx.graph = parser.parse(gfa_file_path, num_threads, true, ctx.spill.get());
   }
   if (ctx.spill) {

@@ -1,6 +1,8 @@
 #ifndef GFA_PARSER_HPP
 #define GFA_PARSER_HPP
 
+#include <limits>
+#include <atomic>
 #include <cstdint>
 #include <memory_resource>
 #include <string>
@@ -33,6 +35,15 @@ using LineOffsets =
 
 class GfaParser {
 public:
+  // A record that references a segment no S-line defines is an error. With
+  // `allow` the input is accepted as before this check existed: a reference
+  // by an unknown name is dropped (a step from its path or walk; a link, jump
+  // or containment as a whole) with a warning, and when segments are named
+  // 1..N a number above N is kept as it is.
+  void set_allow_missing_segments(bool allow) {
+    allow_missing_segments_ = allow;
+  }
+
   GfaParser();
   // With a `traversal_sink`, path/walk traversals are handed to the sink
   // instead of being stored in the returned graph (names and other path/walk
@@ -61,6 +72,23 @@ private:
   size_t num_segments_hint_ = 0;
   size_t num_links_hint_ = 0;
   gfaz::TraversalSink *traversal_sink_ = nullptr;
+
+  // References to segments that no S-line defines (in P, W, L, J and C
+  // records). The records are parsed in parallel, so the count is atomic; the
+  // first reference found is kept as an example for the message.
+  bool allow_missing_segments_ = false;
+  mutable std::atomic<uint64_t> missing_segment_refs_{0};
+  mutable std::string first_missing_segment_;
+  void note_missing_segment(char record, std::string_view name) const;
+  // With segments named 1..N, the largest number a reference may use. A
+  // larger number names no segment; allow_missing_segments_ keeps such
+  // references as they are (they round-trip as numbers) instead.
+  size_t dense_id_limit() const {
+    return allow_missing_segments_ ? std::numeric_limits<uint32_t>::max()
+                                   : num_segments_hint_;
+  }
+  // Throws, or with allow_missing_segments_ warns, if any were noted.
+  void report_missing_segments() const;
 
   // Fast-path optimization: when all segment names are sequential integers (1,2,3...),
   // skip hash map lookups and convert names directly to IDs.

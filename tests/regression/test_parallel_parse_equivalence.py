@@ -85,7 +85,10 @@ def compress(cli: Path, src: Path, dst: Path, threads: str, serial: bool):
   if serial:
     env["GFAZ_SERIAL_PARSE"] = "1"
   result = subprocess.run(
-      [str(cli), "compress", "-j", threads, str(src), str(dst)],
+      # Several cases reference undefined segments on purpose; both parsers
+      # must drop the same ones.
+      [str(cli), "compress", "-j", threads, "--allow-missing-segments",
+       str(src), str(dst)],
       cwd=str(REPO_ROOT), text=True, capture_output=True, check=False, env=env)
   if result.returncode != 0:
     raise AssertionError(
