@@ -2677,6 +2677,49 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
   walk.reserve(walk_steps);
   size_t walk_pos = 0;
 
+  // Fast path for numeric segment names: one pass over the digits, no call
+  // per step. A name of up to nine digits cannot overflow; anything else goes
+  // through resolve_node_id() as below, so the result is the same.
+  const bool table_names = !all_segment_names_numeric_ &&
+                           !numeric_name_table_.empty();
+  if (all_segment_names_numeric_ || table_names) {
+    const uint32_t *table = numeric_name_table_.data();
+    const size_t table_size = numeric_name_table_.size();
+    const char *p = walk_str.data();
+    const char *const end = p + walk_str.size();
+    while (p < end) {
+      const char orient_char = *p++;
+      if (orient_char != '>' && orient_char != '<')
+        continue;
+      const char *const name = p;
+      uint32_t node_id = 0;
+      while (p < end && static_cast<unsigned char>(*p - '0') <= 9)
+        node_id = node_id * 10 + static_cast<uint32_t>(*p++ - '0');
+      const size_t digits = static_cast<size_t>(p - name);
+      const bool simple = digits != 0 && digits <= 9 &&
+                          (p == end || *p == '>' || *p == '<') &&
+                          !(table_names && *name == '0');
+      if (simple) {
+        if (table_names)
+          node_id = node_id < table_size ? table[node_id] : 0;
+      } else {
+        while (p < end && *p != '>' && *p != '<')
+          ++p;
+        if (p == name)
+          continue;
+        node_id = resolve_node_id(
+            std::string_view(name, static_cast<size_t>(p - name)));
+      }
+      if (node_id != 0) {
+        gfaz::NodeId oriented_node_id = node_id;
+        if (orient_char == '<')
+          oriented_node_id = -node_id;
+        walk.push_back(oriented_node_id);
+      }
+    }
+    walk_pos = walk_str.size();
+  }
+
   while (walk_pos < walk_str.size()) {
     char orient_char = walk_str[walk_pos];
     if (orient_char != '>' && orient_char != '<') {
