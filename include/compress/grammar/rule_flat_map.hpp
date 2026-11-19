@@ -2,6 +2,7 @@
 #define RULE_FLAT_MAP_HPP
 
 #include "compress/grammar/packed_2mer.hpp"
+#include "core/utils/runtime_utils.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -41,6 +42,7 @@ public:
     while (cap < n + n / 2)
       cap <<= 1;
     slots_.reset(new Slot[cap]);
+    gfaz::runtime_utils::advise_huge_pages(slots_.get(), cap * sizeof(Slot));
     capacity_ = cap;
     mask_ = cap - 1;
 

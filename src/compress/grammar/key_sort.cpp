@@ -1,3 +1,4 @@
+#include "core/utils/runtime_utils.hpp"
 #include "compress/grammar/key_sort.hpp"
 
 #include <algorithm>
@@ -124,6 +125,8 @@ void parallel_sort_keys(int64_t *keys, size_t count, int num_threads) {
   };
 
   std::unique_ptr<uint16_t[]> bucket_ids(new uint16_t[count]);
+  gfaz::runtime_utils::advise_huge_pages(bucket_ids.get(),
+                                         count * sizeof(uint16_t));
   std::vector<size_t> positions(ranges * buckets, 0);
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) num_threads(threads)
@@ -153,6 +156,8 @@ void parallel_sort_keys(int64_t *keys, size_t count, int num_threads) {
   bucket_start[buckets] = total;
 
   std::unique_ptr<int64_t[]> scattered(new int64_t[count]);
+  gfaz::runtime_utils::advise_huge_pages(scattered.get(),
+                                         count * sizeof(int64_t));
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) num_threads(threads)
 #endif

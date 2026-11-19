@@ -78,6 +78,7 @@ int do_compress(int argc, char *argv[]) {
       {"debug", no_argument, 0, kOptDebug},
       {"memory-budget", required_argument, 0, kOptMemoryBudget},
       {"tmp-dir", required_argument, 0, kOptTmpDir},
+      {"allow-missing-segments", no_argument, 0, kOptAllowMissingSegments},
       {"help", no_argument, 0, 'h'},
       {0, 0, 0, 0}};
 
@@ -127,6 +128,9 @@ int do_compress(int argc, char *argv[]) {
       break;
     case kOptTmpDir:
       cpu_options.tmp_dir = optarg;
+      break;
+    case kOptAllowMissingSegments:
+      cpu_options.allow_missing_segments = true;
       break;
     case 'h':
       print_compress_help();
@@ -251,6 +255,8 @@ int do_compress(int argc, char *argv[]) {
       gpu_compression::GpuCompressionOptions gpu_options;
       gpu_options.num_threads = num_threads;
       gpu_options.force_full_device_legacy = use_gpu_legacy;
+      gpu_options.allow_missing_segments =
+          cpu_options.allow_missing_segments;
       gpu_options.force_rolling_scheduler = !use_gpu_legacy;
       if (gpu_chunk_mb > 0) {
         gpu_options.rolling_input_chunk_bytes =

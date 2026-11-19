@@ -6,6 +6,7 @@
 #include "core/utils/threading_utils.hpp"
 #include "compress/decompression_debug.hpp"
 
+#include <functional>
 #include <algorithm>
 #include <charconv>
 #include <chrono>
@@ -531,124 +532,102 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
   std::vector<char> link_overlap_ops;
   auto t0 = Clock::now();
 
-#ifdef _OPENMP
-#pragma omp parallel sections
-  {
-#pragma omp section
-    {
-      auto decoded_rules = decode_rules(data);
-      rules_first = std::move(decoded_rules.first);
-      rules_second = std::move(decoded_rules.second);
-    }
-#pragma omp section
-    {
-      if (!data.paths_zstd.payload.empty())
-        paths_flat = gfaz::Codec::zstd_decompress_int32_vector(data.paths_zstd);
-    }
-#pragma omp section
-    {
-      if (!data.walks_zstd.payload.empty())
-        walks_flat = gfaz::Codec::zstd_decompress_int32_vector(data.walks_zstd);
-    }
-#pragma omp section
-    {
-      path_names = decompress_string_column(data.names_zstd, data.name_lengths_zstd);
-      path_overlaps =
-          decompress_string_column(data.overlaps_zstd, data.overlap_lengths_zstd);
-    }
-#pragma omp section
-    {
-      walk_sample_ids = decompress_string_column(data.walk_sample_ids_zstd,
-                                                 data.walk_sample_id_lengths_zstd);
-      walk_hap_indices =
-          gfaz::Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
-      walk_seq_ids = decompress_string_column(data.walk_seq_ids_zstd,
-                                              data.walk_seq_id_lengths_zstd);
-      walk_seq_starts = gfaz::Codec::decompress_varint_int64(
-          data.walk_seq_starts_zstd, data.walk_lengths.size());
-      walk_seq_ends =
-          gfaz::Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
-                                        data.walk_lengths.size());
-    }
-#pragma omp section
-    {
-      segment_sequences =
-          gfaz::Codec::zstd_decompress_string(data.segment_sequences_zstd);
-      segment_lengths =
-          gfaz::Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
-    }
-#pragma omp section
+  std::vector<gfaz::OptionalFieldColumn> segment_optional_fields(
+      data.segment_optional_fields_zstd.size());
+  std::vector<gfaz::OptionalFieldColumn> link_optional_fields(
+      data.link_optional_fields_zstd.size());
 
-    {
-      link_from_ids =
-          gfaz::Codec::decompress_delta_varint_uint32(data.link_from_ids_zstd,
-                                                data.num_links);
-      link_to_ids =
-          gfaz::Codec::decompress_delta_varint_uint32(data.link_to_ids_zstd,
-                                                data.num_links);
-      link_from_orients = gfaz::Codec::decompress_orientations(
-          data.link_from_orients_zstd, data.num_links);
-      link_to_orients =
-          gfaz::Codec::decompress_orientations(data.link_to_orients_zstd, data.num_links);
-      link_overlap_nums =
-          gfaz::Codec::zstd_decompress_uint32_vector(data.link_overlap_nums_zstd);
-      link_overlap_ops =
-          gfaz::Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
-    }
+  // Every column decodes independently and single-threaded, so each one is a
+  // job of its own; the longest column bounds the stage.
+  std::vector<std::function<void()>> decode_jobs;
+  decode_jobs.push_back([&] {
+    rules_first =
+        gfaz::Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
+    gfaz::Codec::delta_decode_int32(rules_first);
+  });
+  decode_jobs.push_back([&] {
+    rules_second =
+        gfaz::Codec::zstd_decompress_int32_vector(data.rules_second_zstd);
+    gfaz::Codec::delta_decode_int32(rules_second);
+  });
+  decode_jobs.push_back([&] {
+    segment_sequences =
+        gfaz::Codec::zstd_decompress_string(data.segment_sequences_zstd);
+  });
+  decode_jobs.push_back([&] {
+    if (!data.walks_zstd.payload.empty())
+      walks_flat = gfaz::Codec::zstd_decompress_int32_vector(data.walks_zstd);
+  });
+  decode_jobs.push_back([&] {
+    if (!data.paths_zstd.payload.empty())
+      paths_flat = gfaz::Codec::zstd_decompress_int32_vector(data.paths_zstd);
+  });
+  for (size_t c = 0; c < segment_optional_fields.size(); ++c) {
+    decode_jobs.push_back([&, c] {
+      segment_optional_fields[c] =
+          decompress_optional_column(data.segment_optional_fields_zstd[c]);
+    });
   }
-#else
-  auto decoded_rules = decode_rules(data);
-  rules_first = std::move(decoded_rules.first);
-  rules_second = std::move(decoded_rules.second);
-  if (!data.paths_zstd.payload.empty())
-    paths_flat = gfaz::Codec::zstd_decompress_int32_vector(data.paths_zstd);
-  if (!data.walks_zstd.payload.empty())
-    walks_flat = gfaz::Codec::zstd_decompress_int32_vector(data.walks_zstd);
-  path_names = decompress_string_column(data.names_zstd, data.name_lengths_zstd);
-  path_overlaps =
-      decompress_string_column(data.overlaps_zstd, data.overlap_lengths_zstd);
-  walk_sample_ids = decompress_string_column(data.walk_sample_ids_zstd,
-                                             data.walk_sample_id_lengths_zstd);
-  walk_hap_indices =
-      gfaz::Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
-  walk_seq_ids =
-      decompress_string_column(data.walk_seq_ids_zstd, data.walk_seq_id_lengths_zstd);
-  walk_seq_starts = gfaz::Codec::decompress_varint_int64(data.walk_seq_starts_zstd,
-                                                   data.walk_lengths.size());
-  walk_seq_ends = gfaz::Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
-                                                 data.walk_lengths.size());
-  segment_sequences = gfaz::Codec::zstd_decompress_string(data.segment_sequences_zstd);
-  segment_lengths =
-      gfaz::Codec::zstd_decompress_uint32_vector(data.segment_seq_lengths_zstd);
-  link_from_ids =
-      gfaz::Codec::decompress_delta_varint_uint32(data.link_from_ids_zstd,
-                                            data.num_links);
-  link_to_ids = gfaz::Codec::decompress_delta_varint_uint32(data.link_to_ids_zstd,
-                                                      data.num_links);
-  link_from_orients =
-      gfaz::Codec::decompress_orientations(data.link_from_orients_zstd, data.num_links);
-  link_to_orients =
-      gfaz::Codec::decompress_orientations(data.link_to_orients_zstd, data.num_links);
-  link_overlap_nums =
-      gfaz::Codec::zstd_decompress_uint32_vector(data.link_overlap_nums_zstd);
-  link_overlap_ops =
-      gfaz::Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
+  for (size_t c = 0; c < link_optional_fields.size(); ++c) {
+    decode_jobs.push_back([&, c] {
+      link_optional_fields[c] =
+          decompress_optional_column(data.link_optional_fields_zstd[c]);
+    });
+  }
+  decode_jobs.push_back([&] {
+    link_from_ids = gfaz::Codec::decompress_delta_varint_uint32(
+        data.link_from_ids_zstd, data.num_links);
+  });
+  decode_jobs.push_back([&] {
+    link_to_ids = gfaz::Codec::decompress_delta_varint_uint32(
+        data.link_to_ids_zstd, data.num_links);
+  });
+  decode_jobs.push_back([&] {
+    link_from_orients = gfaz::Codec::decompress_orientations(
+        data.link_from_orients_zstd, data.num_links);
+  });
+  decode_jobs.push_back([&] {
+    link_to_orients = gfaz::Codec::decompress_orientations(
+        data.link_to_orients_zstd, data.num_links);
+  });
+  decode_jobs.push_back([&] {
+    link_overlap_nums =
+        gfaz::Codec::zstd_decompress_uint32_vector(data.link_overlap_nums_zstd);
+  });
+  decode_jobs.push_back([&] {
+    link_overlap_ops =
+        gfaz::Codec::zstd_decompress_char_vector(data.link_overlap_ops_zstd);
+  });
+  decode_jobs.push_back([&] {
+    segment_lengths = gfaz::Codec::zstd_decompress_uint32_vector(
+        data.segment_seq_lengths_zstd);
+  });
+  decode_jobs.push_back([&] {
+    path_names =
+        decompress_string_column(data.names_zstd, data.name_lengths_zstd);
+    path_overlaps =
+        decompress_string_column(data.overlaps_zstd, data.overlap_lengths_zstd);
+  });
+  decode_jobs.push_back([&] {
+    walk_sample_ids = decompress_string_column(
+        data.walk_sample_ids_zstd, data.walk_sample_id_lengths_zstd);
+    walk_hap_indices =
+        gfaz::Codec::zstd_decompress_uint32_vector(data.walk_hap_indices_zstd);
+    walk_seq_ids = decompress_string_column(data.walk_seq_ids_zstd,
+                                            data.walk_seq_id_lengths_zstd);
+    walk_seq_starts = gfaz::Codec::decompress_varint_int64(
+        data.walk_seq_starts_zstd, data.walk_lengths.size());
+    walk_seq_ends = gfaz::Codec::decompress_varint_int64(
+        data.walk_seq_ends_zstd, data.walk_lengths.size());
+  });
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1)
 #endif
+  for (size_t job = 0; job < decode_jobs.size(); ++job)
+    decode_jobs[job]();
+  decode_jobs.clear();
   auto t1 = Clock::now();
-  debug_stages.push_back({"decode core columns", elapsed_ms(t0, t1)});
-
-  t0 = Clock::now();
-  std::vector<gfaz::OptionalFieldColumn> segment_optional_fields;
-  segment_optional_fields.reserve(data.segment_optional_fields_zstd.size());
-  for (const auto &c : data.segment_optional_fields_zstd)
-    segment_optional_fields.push_back(decompress_optional_column(c));
-
-  std::vector<gfaz::OptionalFieldColumn> link_optional_fields;
-  link_optional_fields.reserve(data.link_optional_fields_zstd.size());
-  for (const auto &c : data.link_optional_fields_zstd)
-    link_optional_fields.push_back(decompress_optional_column(c));
-  t1 = Clock::now();
-  debug_stages.push_back({"decode optional columns", elapsed_ms(t0, t1)});
+  debug_stages.push_back({"decode columns", elapsed_ms(t0, t1)});
 
   std::vector<uint32_t> jump_from_ids;
   std::vector<uint32_t> jump_to_ids;

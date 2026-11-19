@@ -1,4 +1,5 @@
 #include "core/codec/codec.hpp"
+#include "core/utils/runtime_utils.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
@@ -288,7 +289,13 @@ zstd_decompress_int32_vector(const ZstdCompressedBlock &block) {
   }
 
   size_t num_elements = block.original_size / sizeof(int32_t);
-  std::vector<int32_t> result(num_elements);
+  // Large columns are read at random later (rule expansion); ask for huge
+  // pages before the first touch.
+  std::vector<int32_t> result;
+  result.reserve(num_elements);
+  gfaz::runtime_utils::advise_huge_pages(result.data(),
+                                         num_elements * sizeof(int32_t));
+  result.resize(num_elements);
 
   size_t decompressed_size =
       ZSTD_decompress(result.data(), block.original_size, block.payload.data(),
@@ -337,7 +344,13 @@ zstd_decompress_uint32_vector(const ZstdCompressedBlock &block) {
   }
 
   size_t num_elements = block.original_size / sizeof(uint32_t);
-  std::vector<uint32_t> result(num_elements);
+  // Large columns are read at random later (rule expansion); ask for huge
+  // pages before the first touch.
+  std::vector<uint32_t> result;
+  result.reserve(num_elements);
+  gfaz::runtime_utils::advise_huge_pages(result.data(),
+                                         num_elements * sizeof(uint32_t));
+  result.resize(num_elements);
 
   size_t decompressed_size =
       ZSTD_decompress(result.data(), block.original_size, block.payload.data(),
@@ -610,7 +623,13 @@ zstd_decompress_float_vector(const ZstdCompressedBlock &block) {
   }
 
   size_t num_elements = block.original_size / sizeof(float);
-  std::vector<float> result(num_elements);
+  // Large columns are read at random later (rule expansion); ask for huge
+  // pages before the first touch.
+  std::vector<float> result;
+  result.reserve(num_elements);
+  gfaz::runtime_utils::advise_huge_pages(result.data(),
+                                         num_elements * sizeof(float));
+  result.resize(num_elements);
 
   size_t decompressed_size =
       ZSTD_decompress(result.data(), block.original_size, block.payload.data(),

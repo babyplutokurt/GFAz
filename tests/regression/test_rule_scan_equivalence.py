@@ -51,7 +51,9 @@ def compress(cli: Path, src: Path, dst: Path, extra, scan, new_filter=True):
   else:
     env["GFAZ_FUSED_SCAN"] = "1"
   result = subprocess.run(
-      [str(cli), "compress", *extra, str(src), str(dst)],
+      # append_mixed.gfa has paths and walks but no segments.
+      [str(cli), "compress", "--allow-missing-segments", *extra, str(src),
+       str(dst)],
       cwd=str(REPO_ROOT), text=True, capture_output=True, check=False, env=env)
   if result.returncode != 0:
     raise AssertionError(

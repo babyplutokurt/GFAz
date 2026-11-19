@@ -229,6 +229,7 @@ gfaz::CompressedData compress_gfa_gpu(const std::string &gfa_file_path,
   const auto total_start = Clock::now();
   const auto parse_start = Clock::now();
   GfaParser parser;
+  parser.set_allow_missing_segments(options.allow_missing_segments);
   gfaz::GfaGraph graph = parser.parse(gfa_file_path, options.num_threads);
   const auto parse_end = Clock::now();
   log_gpu_memory_checkpoint("after parse");

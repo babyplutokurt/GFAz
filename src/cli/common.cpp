@@ -108,6 +108,10 @@ OPTIONS (compress):
                              the rest through a temp file. Same output.
     --tmp-dir <DIR>         Temp file location for --memory-budget; use fast
                              local storage (default: $TMPDIR, else output dir)
+    --allow-missing-segments
+                            Accept references to segments that no S-line
+                             defines instead of failing: unknown names are
+                             dropped, numbers above N in a 1..N graph kept
     -s, --stats             Show size/statistics summary
     --debug                 Show internal debug/timing output
     -h, --help              Show this help message
@@ -486,6 +490,10 @@ OPTIONS:
                              the rest through a temp file. Same output.
     --tmp-dir <DIR>         Temp file location for --memory-budget; use fast
                              local storage (default: $TMPDIR, else output dir)
+    --allow-missing-segments
+                            Accept references to segments that no S-line
+                             defines instead of failing: unknown names are
+                             dropped, numbers above N in a 1..N graph kept
     -s, --stats             Show size/statistics summary
     --debug                 Show internal debug/timing output
     -h, --help              Show this help message

@@ -1,6 +1,8 @@
 #ifndef GFA_PARSER_HPP
 #define GFA_PARSER_HPP
 
+#include <limits>
+#include <atomic>
 #include <cstdint>
 #include <memory_resource>
 #include <string>
@@ -12,8 +14,36 @@
 #include "compress/io/traversal_sink.hpp"
 #include "core/model/gfa_graph.hpp"
 
+// Allocator that leaves trivially constructible elements uninitialized, so a
+// large vector can be sized once and then filled (and first touched) by
+// several threads.
+template <typename T> struct DefaultInitAllocator : std::allocator<T> {
+  template <typename U> struct rebind {
+    using other = DefaultInitAllocator<U>;
+  };
+  DefaultInitAllocator() = default;
+  template <typename U>
+  DefaultInitAllocator(const DefaultInitAllocator<U> &) noexcept {}
+  template <typename U> void construct(U *p) { ::new (static_cast<void *>(p)) U; }
+  template <typename U, typename... Args> void construct(U *p, Args &&...args) {
+    ::new (static_cast<void *>(p)) U(std::forward<Args>(args)...);
+  }
+};
+
+using LineOffsets =
+    std::vector<gfaz::LineOffset, DefaultInitAllocator<gfaz::LineOffset>>;
+
 class GfaParser {
 public:
+  // A record that references a segment no S-line defines is an error. With
+  // `allow` the input is accepted as before this check existed: a reference
+  // by an unknown name is dropped (a step from its path or walk; a link, jump
+  // or containment as a whole) with a warning, and when segments are named
+  // 1..N a number above N is kept as it is.
+  void set_allow_missing_segments(bool allow) {
+    allow_missing_segments_ = allow;
+  }
+
   GfaParser();
   // With a `traversal_sink`, path/walk traversals are handed to the sink
   // instead of being stored in the returned graph (names and other path/walk
@@ -43,6 +73,23 @@ private:
   size_t num_links_hint_ = 0;
   gfaz::TraversalSink *traversal_sink_ = nullptr;
 
+  // References to segments that no S-line defines (in P, W, L, J and C
+  // records). The records are parsed in parallel, so the count is atomic; the
+  // first reference found is kept as an example for the message.
+  bool allow_missing_segments_ = false;
+  mutable std::atomic<uint64_t> missing_segment_refs_{0};
+  mutable std::string first_missing_segment_;
+  void note_missing_segment(char record, std::string_view name) const;
+  // With segments named 1..N, the largest number a reference may use. A
+  // larger number names no segment; allow_missing_segments_ keeps such
+  // references as they are (they round-trip as numbers) instead.
+  size_t dense_id_limit() const {
+    return allow_missing_segments_ ? std::numeric_limits<uint32_t>::max()
+                                   : num_segments_hint_;
+  }
+  // Throws, or with allow_missing_segments_ warns, if any were noted.
+  void report_missing_segments() const;
+
   // Fast-path optimization: when all segment names are sequential integers (1,2,3...),
   // skip hash map lookups and convert names directly to IDs.
   bool all_segment_names_numeric_ = true;
@@ -56,11 +103,11 @@ private:
   // leaving the graph as it found it, for any input the serial line parsers
   // treat specially; the caller then runs those.
   bool parse_segments_in_chunks(const char *data,
-                                const std::vector<gfaz::LineOffset> &offsets,
+                                const LineOffsets &offsets,
                                 size_t page_size, bool direct_segment_columns,
                                 gfaz::GfaGraph &graph);
   bool parse_links_in_chunks(const char *data,
-                             const std::vector<gfaz::LineOffset> &offsets,
+                             const LineOffsets &offsets,
                              size_t page_size, gfaz::GfaGraph &graph);
 
   void parse_segment_field(std::string_view field, size_t segment_index, gfaz::GfaGraph &graph);

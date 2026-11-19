@@ -32,8 +32,10 @@ constexpr int kDefaultDeltaRound = 1;
 constexpr int kDefaultNumThreads = 0;
 } // namespace
 
-gfaz::GfaGraph parse_gfa_file(const std::string &file_path) {
+gfaz::GfaGraph parse_gfa_file(const std::string &file_path,
+                              bool allow_missing_segments) {
   GfaParser parser;
+  parser.set_allow_missing_segments(allow_missing_segments);
   return parser.parse(file_path);
 }
 
@@ -42,10 +44,12 @@ gfaz::CompressedData compress_gfa_with_budget(const std::string &gfa_file_path,
                                         int delta_round, int num_threads,
                                         bool show_stats,
                                         size_t memory_budget_bytes,
-                                        const std::string &tmp_dir) {
+                                        const std::string &tmp_dir,
+                                        bool allow_missing_segments) {
   CompressOptions options;
   options.traversal_memory_budget_bytes = memory_budget_bytes;
   options.tmp_dir = tmp_dir;
+  options.allow_missing_segments = allow_missing_segments;
   return compress_gfa_with_options(gfa_file_path, num_rounds, freq_threshold,
                                    delta_round, num_threads, show_stats,
                                    options);
@@ -338,13 +342,14 @@ PYBIND11_MODULE(gfa_compression, m) {
         "Compress a GFA file (returns CompressedData). A non-zero "
         "memory_budget_bytes caps the path/walk data held in memory and "
         "streams the rest through a temp file in tmp_dir; the result is "
-        "identical.",
+        "identical. A record that references an undefined segment is an "
+        "error unless allow_missing_segments is set, which drops it.",
         py::arg("gfa_file_path"), py::arg("num_rounds") = kDefaultRounds,
         py::arg("freq_threshold") = kDefaultFreqThreshold,
         py::arg("delta_round") = kDefaultDeltaRound,
         py::arg("num_threads") = kDefaultNumThreads,
         py::arg("show_stats") = false, py::arg("memory_budget_bytes") = 0,
-        py::arg("tmp_dir") = "");
+        py::arg("tmp_dir") = "", py::arg("allow_missing_segments") = false);
 
   m.def(
       "decompress",
@@ -674,8 +679,10 @@ PYBIND11_MODULE(gfa_compression, m) {
   m.attr("verify_roundtrip") = m.attr("verify_round_trip");
 
   // Stable naming-normalized aliases.
-  m.def("parse", &parse_gfa_file, "Parse a GFA file", py::arg("file_path"));
-  m.def("parse_gfa", &parse_gfa_file, "Parse a GFA file", py::arg("file_path"));
+  m.def("parse", &parse_gfa_file, "Parse a GFA file",
+        py::arg("file_path"), py::arg("allow_missing_segments") = false);
+  m.def("parse_gfa", &parse_gfa_file, "Parse a GFA file",
+        py::arg("file_path"), py::arg("allow_missing_segments") = false);
   m.def("compress_file", &compress_gfa_with_budget,
         "Alias for compress with normalized argument names",
         py::arg("gfa_file_path"), py::arg("rounds") = kDefaultRounds,
@@ -683,7 +690,7 @@ PYBIND11_MODULE(gfa_compression, m) {
         py::arg("delta_round") = kDefaultDeltaRound,
         py::arg("threads") = kDefaultNumThreads,
         py::arg("show_stats") = false, py::arg("memory_budget_bytes") = 0,
-        py::arg("tmp_dir") = "");
+        py::arg("tmp_dir") = "", py::arg("allow_missing_segments") = false);
   m.def(
       "decompress_data",
       [](const gfaz::CompressedData &data, int threads) {

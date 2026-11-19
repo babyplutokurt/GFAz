@@ -5,7 +5,7 @@ decompressing Graphical Fragment Assembly (GFA) files.
 
 In our current benchmarks, GFAz reaches up to 20x higher compression ratio than
 Gzip and 13x higher compression ratio than Zstd. At 16 CPU threads it reaches
-up to 3.1 GB/s compression and 7.4 GB/s decompression; the experimental GPU
+up to 3.4 GB/s compression and 8.5 GB/s decompression; the experimental GPU
 backend reaches up to 4.8 GB/s compression and 9.4 GB/s decompression.
 
 It has two execution backends:
@@ -26,7 +26,7 @@ writes to `/dev/null`.
 
 - Compression ratio: up to 84x on whole-genome HPRC graphs, up to 20x higher
   than Gzip and 13x higher than Zstd.
-- CPU throughput: up to 3.1 GB/s compression and 7.4 GB/s decompression.
+- CPU throughput: up to 3.4 GB/s compression and 8.5 GB/s decompression.
   The 396 GB HPRC v2.1 graph compresses in under 2.5 minutes.
 - CPU memory: `--memory-budget` cuts compression peak memory by 2.6-5.5x on
   whole-genome graphs (HPRC v2.1: 161 GB to 30 GB) for the same output; see
@@ -128,6 +128,15 @@ Lower-memory CPU compression (same output, byte for byte):
 # Keep at most 2 GiB of path/walk data in RAM; stream the rest through a temp
 # file on fast local storage
 build/bin/gfaz compress --memory-budget 2G --tmp-dir /path/on/nvme example.gfa
+```
+
+A path, walk, link, jump or containment that references a segment with no
+S-line is reported as an error. To compress such a file anyway:
+
+```bash
+# Unknown segment names are dropped (with a warning); in a graph whose
+# segments are named 1..N, numbers above N are kept
+build/bin/gfaz compress --allow-missing-segments example.gfa
 ```
 
 Decompression:

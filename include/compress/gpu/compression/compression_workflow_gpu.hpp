@@ -14,6 +14,8 @@ struct GpuCompressionOptions {
   int num_threads = 0;
   bool force_rolling_scheduler = false;
   bool force_full_device_legacy = false;
+  // Accept references to segments that no S-line defines instead of failing.
+  bool allow_missing_segments = false;
 };
 
 struct GpuGrammarRoundDebugInfo {

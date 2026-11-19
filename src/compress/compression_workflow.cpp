@@ -887,7 +887,13 @@ static void run_grammar_compression(std::vector<std::vector<gfaz::NodeId>> &path
       rules_sorted = rules_sorted &&
                      rules.rule_id_to_kmer[idx - 1] < rules.rule_id_to_kmer[idx];
 
-    std::vector<uint32_t> id_map(rules_used.size(), 0);
+    // Looked up at random by the remap pass: ask for huge pages before the
+    // first touch.
+    std::vector<uint32_t> id_map;
+    id_map.reserve(rules_used.size());
+    gfaz::runtime_utils::advise_huge_pages(
+        id_map.data(), rules_used.size() * sizeof(uint32_t));
+    id_map.resize(rules_used.size(), 0);
     const uint32_t new_id = next_id + total_used;
     const size_t rulebook_base = next_id - layer_start;
     if (rulebook.size() < rulebook_base + total_used)
@@ -1040,6 +1046,7 @@ gfaz::CompressedData compress_gfa_with_options(const std::string &gfa_file_path,
 
   {
     GfaParser parser;
+    parser.set_allow_missing_segments(options.allow_missing_segments);
     ctx.graph = parser.parse(gfa_file_path, num_threads, true, ctx.spill.get());
   }
   if (ctx.spill) {

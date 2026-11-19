@@ -17,6 +17,10 @@ struct CompressOptions {
   // Directory for the temp file; empty means $TMPDIR, then /tmp. Put it on
   // fast local storage.
   std::string tmp_dir;
+  // A record that references a segment no S-line defines is an error. Set
+  // this to accept the input as older versions did: unknown names are dropped
+  // with a warning; numbers above N in a graph named 1..N are kept.
+  bool allow_missing_segments = false;
 };
 
 gfaz::CompressedData compress_gfa(const std::string &gfa_file_path, int num_rounds,

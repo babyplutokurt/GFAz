@@ -142,6 +142,7 @@ inline std::string_view next_field(std::string_view line, size_t &pos) {
 
 #ifdef GFAZ_X86_SIMD
 inline bool parse_numeric_path_token(const char *begin, const char *end,
+                                     uint64_t max_id,
                                      std::vector<gfaz::NodeId> &path) {
   if (begin == end)
     return true;
@@ -163,10 +164,11 @@ inline bool parse_numeric_path_token(const char *begin, const char *end,
       return false;
     value = value * 10 + digit;
   }
-  if (value > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()))
+  // An ID outside 1..max_id names no segment: hand the path back so the
+  // general parser reports it.
+  if (value == 0 || value > max_id ||
+      value > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()))
     return false;
-  if (value == 0)
-    return true;
 
   const auto node = static_cast<gfaz::NodeId>(value);
   path.push_back(orientation == '-' ? -node : node);
@@ -174,7 +176,28 @@ inline bool parse_numeric_path_token(const char *begin, const char *end,
 }
 
 __attribute__((target("avx2")))
-bool parse_numeric_path_avx2(std::string_view nodes,
+size_t count_walk_steps_avx2(std::string_view walk) {
+  const char *data = walk.data();
+  const size_t size = walk.size();
+  const __m256i forward = _mm256_set1_epi8('>');
+  const __m256i reverse = _mm256_set1_epi8('<');
+  size_t steps = 0;
+  size_t offset = 0;
+  for (; offset + 32 <= size; offset += 32) {
+    const __m256i chars =
+        _mm256_loadu_si256(reinterpret_cast<const __m256i *>(data + offset));
+    const __m256i hits = _mm256_or_si256(_mm256_cmpeq_epi8(chars, forward),
+                                         _mm256_cmpeq_epi8(chars, reverse));
+    steps += static_cast<size_t>(__builtin_popcount(
+        static_cast<uint32_t>(_mm256_movemask_epi8(hits))));
+  }
+  for (; offset < size; ++offset)
+    steps += data[offset] == '>' || data[offset] == '<';
+  return steps;
+}
+
+__attribute__((target("avx2")))
+bool parse_numeric_path_avx2(std::string_view nodes, uint64_t max_id,
                              std::vector<gfaz::NodeId> &path) {
   const char *data = nodes.data();
   const size_t size = nodes.size();
@@ -204,7 +227,7 @@ bool parse_numeric_path_avx2(std::string_view nodes,
     while (mask != 0) {
       const size_t delimiter =
           offset + static_cast<size_t>(__builtin_ctz(mask));
-      if (!parse_numeric_path_token(token_begin, data + delimiter, path))
+      if (!parse_numeric_path_token(token_begin, data + delimiter, max_id, path))
         return false;
       token_begin = data + delimiter + 1;
       mask &= mask - 1;
@@ -213,15 +236,15 @@ bool parse_numeric_path_avx2(std::string_view nodes,
   for (size_t i = offset; i < size; ++i) {
     if (data[i] != ',')
       continue;
-    if (!parse_numeric_path_token(token_begin, data + i, path))
+    if (!parse_numeric_path_token(token_begin, data + i, max_id, path))
       return false;
     token_begin = data + i + 1;
   }
-  return parse_numeric_path_token(token_begin, data + size, path);
+  return parse_numeric_path_token(token_begin, data + size, max_id, path);
 }
 
 __attribute__((target("avx512f,avx512bw")))
-bool parse_numeric_path_avx512(std::string_view nodes,
+bool parse_numeric_path_avx512(std::string_view nodes, uint64_t max_id,
                                std::vector<gfaz::NodeId> &path) {
   const char *data = nodes.data();
   const size_t size = nodes.size();
@@ -249,7 +272,7 @@ bool parse_numeric_path_avx512(std::string_view nodes,
     while (mask != 0) {
       const size_t delimiter =
           offset + static_cast<size_t>(__builtin_ctzll(mask));
-      if (!parse_numeric_path_token(token_begin, data + delimiter, path))
+      if (!parse_numeric_path_token(token_begin, data + delimiter, max_id, path))
         return false;
       token_begin = data + delimiter + 1;
       mask &= mask - 1;
@@ -258,26 +281,81 @@ bool parse_numeric_path_avx512(std::string_view nodes,
   for (size_t i = offset; i < size; ++i) {
     if (data[i] != ',')
       continue;
-    if (!parse_numeric_path_token(token_begin, data + i, path))
+    if (!parse_numeric_path_token(token_begin, data + i, max_id, path))
       return false;
     token_begin = data + i + 1;
   }
-  return parse_numeric_path_token(token_begin, data + size, path);
+  return parse_numeric_path_token(token_begin, data + size, max_id, path);
 }
 
-bool try_parse_numeric_path_simd(std::string_view nodes,
+bool try_parse_numeric_path_simd(std::string_view nodes, uint64_t max_id,
                                  std::vector<gfaz::NodeId> &path) {
   static const bool has_avx512bw = __builtin_cpu_supports("avx512bw");
   static const bool has_avx2 = __builtin_cpu_supports("avx2");
   if (has_avx512bw)
-    return parse_numeric_path_avx512(nodes, path);
-  return has_avx2 && parse_numeric_path_avx2(nodes, path);
+    return parse_numeric_path_avx512(nodes, max_id, path);
+  return has_avx2 && parse_numeric_path_avx2(nodes, max_id, path);
 }
 #else
-bool try_parse_numeric_path_simd(std::string_view,
+bool try_parse_numeric_path_simd(std::string_view, uint64_t,
                                  std::vector<gfaz::NodeId> &) {
   return false;
 }
+#endif
+
+// Number of '>' and '<' characters, i.e. an upper bound on the walk's steps.
+size_t count_walk_steps(std::string_view walk) {
+#ifdef GFAZ_X86_SIMD
+  static const bool has_avx2 = __builtin_cpu_supports("avx2");
+  if (has_avx2)
+    return count_walk_steps_avx2(walk);
+#endif
+  size_t steps = 0;
+  for (char c : walk) {
+    if (c == '>' || c == '<')
+      ++steps;
+  }
+  return steps;
+}
+
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+// Value of the first `digits` (1..8) ASCII digits of an 8-byte little-endian
+// load; the other bytes are ignored.
+inline uint32_t parse_up_to_8_digits(uint64_t word, unsigned digits) {
+  uint64_t t = (word ^ 0x3030303030303030ull) << (64 - 8 * digits);
+  t = ((t * 2561) >> 8) & 0x00FF00FF00FF00FFull;
+  t = ((t * 6553601) >> 16) & 0x0000FFFF0000FFFFull;
+  return static_cast<uint32_t>((t * 42949672960001ull) >> 32);
+}
+
+// Parses the digits at `name`, where at least 10 bytes are readable. Returns
+// the digit count (1..9) with the value in `value`, or 0 when the name is not
+// 1 to 9 digits followed by '>' or '<'.
+inline unsigned parse_simple_walk_name(const char *name, uint32_t &value) {
+  uint64_t word;
+  std::memcpy(&word, name, sizeof(word));
+  const uint64_t t = word ^ 0x3030303030303030ull;
+  const uint64_t non_digit =
+      ((t + 0x7676767676767676ull) | t) & 0x8080808080808080ull;
+  const unsigned leading =
+      non_digit != 0 ? static_cast<unsigned>(__builtin_ctzll(non_digit)) >> 3
+                     : 8;
+  if (leading == 0)
+    return 0;
+  uint32_t parsed = parse_up_to_8_digits(word, leading);
+  const unsigned ninth = static_cast<unsigned char>(name[8] - '0');
+  const bool has_ninth = (leading == 8) & (ninth <= 9);
+  parsed = has_ninth ? parsed * 10 + ninth : parsed;
+  const unsigned digits = leading + (has_ninth ? 1 : 0);
+  const char next = name[digits];
+  if (next != '>' && next != '<')
+    return 0;
+  value = parsed;
+  return digits;
+}
+#define GFAZ_HAVE_SWAR_WALK_NAME 1
+#else
+#define GFAZ_HAVE_SWAR_WALK_NAME 0
 #endif
 
 inline uint32_t parse_overlap_num(std::string_view overlap_view, char &op) {
@@ -380,6 +458,52 @@ void parse_b_array(std::string_view value_view, gfaz::OptionalFieldColumn &col) 
 
 // Reserve storage for the active type variant of a freshly-discovered optional
 // column, sized to the expected row count. Shared by segment/link parsing.
+// Faults in the pages of a freshly reserved buffer from all threads. A large
+// buffer that one thread then fills (a resize or an append) would otherwise
+// take every page fault on that thread. Only a hint: failure is ignored.
+void populate_pages(const void *begin, size_t bytes) {
+#if defined(__linux__)
+#ifndef MADV_POPULATE_WRITE
+#define MADV_POPULATE_WRITE 23
+#endif
+  constexpr size_t kMinBytes = 64ull * 1024ull * 1024ull;
+  if (begin == nullptr || bytes < kMinBytes)
+    return;
+  const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  const size_t first =
+      (reinterpret_cast<uintptr_t>(begin) + page - 1) / page * page;
+  const size_t last = (reinterpret_cast<uintptr_t>(begin) + bytes) / page * page;
+  if (last <= first)
+    return;
+  const size_t pages = (last - first) / page;
+  constexpr size_t kPagesPerPiece = 4096;
+  const size_t pieces = (pages + kPagesPerPiece - 1) / kPagesPerPiece;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1)
+#endif
+  for (size_t piece = 0; piece < pieces; ++piece) {
+    const size_t piece_first = first + piece * kPagesPerPiece * page;
+    const size_t piece_last =
+        std::min(last, piece_first + kPagesPerPiece * page);
+    madvise(reinterpret_cast<void *>(piece_first), piece_last - piece_first,
+            MADV_POPULATE_WRITE);
+  }
+#else
+  (void)begin;
+  (void)bytes;
+#endif
+}
+
+template <typename T> void reserve_populated(std::vector<T> &values, size_t n) {
+  values.reserve(n);
+  populate_pages(values.data(), n * sizeof(T));
+}
+
+inline void reserve_populated(std::string &value, size_t n) {
+  value.reserve(n);
+  populate_pages(value.data(), n);
+}
+
 void reserve_optional_column(gfaz::OptionalFieldColumn &col, char type,
                              size_t hint) {
   if (type == 'i')
@@ -684,8 +808,17 @@ bool merge_optional_chunks(std::vector<OptionalColumnChunk> &chunks,
   const size_t total_rows = row_bases.back();
   for (size_t i = 0; i < out.size(); ++i) {
     reserve_optional_column(out[i], out[i].type, total_rows);
-    out[i].concatenated_strings.reserve(string_bytes[i]);
-    out[i].b_concat_bytes.reserve(b_bytes[i]);
+    // Every column ends up with one value per row, so the whole reservation
+    // is used; fault it in from all threads before the serial appends below.
+    populate_pages(out[i].int_values.data(),
+                   out[i].int_values.capacity() * sizeof(int64_t));
+    populate_pages(out[i].float_values.data(),
+                   out[i].float_values.capacity() * sizeof(float));
+    populate_pages(out[i].char_values.data(), out[i].char_values.capacity());
+    populate_pages(out[i].string_lengths.data(),
+                   out[i].string_lengths.capacity() * sizeof(uint32_t));
+    reserve_populated(out[i].concatenated_strings, string_bytes[i]);
+    reserve_populated(out[i].b_concat_bytes, b_bytes[i]);
   }
 
   for (size_t k = 0; k < chunks.size(); ++k) {
@@ -905,6 +1038,8 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   traversal_sink_ = traversal_sink;
   ScopedOMPThreads omp_scope(num_threads);
   const auto parse_start = Clock::now();
+  missing_segment_refs_.store(0);
+  first_missing_segment_.clear();
   auto phase_start = parse_start;
   gfaz::GfaGraph graph;
   segment_field_meta_.clear();
@@ -1349,6 +1484,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
       num_links_hint_ = link_bases.back();
       all_segment_names_numeric_ = true;
       std::atomic<bool> direct_fill_failed{false};
+      const size_t direct_dense_limit = dense_id_limit();
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -1425,6 +1561,8 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
                 const std::string_view to_orient = next_field(line, pos);
                 const std::string_view overlap = next_field(line, pos);
                 if (from_id == 0 || to_id == 0 ||
+                    from_id > direct_dense_limit ||
+                    to_id > direct_dense_limit ||
                     !assign_fixed_optional_fields(
                         line, pos, link_index,
                         direct_graph.link_optional_fields,
@@ -1464,7 +1602,9 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
                 const uint32_t to_id = parse_uint32(next_field(line, pos));
                 const std::string_view to_orient = next_field(line, pos);
                 const std::string_view distance = next_field(line, pos);
-                if (from_id == 0 || to_id == 0) {
+                if (from_id == 0 || to_id == 0 ||
+                    from_id > direct_dense_limit ||
+                    to_id > direct_dense_limit) {
                   direct_fill_failed.store(true, std::memory_order_relaxed);
                   break;
                 }
@@ -1501,7 +1641,9 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
                     next_field(line, pos);
                 const std::string_view position = next_field(line, pos);
                 const std::string_view overlap = next_field(line, pos);
-                if (container_id == 0 || contained_id == 0) {
+                if (container_id == 0 || contained_id == 0 ||
+                    container_id > direct_dense_limit ||
+                    contained_id > direct_dense_limit) {
                   direct_fill_failed.store(true, std::memory_order_relaxed);
                   break;
                 }
@@ -1606,14 +1748,19 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   return false;
   };
 
-  if (try_parse_direct())
+  if (try_parse_direct()) {
+    report_missing_segments();
     return graph;
+  }
+  // The general parser starts over, so forget what the direct pass noted.
+  missing_segment_refs_.store(0);
+  first_missing_segment_.clear();
 
   // Parallel line classification. Split the mapping at newline boundaries so
   // each worker owns complete lines, then concatenate the per-range offsets in
   // range order to preserve the input order within each record type.
-  std::vector<gfaz::LineOffset> s_offsets, l_offsets, p_offsets, w_offsets;
-  std::vector<gfaz::LineOffset> j_offsets, c_offsets;
+  LineOffsets s_offsets, l_offsets, p_offsets, w_offsets;
+  LineOffsets j_offsets, c_offsets;
 
   struct ClassifiedLines {
     std::vector<gfaz::LineOffset> segments;
@@ -1624,6 +1771,10 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     std::vector<gfaz::LineOffset> containments;
     gfaz::LineOffset last_header{};
     bool has_header = false;
+    // Last parse phase needing the first and the last page of this range.
+    // Neighbouring ranges share those pages, so they are merged afterwards.
+    uint8_t first_page_phase = 0;
+    uint8_t last_page_phase = 0;
   };
 
   const int classifier_threads =
@@ -1648,6 +1799,15 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   // later parsing phases can fault them in with their own access pattern.
   constexpr size_t kClassificationReleaseWindow = 64ull * 1024ull * 1024ull;
 
+  // Classification touches the entire mapping. Record the last parse phase
+  // that needs each page (1: S, 2: L, 3: P/W, 4: J/C), discard the
+  // classification residency, and release pages again as their owning phase
+  // completes. Pages shared by interleaved record types remain resident until
+  // the latest consumer is finished.
+  const size_t page_size = mapping_page_size;
+  const size_t page_count = (file_size + page_size - 1) / page_size;
+  std::vector<uint8_t> page_last_phase(page_count, 0);
+
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
@@ -1659,6 +1819,20 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     size_t release_cursor =
         ((range_start + mapping_page_size - 1) / mapping_page_size) *
         mapping_page_size;
+    const size_t range_first_page = range_start / page_size;
+    const size_t range_last_page =
+        range_end > range_start ? (range_end - 1) / page_size : range_first_page;
+    auto mark_pages = [&](const gfaz::LineOffset &off, uint8_t phase) {
+      const size_t first_page = off.offset / page_size;
+      const size_t last_page = (off.offset + off.length - 1) / page_size;
+      for (size_t page = first_page; page <= last_page; ++page) {
+        uint8_t &slot = page == range_first_page  ? local.first_page_phase
+                        : page == range_last_page ? local.last_page_phase
+                                                  : page_last_phase[page];
+        if (slot < phase)
+          slot = phase;
+      }
+    };
 
     while (line_start < range_end) {
       const void *newline =
@@ -1677,6 +1851,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
         switch (mmap_data[line_start]) {
         case 'S':
           local.segments.push_back(offset);
+          mark_pages(offset, 1);
           break;
         case 'H':
           local.last_header = offset;
@@ -1684,18 +1859,23 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
           break;
         case 'L':
           local.links.push_back(offset);
+          mark_pages(offset, 2);
           break;
         case 'P':
           local.paths.push_back(offset);
+          mark_pages(offset, 3);
           break;
         case 'W':
           local.walks.push_back(offset);
+          mark_pages(offset, 3);
           break;
         case 'J':
           local.jumps.push_back(offset);
+          mark_pages(offset, 4);
           break;
         case 'C':
           local.containments.push_back(offset);
+          mark_pages(offset, 4);
           break;
         }
       }
@@ -1721,15 +1901,34 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     }
   }
 
-  auto merge_offsets = [&](auto ClassifiedLines::*member,
-                           std::vector<gfaz::LineOffset> &output) {
-    size_t total = 0;
-    for (const auto &local : classified)
-      total += (local.*member).size();
-    output.reserve(total);
-    for (auto &local : classified) {
-      auto &offsets = local.*member;
-      output.insert(output.end(), offsets.begin(), offsets.end());
+  for (int t = 0; t < classifier_threads; ++t) {
+    const auto &local = classified[static_cast<size_t>(t)];
+    const size_t range_start = boundaries[static_cast<size_t>(t)];
+    const size_t range_end = boundaries[static_cast<size_t>(t) + 1];
+    if (range_end <= range_start)
+      continue;
+    uint8_t &first = page_last_phase[range_start / page_size];
+    first = std::max(first, local.first_page_phase);
+    uint8_t &last = page_last_phase[(range_end - 1) / page_size];
+    last = std::max(last, local.last_page_phase);
+  }
+
+  // Concatenate the per-range offsets in range order, copying in parallel.
+  auto merge_offsets = [&](auto ClassifiedLines::*member, LineOffsets &output) {
+    std::vector<size_t> bases(classified.size() + 1, 0);
+    for (size_t t = 0; t < classified.size(); ++t)
+      bases[t + 1] = bases[t] + (classified[t].*member).size();
+    output.resize(bases.back());
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static, 1)
+#endif
+    for (size_t t = 0; t < classified.size(); ++t) {
+      auto &offsets = classified[t].*member;
+      if (!offsets.empty()) {
+        std::memcpy(static_cast<void *>(output.data() + bases[t]),
+                    offsets.data(), offsets.size() * sizeof(gfaz::LineOffset));
+      }
+      std::vector<gfaz::LineOffset>().swap(offsets);
     }
   };
 
@@ -1747,31 +1946,6 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   }
   classified.clear();
   classified.shrink_to_fit();
-
-  // Classification touches the entire mapping. Record the last parse phase
-  // that needs each page, discard the classification residency, and release
-  // pages again as their owning phase completes. Pages shared by interleaved
-  // record types remain resident until the latest consumer is finished.
-  const size_t page_size = mapping_page_size;
-  const size_t page_count = (file_size + page_size - 1) / page_size;
-  std::vector<uint8_t> page_last_phase(page_count, 0);
-  auto mark_last_phase = [&](const std::vector<gfaz::LineOffset> &offsets,
-                             uint8_t phase) {
-    for (const auto &off : offsets) {
-      const size_t first_page = off.offset / page_size;
-      const size_t last_page = (off.offset + off.length - 1) / page_size;
-      for (size_t page = first_page; page <= last_page && page < page_count;
-           ++page) {
-        page_last_phase[page] = std::max(page_last_phase[page], phase);
-      }
-    }
-  };
-  mark_last_phase(s_offsets, 1);
-  mark_last_phase(l_offsets, 2);
-  mark_last_phase(p_offsets, 3);
-  mark_last_phase(w_offsets, 3);
-  mark_last_phase(j_offsets, 4);
-  mark_last_phase(c_offsets, 4);
 
   auto release_phase_pages = [&](uint8_t phase) {
     size_t run_start = page_count;
@@ -1902,6 +2076,8 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
           sequence_offsets[i + 1] =
               sequence_offsets[i] + graph.segments.node_sequence_lengths[i];
         }
+        reserve_populated(graph.segments.node_sequences_concat,
+                          sequence_offsets.back());
         graph.segments.node_sequences_concat.resize(sequence_offsets.back());
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -2009,6 +2185,12 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     if (initialize_fixed_optional_columns(first_line, first_pos,
                                           l_offsets.size(), fixed_columns,
                                           fixed_meta)) {
+      reserve_populated(graph.links.from_ids, l_offsets.size());
+      reserve_populated(graph.links.to_ids, l_offsets.size());
+      reserve_populated(graph.links.from_orients, l_offsets.size());
+      reserve_populated(graph.links.to_orients, l_offsets.size());
+      reserve_populated(graph.links.overlap_nums, l_offsets.size());
+      reserve_populated(graph.links.overlap_ops, l_offsets.size());
       graph.links.from_ids.resize(l_offsets.size());
       graph.links.to_ids.resize(l_offsets.size());
       graph.links.from_orients.resize(l_offsets.size());
@@ -2018,6 +2200,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
       graph.link_optional_fields = std::move(fixed_columns);
       link_field_meta_ = fixed_meta;
       std::atomic<bool> failed{false};
+      const size_t dense_limit = dense_id_limit();
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -2034,7 +2217,8 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
           const uint32_t to_id = parse_uint32(next_field(line, pos));
           const std::string_view to_orient = next_field(line, pos);
           const std::string_view overlap = next_field(line, pos);
-          if (from_id == 0 || to_id == 0 ||
+          if (from_id == 0 || to_id == 0 || from_id > dense_limit ||
+              to_id > dense_limit ||
               !assign_fixed_optional_fields(
                   line, pos, i, graph.link_optional_fields, fixed_meta)) {
             failed.store(true, std::memory_order_relaxed);
@@ -2149,23 +2333,53 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     }
   };
 
+  // An exception must not leave a parallel region: keep the first one and
+  // report it once the loops are done.
+  std::atomic<bool> traversal_failed{false};
+  std::string traversal_error;
+  auto record_traversal_error = [&](char record, size_t index,
+                                    const char *what) {
+    if (traversal_failed.exchange(true))
+      return;
+    traversal_error = std::string("malformed ") + record + "-line (record " +
+                      std::to_string(index + 1) + "): " + what;
+  };
+
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
   for (size_t i = 0; i < p_offsets.size(); ++i) {
-    std::string_view line(mmap_data + p_offsets[i].offset, p_offsets[i].length);
-    parse_p_line(line, graph, i);
+    if (traversal_failed.load(std::memory_order_relaxed))
+      continue;
+    try {
+      std::string_view line(mmap_data + p_offsets[i].offset,
+                            p_offsets[i].length);
+      parse_p_line(line, graph, i);
+    } catch (const std::exception &e) {
+      record_traversal_error('P', i, e.what());
+    }
     release_line_pages(p_offsets[i]);
   }
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
-
 #endif
   for (size_t i = 0; i < w_offsets.size(); ++i) {
-    std::string_view line(mmap_data + w_offsets[i].offset, w_offsets[i].length);
-    parse_w_line(line, graph, i);
+    if (traversal_failed.load(std::memory_order_relaxed))
+      continue;
+    try {
+      std::string_view line(mmap_data + w_offsets[i].offset,
+                            w_offsets[i].length);
+      parse_w_line(line, graph, i);
+    } catch (const std::exception &e) {
+      record_traversal_error('W', i, e.what());
+    }
     release_line_pages(w_offsets[i]);
+  }
+  if (traversal_failed.load()) {
+    munmap(const_cast<char *>(mmap_data), file_size);
+    close(fd);
+    throw std::runtime_error(std::string(kParserErrorPrefix) + traversal_error);
   }
   p_offsets.clear();
   p_offsets.shrink_to_fit();
@@ -2223,11 +2437,12 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     print_graph_memory_breakdown(graph);
   }
 
+  report_missing_segments();
   return graph;
 }
 
 bool GfaParser::parse_segments_in_chunks(
-    const char *data, const std::vector<gfaz::LineOffset> &offsets,
+    const char *data, const LineOffsets &offsets,
     size_t page_size, bool direct_segment_columns, gfaz::GfaGraph &graph) {
   const size_t count = offsets.size();
   if (count >= std::numeric_limits<uint32_t>::max())
@@ -2249,6 +2464,7 @@ bool GfaParser::parse_segments_in_chunks(
   // through node_name_lookup_, as in the serial parser.
   std::atomic<bool> named{false};
   if (direct_segment_columns) {
+    reserve_populated(lengths, count);
     lengths.resize(count);
   } else {
     names.resize(count + 1);
@@ -2375,6 +2591,11 @@ bool GfaParser::parse_segments_in_chunks(
         std::max<uint64_t>(uint64_t{16} * count, uint64_t{1} << 20);
     ok = max_number <= limit;
     if (ok) {
+      // Walk parsing looks names up here at random: ask for huge pages
+      // before the first touch.
+      table.reserve(static_cast<size_t>(max_number) + 1);
+      gfaz::runtime_utils::advise_huge_pages(
+          table.data(), (static_cast<size_t>(max_number) + 1) * sizeof(uint32_t));
       table.assign(static_cast<size_t>(max_number) + 1, 0);
       for (size_t i = 0; i < count && ok; ++i) {
         uint32_t &slot = table[name_numbers[i]];
@@ -2402,6 +2623,7 @@ bool GfaParser::parse_segments_in_chunks(
   if (direct_segment_columns) {
     for (size_t chunk = 0; chunk < chunk_count; ++chunk)
       sequence_bases[chunk + 1] += sequence_bases[chunk];
+    reserve_populated(concat, sequence_bases.back());
     concat.resize(sequence_bases.back());
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1)
@@ -2432,13 +2654,19 @@ bool GfaParser::parse_segments_in_chunks(
 }
 
 bool GfaParser::parse_links_in_chunks(
-    const char *data, const std::vector<gfaz::LineOffset> &offsets,
+    const char *data, const LineOffsets &offsets,
     size_t page_size, gfaz::GfaGraph &graph) {
   const size_t count = offsets.size();
   const std::vector<size_t> row_bases = chunk_row_bases(count);
   const size_t chunk_count = row_bases.size() - 1;
   std::vector<OptionalColumnChunk> optional(chunk_count);
   auto &links = graph.links;
+  reserve_populated(links.from_ids, count);
+  reserve_populated(links.to_ids, count);
+  reserve_populated(links.from_orients, count);
+  reserve_populated(links.to_orients, count);
+  reserve_populated(links.overlap_nums, count);
+  reserve_populated(links.overlap_ops, count);
   links.from_ids.resize(count);
   links.to_ids.resize(count);
   links.from_orients.resize(count);
@@ -2559,8 +2787,10 @@ void GfaParser::parse_l_line(std::string_view line, gfaz::GfaGraph &graph) {
 
   uint32_t from_id = resolve_node_id(from_name_view);
   uint32_t to_id = resolve_node_id(to_name_view);
-  if (from_id == 0 || to_id == 0)
+  if (from_id == 0 || to_id == 0) {
+    note_missing_segment('L', from_id == 0 ? from_name_view : to_name_view);
     return;
+  }
 
   graph.links.from_ids.push_back(from_id);
   graph.links.to_ids.push_back(to_id);
@@ -2616,7 +2846,7 @@ void GfaParser::parse_p_line(std::string_view line, gfaz::GfaGraph &graph,
   std::vector<gfaz::NodeId> &path =
       traversal_sink_ ? traversal_sink_->scratch() : local_path;
   if (!(all_segment_names_numeric_ &&
-        try_parse_numeric_path_simd(nodes_str, path))) {
+        try_parse_numeric_path_simd(nodes_str, dense_id_limit(), path))) {
     path.clear();
     path.reserve(1 + std::count(nodes_str.begin(), nodes_str.end(), ','));
     size_t node_start = 0;
@@ -2632,6 +2862,8 @@ void GfaParser::parse_p_line(std::string_view line, gfaz::GfaGraph &graph,
                 node_with_orient.substr(0, node_with_orient.size() - 1);
 
             uint32_t node_id = resolve_node_id(node_name_view);
+            if (node_id == 0)
+              note_missing_segment('P', node_name_view);
             if (node_id != 0) {
               gfaz::NodeId oriented_node_id = node_id;
               if (orientation == '-')
@@ -2669,12 +2901,7 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
   std::vector<gfaz::NodeId> &walk =
       traversal_sink_ ? traversal_sink_->scratch() : local_walk;
   walk.clear();
-  size_t walk_steps = 0;
-  for (char c : walk_str) {
-    if (c == '>' || c == '<')
-      ++walk_steps;
-  }
-  walk.reserve(walk_steps);
+  walk.reserve(count_walk_steps(walk_str));
   size_t walk_pos = 0;
 
   // Fast path for numeric segment names: one pass over the digits, no call
@@ -2685,6 +2912,7 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
   if (all_segment_names_numeric_ || table_names) {
     const uint32_t *table = numeric_name_table_.data();
     const size_t table_size = numeric_name_table_.size();
+    const size_t dense_limit = dense_id_limit();
     const char *p = walk_str.data();
     const char *const end = p + walk_str.size();
     while (p < end) {
@@ -2693,12 +2921,31 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
         continue;
       const char *const name = p;
       uint32_t node_id = 0;
-      while (p < end && static_cast<unsigned char>(*p - '0') <= 9)
-        node_id = node_id * 10 + static_cast<uint32_t>(*p++ - '0');
-      const size_t digits = static_cast<size_t>(p - name);
-      const bool simple = digits != 0 && digits <= 9 &&
-                          (p == end || *p == '>' || *p == '<') &&
-                          !(table_names && *name == '0');
+      bool simple = false;
+#if GFAZ_HAVE_SWAR_WALK_NAME
+      // Common case, eight bytes at a time; anything it rejects is parsed
+      // again by the loop below.
+      if (end - name >= 10) {
+        const unsigned digits = parse_simple_walk_name(name, node_id);
+        if (digits != 0 && !(table_names && *name == '0')) {
+          simple = true;
+          p = name + digits;
+        }
+      }
+#endif
+      if (!simple) {
+        node_id = 0;
+        while (p < end && static_cast<unsigned char>(*p - '0') <= 9)
+          node_id = node_id * 10 + static_cast<uint32_t>(*p++ - '0');
+        const size_t digits = static_cast<size_t>(p - name);
+        simple = digits != 0 && digits <= 9 &&
+                 (p == end || *p == '>' || *p == '<') &&
+                 !(table_names && *name == '0');
+      }
+      // With segments named 1..N a larger number names none; resolve_node_id()
+      // below turns it into an unknown segment.
+      if (simple && !table_names && node_id > dense_limit)
+        simple = false;
       if (simple) {
         if (table_names)
           node_id = node_id < table_size ? table[node_id] : 0;
@@ -2715,6 +2962,9 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
         if (orient_char == '<')
           oriented_node_id = -node_id;
         walk.push_back(oriented_node_id);
+      } else {
+        note_missing_segment(
+            'W', std::string_view(name, static_cast<size_t>(p - name)));
       }
     }
     walk_pos = walk_str.size();
@@ -2738,6 +2988,8 @@ void GfaParser::parse_w_line(std::string_view line, gfaz::GfaGraph &graph,
           walk_str.substr(name_start, name_end - name_start);
 
       uint32_t node_id = resolve_node_id(node_name_view);
+      if (node_id == 0)
+        note_missing_segment('W', node_name_view);
       if (node_id != 0) {
         gfaz::NodeId oriented_node_id = node_id;
         if (orient_char == '<')
@@ -2859,8 +3111,10 @@ void GfaParser::parse_j_line(std::string_view line, gfaz::GfaGraph &graph) {
 
   uint32_t from_id = resolve_node_id(from_name_view);
   uint32_t to_id = resolve_node_id(to_name_view);
-  if (from_id == 0 || to_id == 0)
+  if (from_id == 0 || to_id == 0) {
+    note_missing_segment('J', from_id == 0 ? from_name_view : to_name_view);
     return;
+  }
 
   graph.jumps.from_ids.push_back(from_id);
   graph.jumps.from_orients.push_back(
@@ -2896,8 +3150,11 @@ void GfaParser::parse_c_line(std::string_view line, gfaz::GfaGraph &graph) {
 
   uint32_t container_id = resolve_node_id(container_view);
   uint32_t contained_id = resolve_node_id(contained_view);
-  if (container_id == 0 || contained_id == 0)
+  if (container_id == 0 || contained_id == 0) {
+    note_missing_segment('C',
+                         container_id == 0 ? container_view : contained_view);
     return;
+  }
 
   graph.containments.container_ids.push_back(container_id);
   graph.containments.container_orients.push_back(
@@ -2921,12 +3178,56 @@ void GfaParser::parse_c_line(std::string_view line, gfaz::GfaGraph &graph) {
   graph.containments.rest_fields.push_back(std::move(rest));
 }
 
+void GfaParser::note_missing_segment(char record,
+                                     std::string_view name) const {
+  if (missing_segment_refs_.fetch_add(1, std::memory_order_relaxed) != 0)
+    return;
+  constexpr size_t kMaxShown = 64;
+  first_missing_segment_ = std::string(1, record) + "-line references '" +
+                           std::string(name.substr(0, kMaxShown)) +
+                           (name.size() > kMaxShown ? "..." : "") + "'";
+}
+
+void GfaParser::report_missing_segments() const {
+  const uint64_t count = missing_segment_refs_.load();
+  if (count == 0)
+    return;
+  const std::string summary =
+      std::to_string(count) +
+      (count == 1 ? " reference" : " references") +
+      " to segments that no S-line defines (first: " + first_missing_segment_ +
+      ")";
+  if (!allow_missing_segments_) {
+    throw std::runtime_error(
+        std::string(kParserErrorPrefix) + summary +
+        "; pass --allow-missing-segments (allow_missing_segments in the API) "
+        "to drop them");
+  }
+  std::cerr << "Warning: dropped " << summary << std::endl;
+}
+
 uint32_t GfaParser::resolve_node_id(std::string_view node_name_view) const {
   if (node_name_view.empty())
     return 0;
 
-  if (all_segment_names_numeric_)
-    return parse_uint32(node_name_view);
+  if (all_segment_names_numeric_) {
+    // Same reading as parse_uint32(), except that a name with no leading
+    // digits or one that overflows is an unknown segment (0), as in the other
+    // naming modes, instead of an exception.
+    uint32_t value = 0;
+    bool any = false;
+    for (char c : node_name_view) {
+      if (c < '0' || c > '9')
+        break;
+      const uint32_t digit = static_cast<uint32_t>(c - '0');
+      if (value > (std::numeric_limits<uint32_t>::max() - digit) / 10)
+        return 0;
+      value = value * 10 + digit;
+      any = true;
+    }
+    // Segments are named 1..N here, so a larger number names none.
+    return any && value <= dense_id_limit() ? value : 0;
+  }
 
   if (!numeric_name_table_.empty()) {
     uint32_t number = 0;
