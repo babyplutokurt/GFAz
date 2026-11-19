@@ -177,11 +177,11 @@ Compression, default and with `--memory-budget 2G`:
 
 | Graph | GFA size | Time | Throughput | Peak RSS | Time (2G) | Throughput (2G) | Peak RSS (2G) |
 |---|---|---|---|---|---|---|---|
-| E. coli | 0.12 GB | 0.33 s | 0.36 GB/s | 0.24 GB | 0.35 s | 0.34 GB/s | 0.19 GB |
-| HGSVC3-sv | 3.51 GB | 5.85 s | 0.60 GB/s | 5.92 GB | 5.81 s | 0.60 GB/s | 5.88 GB |
-| HPRC chr6 | 4.06 GB | 2.08 s | 1.95 GB/s | 2.01 GB | 2.23 s | 1.82 GB/s | 2.37 GB |
-| HPRC chr1 | 7.58 GB | 3.57 s | 2.12 GB/s | 4.00 GB | 4.13 s | 1.84 GB/s | 4.25 GB |
-| HPRC v1.1 | 50.8 GB | 32.5 s | 1.56 GB/s | 30.1 GB | 37.8 s | 1.34 GB/s | 11.7 GB |
+| E. coli | 0.12 GB | 0.34 s | 0.35 GB/s | 0.24 GB | 0.35 s | 0.34 GB/s | 0.20 GB |
+| HGSVC3-sv | 3.51 GB | 5.72 s | 0.61 GB/s | 5.91 GB | 5.66 s | 0.62 GB/s | 5.88 GB |
+| HPRC chr6 | 4.06 GB | 2.00 s | 2.03 GB/s | 1.98 GB | 2.27 s | 1.79 GB/s | 2.37 GB |
+| HPRC chr1 | 7.58 GB | 3.55 s | 2.14 GB/s | 4.00 GB | 4.00 s | 1.90 GB/s | 4.27 GB |
+| HPRC v1.1 | 50.8 GB | 32.5 s | 1.56 GB/s | 29.9 GB | 38.3 s | 1.33 GB/s | 11.6 GB |
 | HGSVC3 | 80.1 GB | 47.6 s | 1.68 GB/s | 44.1 GB | 55.9 s | 1.43 GB/s | 15.5 GB |
 | HPRC v2.0 | 384.3 GB | 122.4 s | 3.14 GB/s | 156.7 GB | 142.2 s | 2.70 GB/s | 28.6 GB |
 | HPRC v2.1 | 395.7 GB | 131.7 s | 3.00 GB/s | 161.4 GB | 146.3 s | 2.70 GB/s | 29.7 GB |
@@ -190,11 +190,11 @@ Decompression (default streaming mode), to `/dev/null` and to a file:
 
 | Graph | Time (`/dev/null`) | Throughput | Peak RSS | Time (file) | Throughput | Peak RSS |
 |---|---|---|---|---|---|---|
-| E. coli | 0.07 s | 1.69 GB/s | 0.15 GB | 0.10 s | 1.18 GB/s | 0.17 GB |
-| HGSVC3-sv | 3.02 s | 1.16 GB/s | 4.10 GB | 3.51 s | 1.00 GB/s | 4.12 GB |
-| HPRC chr6 | 0.85 s | 4.78 GB/s | 1.23 GB | 1.65 s | 2.46 GB/s | 1.66 GB |
-| HPRC chr1 | 2.15 s | 3.53 GB/s | 2.65 GB | 3.23 s | 2.35 GB/s | 3.00 GB |
-| HPRC v1.1 | 13.5 s | 3.77 GB/s | 12.9 GB | 20.6 s | 2.47 GB/s | 13.4 GB |
+| E. coli | 0.07 s | 1.69 GB/s | 0.15 GB | 0.11 s | 1.07 GB/s | 0.17 GB |
+| HGSVC3-sv | 2.99 s | 1.17 GB/s | 4.10 GB | 3.70 s | 0.95 GB/s | 4.12 GB |
+| HPRC chr6 | 0.86 s | 4.72 GB/s | 1.21 GB | 1.65 s | 2.46 GB/s | 1.66 GB |
+| HPRC chr1 | 2.11 s | 3.59 GB/s | 2.64 GB | 3.18 s | 2.39 GB/s | 2.99 GB |
+| HPRC v1.1 | 13.5 s | 3.76 GB/s | 12.9 GB | 20.5 s | 2.48 GB/s | 13.4 GB |
 | HGSVC3 | 17.6 s | 4.55 GB/s | 16.1 GB | 29.5 s | 2.71 GB/s | 17.5 GB |
 | HPRC v2.0 | 51.9 s | 7.40 GB/s | 22.7 GB | 180.1 s | 2.13 GB/s | 24.3 GB |
 | HPRC v2.1 | 53.1 s | 7.45 GB/s | 25.0 GB | 189.4 s | 2.09 GB/s | 27.4 GB |
