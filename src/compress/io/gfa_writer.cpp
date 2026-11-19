@@ -151,6 +151,48 @@ void write_sequence_batch_stream(std::ofstream &out, size_t total_count,
   }
 }
 
+constexpr size_t kRowsPerBlock = 16384;
+
+// Writes text rows in order. Block b covers rows
+// [block_rows[b], block_rows[b + 1]); `format_block(b, begin, end, buffer)`
+// appends them to `buffer`. Blocks are formatted in parallel, a batch at a
+// time, and each batch is written while the next one is formatted.
+template <typename FormatBlock>
+void write_row_blocks_stream(std::ofstream &out,
+                             const std::vector<size_t> &block_rows,
+                             int num_threads, FormatBlock format_block) {
+  if (block_rows.size() < 2)
+    return;
+
+  const int effective_threads = std::max(1, resolve_omp_thread_count(num_threads));
+  const size_t total_blocks = block_rows.size() - 1;
+  const size_t batch_blocks = static_cast<size_t>(effective_threads) * 2;
+
+  auto format_batch = [&](size_t first_block) {
+    const size_t end_block = std::min(first_block + batch_blocks, total_blocks);
+    std::vector<std::string> buffers(end_block - first_block);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic) num_threads(effective_threads)
+#endif
+    for (size_t block = first_block; block < end_block; ++block)
+      format_block(block, block_rows[block], block_rows[block + 1],
+                   buffers[block - first_block]);
+    return buffers;
+  };
+
+  size_t first_block = 0;
+  auto pending = std::async(std::launch::async, format_batch, first_block);
+  while (first_block < total_blocks) {
+    std::vector<std::string> buffers = pending.get();
+    first_block += batch_blocks;
+    if (first_block < total_blocks)
+      pending = std::async(std::launch::async, format_batch, first_block);
+
+    for (const auto &buffer : buffers)
+      out.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+  }
+}
+
 } // namespace
 
 void write_gfa(const gfaz::GfaGraph &graph, const std::string &output_path) {
@@ -604,50 +646,90 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
   line.reserve(4096);
 
   t0 = Clock::now();
-  size_t segment_seq_offset = 0;
-  for (size_t i = 0; i < segment_lengths.size(); ++i) {
-    line.clear();
-    line += "S\t";
-    append_numeric_node_name(line, static_cast<uint32_t>(i + 1));
-    line += '\t';
-
-    const uint32_t len = segment_lengths[i];
-    if (segment_seq_offset + len > segment_sequences.size()) {
+  {
+    // Blocks end after kRowsPerBlock rows or kBasesPerBlock bases, whichever
+    // comes first, so a batch of blocks stays small for long sequences too.
+    // block_starts holds where each block's bases start.
+    constexpr size_t kBasesPerBlock = size_t{1} << 20;
+    const size_t segment_count = segment_lengths.size();
+    std::vector<size_t> block_rows{0};
+    std::vector<size_t> block_starts{0};
+    size_t total_bases = 0;
+    for (size_t i = 0; i < segment_count; ++i) {
+      total_bases += segment_lengths[i];
+      if (i + 1 == segment_count ||
+          i + 1 - block_rows.back() >= kRowsPerBlock ||
+          total_bases - block_starts.back() >= kBasesPerBlock) {
+        block_rows.push_back(i + 1);
+        block_starts.push_back(total_bases);
+      }
+    }
+    if (total_bases > segment_sequences.size()) {
       throw std::runtime_error(std::string(kWriterErrorPrefix) +
                                "segment sequence column is truncated");
     }
-    line.append(segment_sequences, segment_seq_offset, len);
-    segment_seq_offset += len;
-
-    append_optional_fields(line, segment_optional_fields, seg_offsets, i);
-    line += '\n';
-    out.write(line.data(), static_cast<std::streamsize>(line.size()));
+    const auto format_segments =
+        [&](size_t block, size_t begin, size_t end, std::string &buffer) {
+          size_t offset = block_starts[block];
+          buffer.reserve((block_starts[block + 1] - offset) +
+                         (end - begin) * 48);
+          for (size_t i = begin; i < end; ++i) {
+            buffer += "S\t";
+            append_numeric_node_name(buffer, static_cast<uint32_t>(i + 1));
+            buffer += '\t';
+            buffer.append(segment_sequences, offset, segment_lengths[i]);
+            offset += segment_lengths[i];
+            append_optional_fields(buffer, segment_optional_fields,
+                                   seg_offsets, i);
+            buffer += '\n';
+          }
+        };
+    // Long sequences are a plain copy that threads do not speed up; the
+    // per-block buffers would only add a second copy through fresh memory.
+    constexpr size_t kLongAverageBases = 512;
+    if (total_bases / std::max<size_t>(segment_count, 1) >= kLongAverageBases) {
+      for (size_t block = 0; block + 1 < block_rows.size(); ++block) {
+        line.clear();
+        format_segments(block, block_rows[block], block_rows[block + 1], line);
+        out.write(line.data(), static_cast<std::streamsize>(line.size()));
+      }
+    } else {
+      write_row_blocks_stream(out, block_rows, num_threads, format_segments);
+    }
   }
   t1 = Clock::now();
   debug_stages.push_back({"stream segments", elapsed_ms(t0, t1)});
 
   t0 = Clock::now();
-  for (size_t i = 0; i < link_from_ids.size(); ++i) {
-    line.clear();
-    line += "L\t";
-    append_numeric_node_name(line, link_from_ids[i]);
-    line += '\t';
-    line += link_from_orients[i];
-    line += '\t';
-    append_numeric_node_name(line, link_to_ids[i]);
-    line += '\t';
-    line += link_to_orients[i];
-    line += '\t';
-    if (i < link_overlap_ops.size() && link_overlap_ops[i] != '\0') {
-      append_numeric_node_name(line, link_overlap_nums[i]);
-      line += link_overlap_ops[i];
-    } else {
-      line += '*';
-    }
-    append_optional_fields(line, link_optional_fields, link_offsets, i);
-    line += '\n';
-    out.write(line.data(), static_cast<std::streamsize>(line.size()));
-  }
+  std::vector<size_t> link_block_rows;
+  for (size_t row = 0; row < link_from_ids.size(); row += kRowsPerBlock)
+    link_block_rows.push_back(row);
+  link_block_rows.push_back(link_from_ids.size());
+  write_row_blocks_stream(
+      out, link_block_rows, num_threads,
+      [&](size_t, size_t begin, size_t end, std::string &buffer) {
+        buffer.reserve((end - begin) * 48);
+        for (size_t i = begin; i < end; ++i) {
+          buffer += "L\t";
+          append_numeric_node_name(buffer, link_from_ids[i]);
+          buffer += '\t';
+          buffer += link_from_orients[i];
+          buffer += '\t';
+          append_numeric_node_name(buffer, link_to_ids[i]);
+          buffer += '\t';
+          buffer += link_to_orients[i];
+          buffer += '\t';
+          if (i < link_overlap_ops.size() && link_overlap_ops[i] != '\0') {
+            append_numeric_node_name(buffer, link_overlap_nums[i]);
+            buffer += link_overlap_ops[i];
+          } else {
+            buffer += '*';
+          }
+          append_optional_fields(buffer, link_optional_fields, link_offsets,
+                                 i);
+          buffer += '\n';
+        }
+      });
   t1 = Clock::now();
   debug_stages.push_back({"stream links", elapsed_ms(t0, t1)});
 
