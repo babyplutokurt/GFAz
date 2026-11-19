@@ -96,6 +96,9 @@ reconstruct_path_cpu(const std::vector<int32_t> &compressed_path,
   return result;
 }
 
+// Defined in path_reader_bindings.cpp.
+void bind_path_reader(pybind11::module_ &m);
+
 PYBIND11_MODULE(gfa_compression, m) {
   // Module metadata and shared defaults.
   m.doc() = "Python bindings for the GFA compression library.\n"
@@ -1430,4 +1433,6 @@ PYBIND11_MODULE(gfa_compression, m) {
       "Returns True if all fields match, False otherwise with error details.",
       py::arg("original"), py::arg("decompressed"));
 #endif
+
+  bind_path_reader(m);
 }

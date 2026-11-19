@@ -293,7 +293,8 @@ endif()
 
 if(BUILD_PYTHON_BINDINGS)
   # Python extension module (import name `gfa_compression`).
-  add_library(gfa_compression MODULE src/python/bindings.cpp)
+  add_library(gfa_compression MODULE src/python/bindings.cpp
+    src/python/path_reader_bindings.cpp)
   set_target_properties(gfa_compression PROPERTIES PREFIX "")
   target_link_libraries(gfa_compression PRIVATE pybind11::module
     gfaz_compress gfaz_compute gfaz_core)

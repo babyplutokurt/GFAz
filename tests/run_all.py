@@ -68,6 +68,7 @@ HERMETIC_SUITES = [
 # binding-capable interpreter. GPU is skipped (experimental / often not built).
 BINDING_SUITES = [
     ("tests/regression/test_compression_regression.py", ["--skip-gpu"]),
+    ("tests/regression/test_path_reader.py", []),
 ]
 
 
