@@ -19,15 +19,36 @@ namespace {
 
 constexpr const char *kSpillErrorPrefix = "Traversal spill error: ";
 
-// Records are zigzag + LEB128 varints. Delta-transformed traversals are mostly
-// tiny values, so this cuts the bytes that travel to and from the SSD well
-// below 4 per step. GFAZ_SPILL_CODEC=raw stores plain int32 instead.
-bool use_raw_codec() {
-  static const bool raw = [] {
+// Record encodings; see the header. GFAZ_SPILL_CODEC=raw|varint pins one of
+// the two simple ones for every record.
+constexpr uint32_t kCodecVarint = 0;
+constexpr uint32_t kCodecRaw = 1;
+constexpr uint32_t kCodecTable = 2; // + table index
+
+enum class ForcedCodec { kNone, kRaw, kVarint };
+ForcedCodec forced_codec() {
+  static const ForcedCodec forced = [] {
     const char *value = std::getenv("GFAZ_SPILL_CODEC");
-    return value != nullptr && std::strcmp(value, "raw") == 0;
+    if (value != nullptr && std::strcmp(value, "raw") == 0)
+      return ForcedCodec::kRaw;
+    if (value != nullptr && std::strcmp(value, "varint") == 0)
+      return ForcedCodec::kVarint;
+    return ForcedCodec::kNone;
   }();
-  return raw;
+  return forced;
+}
+
+// Table codes: one byte for ranks below kOneByteRanks, two bytes up to
+// kTableRanks, and kEscape followed by the int32 for any other symbol.
+constexpr uint32_t kOneByteRanks = 128;
+constexpr uint32_t kTableRanks = kOneByteRanks + 127 * 256;
+constexpr uint8_t kEscape = 0xFF;
+constexpr size_t kTableSlots = size_t{1} << 16; // at most half full
+constexpr size_t kTrainingSample = size_t{1} << 18;
+constexpr size_t kMaxTablesPerPass = 1024;
+
+inline size_t table_slot(NodeId symbol) {
+  return (static_cast<uint32_t>(symbol) * 2654435761u) >> 16;
 }
 
 // GFAZ_SPILL_DROP_CACHE=1 evicts spill pages from the page cache as soon as
@@ -40,16 +61,80 @@ bool drop_page_cache() {
   return drop;
 }
 
-size_t encode_record(const std::vector<NodeId> &sequence,
-                     std::vector<uint8_t> &buffer) {
-  if (use_raw_codec()) {
-    const size_t bytes = sequence.size() * sizeof(NodeId);
-    if (buffer.size() < bytes)
-      buffer.resize(bytes);
-    std::memcpy(buffer.data(), sequence.data(), bytes);
-    return bytes;
-  }
+size_t encode_raw(const std::vector<NodeId> &sequence,
+                  std::vector<uint8_t> &buffer) {
+  const size_t bytes = sequence.size() * sizeof(NodeId);
+  if (buffer.size() < bytes)
+    buffer.resize(bytes);
+  std::memcpy(buffer.data(), sequence.data(), bytes);
+  return bytes;
+}
 
+// Returns the encoded size; `escapes` counts the symbols not in the table.
+size_t encode_with_table(const std::vector<NodeId> &sequence,
+                         const std::vector<NodeId> &keys,
+                         const std::vector<uint16_t> &ranks,
+                         std::vector<uint8_t> &buffer, size_t &escapes) {
+  constexpr size_t kBlockSteps = 64 * 1024;
+  constexpr size_t kMaxBytes = 5;
+  constexpr size_t kMask = kTableSlots - 1;
+  size_t used = 0;
+  escapes = 0;
+  for (size_t begin = 0; begin < sequence.size(); begin += kBlockSteps) {
+    const size_t end = std::min(sequence.size(), begin + kBlockSteps);
+    const size_t needed = used + (end - begin) * kMaxBytes;
+    if (buffer.size() < needed)
+      buffer.resize(std::max(needed, buffer.size() + buffer.size() / 2));
+    uint8_t *out = buffer.data() + used;
+    for (size_t i = begin; i < end; ++i) {
+      const NodeId symbol = sequence[i];
+      size_t slot = table_slot(symbol);
+      uint32_t rank_plus_one;
+      while ((rank_plus_one = ranks[slot]) != 0 && keys[slot] != symbol)
+        slot = (slot + 1) & kMask;
+      if (rank_plus_one == 0) {
+        *out++ = kEscape;
+        std::memcpy(out, &symbol, sizeof(symbol));
+        out += sizeof(symbol);
+        ++escapes;
+        continue;
+      }
+      const uint32_t rank = rank_plus_one - 1;
+      if (rank < kOneByteRanks) {
+        *out++ = static_cast<uint8_t>(rank);
+      } else {
+        const uint32_t rest = rank - kOneByteRanks;
+        *out++ = static_cast<uint8_t>(0x80 + (rest >> 8));
+        *out++ = static_cast<uint8_t>(rest);
+      }
+    }
+    used = static_cast<size_t>(out - buffer.data());
+  }
+  return used;
+}
+
+void decode_with_table(const uint8_t *in, size_t steps,
+                       const std::vector<NodeId> &symbols,
+                       std::vector<NodeId> &out) {
+  out.resize(steps);
+  NodeId *dst = out.data();
+  NodeId *const end = dst + steps;
+  const NodeId *by_rank = symbols.data();
+  while (dst < end) {
+    const uint32_t first = *in++;
+    if (first < kOneByteRanks) {
+      *dst++ = by_rank[first];
+    } else if (first != kEscape) {
+      *dst++ = by_rank[kOneByteRanks + ((first - 0x80) << 8) + *in++];
+    } else {
+      std::memcpy(dst++, in, sizeof(NodeId));
+      in += sizeof(NodeId);
+    }
+  }
+}
+
+size_t encode_varint(const std::vector<NodeId> &sequence,
+                     std::vector<uint8_t> &buffer) {
   // Grow the buffer block by block instead of reserving the 5-bytes-per-step
   // worst case: typical records need about one byte per step.
   constexpr size_t kBlockSteps = 64 * 1024;
@@ -76,10 +161,10 @@ size_t encode_record(const std::vector<NodeId> &sequence,
   return used;
 }
 
-void decode_record(const uint8_t *in, size_t bytes, size_t steps,
-                   std::vector<NodeId> &out) {
+void decode_raw_or_varint(const uint8_t *in, size_t bytes, size_t steps,
+                          bool raw, std::vector<NodeId> &out) {
   out.resize(steps);
-  if (use_raw_codec()) {
+  if (raw) {
     std::memcpy(out.data(), in, bytes);
     return;
   }
@@ -190,6 +275,8 @@ void TraversalSpill::release_thread_buffers() {
   for (auto &buffers : thread_buffers_) {
     std::vector<NodeId>().swap(buffers.sequence);
     std::vector<uint8_t>().swap(buffers.io);
+    std::vector<uint8_t>().swap(buffers.io_alternate);
+    buffers.table = SymbolTable{};
   }
 }
 
@@ -218,6 +305,8 @@ void TraversalSpill::prepare(size_t num_paths, size_t num_walks) {
   spilled_steps_.store(0);
   max_abs_.store(0);
   remap_.clear();
+  read_tables_.clear();
+  write_tables_.clear();
   rewriting_ = false;
   ensure_thread_buffers();
 
@@ -241,11 +330,122 @@ bool TraversalSpill::try_reserve_memory(size_t elements) {
   return false;
 }
 
+void TraversalSpill::train_table(SymbolTable &table,
+                                 const std::vector<NodeId> &sequence) {
+  // Count symbols in an evenly spaced sample and keep the most frequent.
+  const size_t stride = std::max<size_t>(1, sequence.size() / kTrainingSample);
+  std::vector<NodeId> sample;
+  sample.reserve(sequence.size() / stride + 1);
+  for (size_t i = 0; i < sequence.size(); i += stride)
+    sample.push_back(sequence[i]);
+  std::sort(sample.begin(), sample.end());
+
+  std::vector<std::pair<uint32_t, NodeId>> counts; // (count, symbol)
+  for (size_t i = 0; i < sample.size();) {
+    size_t j = i + 1;
+    while (j < sample.size() && sample[j] == sample[i])
+      ++j;
+    counts.emplace_back(static_cast<uint32_t>(j - i), sample[i]);
+    i = j;
+  }
+  const size_t kept = std::min<size_t>(counts.size(), kTableRanks);
+  std::partial_sort(counts.begin(), counts.begin() + kept, counts.end(),
+                    [](const auto &a, const auto &b) {
+                      return a.first != b.first ? a.first > b.first
+                                                : a.second < b.second;
+                    });
+
+  std::vector<NodeId> symbols(kept);
+  table.keys.assign(kTableSlots, 0);
+  table.ranks.assign(kTableSlots, 0);
+  for (size_t rank = 0; rank < kept; ++rank) {
+    const NodeId symbol = counts[rank].second;
+    symbols[rank] = symbol;
+    size_t slot = table_slot(symbol);
+    while (table.ranks[slot] != 0)
+      slot = (slot + 1) & (kTableSlots - 1);
+    table.keys[slot] = symbol;
+    table.ranks[slot] = static_cast<uint16_t>(rank + 1);
+  }
+
+  std::lock_guard<std::mutex> lock(table_mutex_);
+  table.index = static_cast<uint32_t>(write_tables_.size());
+  write_tables_.push_back(std::move(symbols));
+  table.ready = true;
+}
+
 void TraversalSpill::write_record(int fd, std::atomic<uint64_t> &cursor,
                                   size_t i,
-                                  const std::vector<NodeId> &sequence) {
-  auto &buffer = thread_buffers().io;
-  const size_t bytes = encode_record(sequence, buffer);
+                                  const std::vector<NodeId> &sequence,
+                                  bool rewritten) {
+  auto &buffers = thread_buffers();
+  auto &buffer = buffers.io;
+  const size_t steps = sequence.size();
+  const ForcedCodec forced = forced_codec();
+  uint32_t codec = forced == ForcedCodec::kRaw ? kCodecRaw : kCodecVarint;
+  size_t bytes = 0;
+  bool encoded = false;
+
+  if (rewritten && forced == ForcedCodec::kNone) {
+    SymbolTable &table = buffers.table;
+    if (!table.useless) {
+      size_t escapes = 0;
+      bool fresh = false;
+      if (!table.ready) {
+        train_table(table, sequence);
+        fresh = true;
+      }
+      bytes = encode_with_table(sequence, table.keys, table.ranks, buffer,
+                                escapes);
+      // A table that misses many symbols was learned from different data:
+      // learn a new one from this record, unless too many exist already.
+      if (!fresh && escapes > steps / 8) {
+        bool room;
+        {
+          std::lock_guard<std::mutex> lock(table_mutex_);
+          room = write_tables_.size() < kMaxTablesPerPass;
+        }
+        if (room) {
+          train_table(table, sequence);
+          fresh = true;
+          bytes = encode_with_table(sequence, table.keys, table.ranks, buffer,
+                                    escapes);
+        }
+      }
+      // Even a table learned from this very record misses half of it: the
+      // symbols are too spread out (later rounds). Stop trying.
+      if (fresh && steps >= 4096 && escapes > steps / 2)
+        table.useless = true;
+      codec = kCodecTable + table.index;
+      encoded = true;
+    }
+    // Plain int32 is the bound to beat; small values do better as varints.
+    if (!encoded || bytes >= steps * sizeof(NodeId)) {
+      uint32_t any_bits = 0;
+      for (const NodeId value : sequence)
+        any_bits |= value < 0 ? 0u - static_cast<uint32_t>(value)
+                              : static_cast<uint32_t>(value);
+      const bool small_values = any_bits < (uint32_t{1} << 20);
+      if (small_values) {
+        std::vector<uint8_t> &other = buffers.io_alternate;
+        const size_t varint_bytes = encode_varint(sequence, other);
+        if (!encoded || varint_bytes < bytes) {
+          buffer.swap(other);
+          bytes = varint_bytes;
+          codec = kCodecVarint;
+          encoded = true;
+        }
+      } else {
+        bytes = encode_raw(sequence, buffer);
+        codec = kCodecRaw;
+        encoded = true;
+      }
+    }
+  }
+  if (!encoded) {
+    bytes = codec == kCodecRaw ? encode_raw(sequence, buffer)
+                               : encode_varint(sequence, buffer);
+  }
   const uint64_t offset = cursor.fetch_add(bytes);
 
   size_t done = 0;
@@ -271,7 +471,8 @@ void TraversalSpill::write_record(int fd, std::atomic<uint64_t> &cursor,
                   POSIX_FADV_DONTNEED);
   }
 
-  records_[i] = Record{offset, bytes, static_cast<uint32_t>(sequence.size())};
+  records_[i] =
+      Record{offset, bytes, static_cast<uint32_t>(sequence.size()), codec};
   total_written_bytes_.fetch_add(bytes);
 }
 
@@ -297,7 +498,7 @@ void TraversalSpill::consume(bool is_walk, size_t index,
     sequence.clear();
     return;
   }
-  write_record(read_fd_, read_cursor_, i, sequence);
+  write_record(read_fd_, read_cursor_, i, sequence, false);
   spilled_count_.fetch_add(1);
   spilled_steps_.fetch_add(sequence.size());
 }
@@ -332,7 +533,13 @@ void TraversalSpill::load(size_t i, std::vector<NodeId> &out) {
                   static_cast<off_t>(record.bytes), POSIX_FADV_DONTNEED);
   }
 
-  decode_record(buffer.data(), record.bytes, record.steps, out);
+  if (record.codec >= kCodecTable) {
+    decode_with_table(buffer.data(), record.steps,
+                      read_tables_[record.codec - kCodecTable], out);
+  } else {
+    decode_raw_or_varint(buffer.data(), record.bytes, record.steps,
+                         record.codec == kCodecRaw, out);
+  }
 
   if (!remap_.empty()) {
     for (NodeId &node : out) {
@@ -350,6 +557,9 @@ void TraversalSpill::load(size_t i, std::vector<NodeId> &out) {
 
 void TraversalSpill::begin_rewrite() {
   ensure_thread_buffers();
+  for (auto &buffers : thread_buffers_)
+    buffers.table = SymbolTable{};
+  write_tables_.clear();
   write_cursor_.store(0);
   rewriting_ = true;
 }
@@ -364,7 +574,7 @@ void TraversalSpill::store(size_t i, std::vector<NodeId> &sequence,
     spilled_steps_.fetch_sub(old_steps);
     return;
   }
-  write_record(write_fd_, write_cursor_, i, sequence);
+  write_record(write_fd_, write_cursor_, i, sequence, true);
   spilled_steps_.fetch_sub(old_steps - sequence.size());
 }
 
@@ -376,6 +586,8 @@ void TraversalSpill::end_rewrite() {
   write_cursor_.store(0);
   if (ftruncate(write_fd_, 0) != 0)
     fail(std::string("cannot reset temp file: ") + std::strerror(errno));
+  read_tables_ = std::move(write_tables_);
+  write_tables_.clear();
   // Every spilled record was just rewritten with the pending remap applied.
   remap_.clear();
   remap_.shrink_to_fit();
@@ -408,6 +620,8 @@ void TraversalSpill::materialize_all(std::vector<std::vector<NodeId>> &paths,
   spilled_steps_.store(0);
   remap_.clear();
   remap_.shrink_to_fit();
+  read_tables_.clear();
+  read_tables_.shrink_to_fit();
   thread_buffers_.clear();
   thread_buffers_.shrink_to_fit();
   if (ftruncate(read_fd_, 0) != 0)

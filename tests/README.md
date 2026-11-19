@@ -40,9 +40,9 @@
   irregular optional fields) give a byte-identical `.gfaz` to the serial line
   parsers (`GFAZ_SERIAL_PARSE=1`), including the inputs they must hand back.
 - `test_rule_scan_equivalence.py` asserts the two ways the rule generator finds
-  repeated 2-mers (per-thread sets, or sorting every 2-mer; pinned with
-  `GFAZ_RULE_SCAN=sets|all`) and the default per-round choice give a
-  byte-identical `.gfaz`.
+  repeated 2-mers (per-thread tables, or sorting every 2-mer; pinned with
+  `GFAZ_RULE_SCAN=sets|sets-legacy|all`) and the default per-round choice give
+  a byte-identical `.gfaz`.
 - `test_degenerate_inputs.py` covers degenerate-but-valid graphs (segments-only,
   walks-only, header-only) round-tripping cleanly, and invalid invocations
   (missing/malformed BED, unresolved pav/deconstruct reference) failing with a
@@ -69,6 +69,8 @@
 `tests/cpp/`
 - C++ tests built with the project and run by `ctest --test-dir build`.
 - `test_gfa_decoder.cpp` covers the front-door decoder API.
+- `test_kmer_seen_table.cpp` checks the rule scan's per-thread 2-mer table
+  against a reference count, including zero, negative and limit-sized IDs.
 - `test_key_sort.cpp` checks the rule generator's parallel key sort against
   `std::sort` on uniform, skewed, repeated and extreme-valued inputs.
 

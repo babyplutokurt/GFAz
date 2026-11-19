@@ -15,7 +15,9 @@ Checked across thread counts and delta settings, on committed fixtures and on a
 synthetic graph with enough repeated structure for several grammar rounds.
 """
 
+import os
 import random
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -85,9 +87,20 @@ def make_synthetic_graph(path: Path, numeric_names: bool):
   path.write_text("\n".join(lines) + "\n")
 
 
-def compress(cli: Path, src: Path, dst: Path, extra):
-  result = run_command([str(cli), "compress", *extra, str(src), str(dst)])
-  require_success(result, f"compress {src.name} {' '.join(extra)}")
+def compress(cli: Path, src: Path, dst: Path, extra, spill_codec=None):
+  # GFAZ_SPILL_CODEC=raw|varint pins how spilled traversals are stored; by
+  # default rewritten records use per-thread tables of frequent symbols.
+  env = dict(os.environ)
+  env.pop("GFAZ_SPILL_CODEC", None)
+  if spill_codec:
+    env["GFAZ_SPILL_CODEC"] = spill_codec
+  result = subprocess.run(
+      [str(cli), "compress", *extra, str(src), str(dst)],
+      text=True, capture_output=True, check=False, env=env)
+  if result.returncode != 0:
+    raise AssertionError(
+        f"compress {src.name} {' '.join(extra)} (spill codec "
+        f"{spill_codec or 'default'}) failed:\n{result.stderr}")
   return dst.read_bytes()
 
 
@@ -99,13 +112,16 @@ def check_input(cli: Path, src: Path, workdir: Path, label: str):
       common = ["-d", delta, "-j", threads]
       reference = compress(cli, src, workdir / "ref.gfaz", common)
       for budget in ("1", "6K", "40K", "1G"):
-        got = compress(
-            cli, src, workdir / "budget.gfaz",
-            common + ["--memory-budget", budget, "--tmp-dir", str(tmp_dir)])
-        if got != reference:
-          raise AssertionError(
-              f"{label}: --memory-budget {budget} changed the output "
-              f"(delta={delta}, threads={threads})")
+        for codec in (None, "varint", "raw"):
+          got = compress(
+              cli, src, workdir / "budget.gfaz",
+              common + ["--memory-budget", budget, "--tmp-dir", str(tmp_dir)],
+              spill_codec=codec)
+          if got != reference:
+            raise AssertionError(
+                f"{label}: --memory-budget {budget} changed the output "
+                f"(delta={delta}, threads={threads}, "
+                f"spill codec={codec or 'default'})")
   leftovers = list(tmp_dir.iterdir())
   if leftovers:
     raise AssertionError(f"{label}: temp files left behind: {leftovers}")

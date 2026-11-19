@@ -24,6 +24,15 @@ namespace gfaz {
 // graph vector is empty and a record points into the temp file). Spilled
 // records are rewritten by every encode pass, so they all carry the same
 // pending rule-ID remap, which is applied when a record is loaded.
+//
+// Record encodings. At parse time the steps are (delta-coded) node IDs, which
+// are small, and records are varints. After a grammar round most steps are
+// rule IDs: large numbers, but a few thousand of them make up nearly all
+// steps in the early rounds. Rewritten records therefore code each step as
+// its rank in a table of frequent symbols (1 or 2 bytes, 5 for a symbol that
+// is not in the table); each thread learns its table from the records it
+// writes. Records for which that does not pay are stored as varints or plain
+// int32, whichever is smaller.
 class TraversalSpill final : public TraversalSink {
 public:
   TraversalSpill(size_t memory_budget_bytes, std::string tmp_dir,
@@ -56,6 +65,8 @@ public:
   // Largest absolute symbol produced by the delta transform(s).
   uint32_t max_abs() const { return max_abs_.load(); }
   bool is_spilled(size_t i) const { return records_[i].bytes != 0; }
+  // Number of steps of spilled traversal `i`.
+  size_t spilled_length(size_t i) const { return records_[i].steps; }
   size_t spilled_count() const { return spilled_count_.load(); }
   size_t spilled_steps() const { return spilled_steps_.load(); }
   size_t memory_bytes() const { return memory_bytes_.load(); }
@@ -96,18 +107,33 @@ private:
     uint64_t offset = 0;
     uint64_t bytes = 0; // 0 = in memory
     uint32_t steps = 0;
+    uint32_t codec = 0; // kCodec* or kCodecTable + table index
+  };
+
+  // One thread's symbol table while it writes records: symbol -> rank through
+  // an open-addressing table (`ranks` holds rank + 1, 0 = empty slot).
+  struct SymbolTable {
+    std::vector<NodeId> keys;
+    std::vector<uint16_t> ranks;
+    uint32_t index = 0; // position in write_tables_
+    bool ready = false;
+    bool useless = false; // tables did not pay; stop trying this pass
   };
 
   struct ThreadBuffers {
     std::vector<NodeId> sequence;
     std::vector<uint8_t> io;
+    std::vector<uint8_t> io_alternate; // second candidate encoding
+    SymbolTable table;
   };
   ThreadBuffers &thread_buffers();
   void ensure_thread_buffers();
 
   bool try_reserve_memory(size_t elements);
   void write_record(int fd, std::atomic<uint64_t> &cursor, size_t i,
-                    const std::vector<NodeId> &sequence);
+                    const std::vector<NodeId> &sequence, bool rewritten);
+  // Learns `table` from `sequence` and registers it in write_tables_.
+  void train_table(SymbolTable &table, const std::vector<NodeId> &sequence);
   void fail(const std::string &message);
   int open_temp_file();
 
@@ -135,6 +161,13 @@ private:
   std::atomic<size_t> total_written_bytes_{0};
   std::atomic<uint32_t> max_abs_{0};
   size_t peak_file_bytes_ = 0;
+
+  // Symbols by rank, for the records in the read file and for the ones being
+  // written. A table is only appended (under the mutex) while it is still
+  // private to the thread that trained it.
+  std::vector<std::vector<NodeId>> read_tables_;
+  std::vector<std::vector<NodeId>> write_tables_;
+  std::mutex table_mutex_;
 
   uint32_t remap_start_id_ = 0;
   std::vector<uint32_t> remap_;

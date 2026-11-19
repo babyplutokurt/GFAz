@@ -36,6 +36,9 @@ private:
   // are not simply 1..N in file order: maps the number to the segment ID, so
   // resolving a name is an array read instead of a string hash lookup.
   std::vector<uint32_t> numeric_name_table_;
+  // Segment names of the chunked parser when they are not all numbers;
+  // node_name_lookup_ keys point into it.
+  std::string segment_name_arena_;
   size_t num_segments_hint_ = 0;
   size_t num_links_hint_ = 0;
   gfaz::TraversalSink *traversal_sink_ = nullptr;
