@@ -177,27 +177,27 @@ Compression, default and with `--memory-budget 2G`:
 
 | Graph | GFA size | Time | Throughput | Peak RSS | Time (2G) | Throughput (2G) | Peak RSS (2G) |
 |---|---|---|---|---|---|---|---|
-| E. coli | 0.12 GB | 0.30 s | 0.39 GB/s | 0.25 GB | 0.35 s | 0.34 GB/s | 0.20 GB |
-| HGSVC3-sv | 3.51 GB | 5.74 s | 0.61 GB/s | 5.92 GB | 5.70 s | 0.62 GB/s | 5.88 GB |
-| HPRC chr6 | 4.06 GB | 2.12 s | 1.92 GB/s | 2.00 GB | 2.34 s | 1.74 GB/s | 2.37 GB |
-| HPRC chr1 | 7.58 GB | 3.96 s | 1.92 GB/s | 4.04 GB | 4.23 s | 1.79 GB/s | 4.28 GB |
-| HPRC v1.1 | 50.8 GB | 36.4 s | 1.39 GB/s | 30.3 GB | 40.6 s | 1.25 GB/s | 11.7 GB |
-| HGSVC3 | 80.1 GB | 52.4 s | 1.53 GB/s | 44.0 GB | 59.0 s | 1.36 GB/s | 15.5 GB |
-| HPRC v2.0 | 384.3 GB | 131.7 s | 2.92 GB/s | 156.7 GB | 148.6 s | 2.59 GB/s | 28.6 GB |
-| HPRC v2.1 | 395.7 GB | 138.4 s | 2.86 GB/s | 161.4 GB | 151.3 s | 2.62 GB/s | 29.6 GB |
+| E. coli | 0.12 GB | 0.33 s | 0.36 GB/s | 0.24 GB | 0.35 s | 0.34 GB/s | 0.19 GB |
+| HGSVC3-sv | 3.51 GB | 5.85 s | 0.60 GB/s | 5.92 GB | 5.81 s | 0.60 GB/s | 5.88 GB |
+| HPRC chr6 | 4.06 GB | 2.08 s | 1.95 GB/s | 2.01 GB | 2.23 s | 1.82 GB/s | 2.37 GB |
+| HPRC chr1 | 7.58 GB | 3.57 s | 2.12 GB/s | 4.00 GB | 4.13 s | 1.84 GB/s | 4.25 GB |
+| HPRC v1.1 | 50.8 GB | 32.5 s | 1.56 GB/s | 30.1 GB | 37.8 s | 1.34 GB/s | 11.7 GB |
+| HGSVC3 | 80.1 GB | 47.6 s | 1.68 GB/s | 44.1 GB | 55.9 s | 1.43 GB/s | 15.5 GB |
+| HPRC v2.0 | 384.3 GB | 122.4 s | 3.14 GB/s | 156.7 GB | 142.2 s | 2.70 GB/s | 28.6 GB |
+| HPRC v2.1 | 395.7 GB | 131.7 s | 3.00 GB/s | 161.4 GB | 146.3 s | 2.70 GB/s | 29.7 GB |
 
 Decompression (default streaming mode), to `/dev/null` and to a file:
 
 | Graph | Time (`/dev/null`) | Throughput | Peak RSS | Time (file) | Throughput | Peak RSS |
 |---|---|---|---|---|---|---|
-| E. coli | 0.08 s | 1.48 GB/s | 0.15 GB | 0.10 s | 1.18 GB/s | 0.17 GB |
-| HGSVC3-sv | 3.15 s | 1.11 GB/s | 4.10 GB | 3.85 s | 0.91 GB/s | 4.12 GB |
-| HPRC chr6 | 1.13 s | 3.60 GB/s | 1.22 GB | 1.75 s | 2.32 GB/s | 1.67 GB |
-| HPRC chr1 | 2.79 s | 2.72 GB/s | 2.64 GB | 3.62 s | 2.09 GB/s | 2.98 GB |
-| HPRC v1.1 | 17.0 s | 2.98 GB/s | 12.9 GB | 21.2 s | 2.40 GB/s | 13.4 GB |
-| HGSVC3 | 23.2 s | 3.46 GB/s | 16.1 GB | 30.3 s | 2.64 GB/s | 17.4 GB |
-| HPRC v2.0 | 76.1 s | 5.05 GB/s | 22.7 GB | 171.8 s | 2.24 GB/s | 24.2 GB |
-| HPRC v2.1 | 77.0 s | 5.14 GB/s | 25.0 GB | 170.1 s | 2.33 GB/s | 27.3 GB |
+| E. coli | 0.07 s | 1.69 GB/s | 0.15 GB | 0.10 s | 1.18 GB/s | 0.17 GB |
+| HGSVC3-sv | 3.02 s | 1.16 GB/s | 4.10 GB | 3.51 s | 1.00 GB/s | 4.12 GB |
+| HPRC chr6 | 0.85 s | 4.78 GB/s | 1.23 GB | 1.65 s | 2.46 GB/s | 1.66 GB |
+| HPRC chr1 | 2.15 s | 3.53 GB/s | 2.65 GB | 3.23 s | 2.35 GB/s | 3.00 GB |
+| HPRC v1.1 | 13.5 s | 3.77 GB/s | 12.9 GB | 20.6 s | 2.47 GB/s | 13.4 GB |
+| HGSVC3 | 17.6 s | 4.55 GB/s | 16.1 GB | 29.5 s | 2.71 GB/s | 17.5 GB |
+| HPRC v2.0 | 51.9 s | 7.40 GB/s | 22.7 GB | 180.1 s | 2.13 GB/s | 24.3 GB |
+| HPRC v2.1 | 53.1 s | 7.45 GB/s | 25.0 GB | 189.4 s | 2.09 GB/s | 27.4 GB |
 
 Notes:
 
@@ -206,6 +206,8 @@ Notes:
   HGSVC3-sv, which has no paths or walks, it has nothing to spill.
 - On the HPRC v2.x graphs the default run's memory plus the input exceed the
   node's RAM, so part of the input leaves the page cache during the run.
+- Writing the ~390 GB HPRC v2.x outputs to a file is limited by the drive;
+  repeated runs of the same binary ranged from 170 s to 280 s.
 
 ## CPU Decompression Workflow Details
 
