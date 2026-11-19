@@ -1612,8 +1612,8 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   // Parallel line classification. Split the mapping at newline boundaries so
   // each worker owns complete lines, then concatenate the per-range offsets in
   // range order to preserve the input order within each record type.
-  std::vector<gfaz::LineOffset> s_offsets, l_offsets, p_offsets, w_offsets;
-  std::vector<gfaz::LineOffset> j_offsets, c_offsets;
+  LineOffsets s_offsets, l_offsets, p_offsets, w_offsets;
+  LineOffsets j_offsets, c_offsets;
 
   struct ClassifiedLines {
     std::vector<gfaz::LineOffset> segments;
@@ -1624,6 +1624,10 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     std::vector<gfaz::LineOffset> containments;
     gfaz::LineOffset last_header{};
     bool has_header = false;
+    // Last parse phase needing the first and the last page of this range.
+    // Neighbouring ranges share those pages, so they are merged afterwards.
+    uint8_t first_page_phase = 0;
+    uint8_t last_page_phase = 0;
   };
 
   const int classifier_threads =
@@ -1648,6 +1652,15 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   // later parsing phases can fault them in with their own access pattern.
   constexpr size_t kClassificationReleaseWindow = 64ull * 1024ull * 1024ull;
 
+  // Classification touches the entire mapping. Record the last parse phase
+  // that needs each page (1: S, 2: L, 3: P/W, 4: J/C), discard the
+  // classification residency, and release pages again as their owning phase
+  // completes. Pages shared by interleaved record types remain resident until
+  // the latest consumer is finished.
+  const size_t page_size = mapping_page_size;
+  const size_t page_count = (file_size + page_size - 1) / page_size;
+  std::vector<uint8_t> page_last_phase(page_count, 0);
+
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
@@ -1659,6 +1672,20 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     size_t release_cursor =
         ((range_start + mapping_page_size - 1) / mapping_page_size) *
         mapping_page_size;
+    const size_t range_first_page = range_start / page_size;
+    const size_t range_last_page =
+        range_end > range_start ? (range_end - 1) / page_size : range_first_page;
+    auto mark_pages = [&](const gfaz::LineOffset &off, uint8_t phase) {
+      const size_t first_page = off.offset / page_size;
+      const size_t last_page = (off.offset + off.length - 1) / page_size;
+      for (size_t page = first_page; page <= last_page; ++page) {
+        uint8_t &slot = page == range_first_page  ? local.first_page_phase
+                        : page == range_last_page ? local.last_page_phase
+                                                  : page_last_phase[page];
+        if (slot < phase)
+          slot = phase;
+      }
+    };
 
     while (line_start < range_end) {
       const void *newline =
@@ -1677,6 +1704,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
         switch (mmap_data[line_start]) {
         case 'S':
           local.segments.push_back(offset);
+          mark_pages(offset, 1);
           break;
         case 'H':
           local.last_header = offset;
@@ -1684,18 +1712,23 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
           break;
         case 'L':
           local.links.push_back(offset);
+          mark_pages(offset, 2);
           break;
         case 'P':
           local.paths.push_back(offset);
+          mark_pages(offset, 3);
           break;
         case 'W':
           local.walks.push_back(offset);
+          mark_pages(offset, 3);
           break;
         case 'J':
           local.jumps.push_back(offset);
+          mark_pages(offset, 4);
           break;
         case 'C':
           local.containments.push_back(offset);
+          mark_pages(offset, 4);
           break;
         }
       }
@@ -1721,15 +1754,34 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
     }
   }
 
-  auto merge_offsets = [&](auto ClassifiedLines::*member,
-                           std::vector<gfaz::LineOffset> &output) {
-    size_t total = 0;
-    for (const auto &local : classified)
-      total += (local.*member).size();
-    output.reserve(total);
-    for (auto &local : classified) {
-      auto &offsets = local.*member;
-      output.insert(output.end(), offsets.begin(), offsets.end());
+  for (int t = 0; t < classifier_threads; ++t) {
+    const auto &local = classified[static_cast<size_t>(t)];
+    const size_t range_start = boundaries[static_cast<size_t>(t)];
+    const size_t range_end = boundaries[static_cast<size_t>(t) + 1];
+    if (range_end <= range_start)
+      continue;
+    uint8_t &first = page_last_phase[range_start / page_size];
+    first = std::max(first, local.first_page_phase);
+    uint8_t &last = page_last_phase[(range_end - 1) / page_size];
+    last = std::max(last, local.last_page_phase);
+  }
+
+  // Concatenate the per-range offsets in range order, copying in parallel.
+  auto merge_offsets = [&](auto ClassifiedLines::*member, LineOffsets &output) {
+    std::vector<size_t> bases(classified.size() + 1, 0);
+    for (size_t t = 0; t < classified.size(); ++t)
+      bases[t + 1] = bases[t] + (classified[t].*member).size();
+    output.resize(bases.back());
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static, 1)
+#endif
+    for (size_t t = 0; t < classified.size(); ++t) {
+      auto &offsets = classified[t].*member;
+      if (!offsets.empty()) {
+        std::memcpy(static_cast<void *>(output.data() + bases[t]),
+                    offsets.data(), offsets.size() * sizeof(gfaz::LineOffset));
+      }
+      std::vector<gfaz::LineOffset>().swap(offsets);
     }
   };
 
@@ -1747,31 +1799,6 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   }
   classified.clear();
   classified.shrink_to_fit();
-
-  // Classification touches the entire mapping. Record the last parse phase
-  // that needs each page, discard the classification residency, and release
-  // pages again as their owning phase completes. Pages shared by interleaved
-  // record types remain resident until the latest consumer is finished.
-  const size_t page_size = mapping_page_size;
-  const size_t page_count = (file_size + page_size - 1) / page_size;
-  std::vector<uint8_t> page_last_phase(page_count, 0);
-  auto mark_last_phase = [&](const std::vector<gfaz::LineOffset> &offsets,
-                             uint8_t phase) {
-    for (const auto &off : offsets) {
-      const size_t first_page = off.offset / page_size;
-      const size_t last_page = (off.offset + off.length - 1) / page_size;
-      for (size_t page = first_page; page <= last_page && page < page_count;
-           ++page) {
-        page_last_phase[page] = std::max(page_last_phase[page], phase);
-      }
-    }
-  };
-  mark_last_phase(s_offsets, 1);
-  mark_last_phase(l_offsets, 2);
-  mark_last_phase(p_offsets, 3);
-  mark_last_phase(w_offsets, 3);
-  mark_last_phase(j_offsets, 4);
-  mark_last_phase(c_offsets, 4);
 
   auto release_phase_pages = [&](uint8_t phase) {
     size_t run_start = page_count;
@@ -2227,7 +2254,7 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
 }
 
 bool GfaParser::parse_segments_in_chunks(
-    const char *data, const std::vector<gfaz::LineOffset> &offsets,
+    const char *data, const LineOffsets &offsets,
     size_t page_size, bool direct_segment_columns, gfaz::GfaGraph &graph) {
   const size_t count = offsets.size();
   if (count >= std::numeric_limits<uint32_t>::max())
@@ -2432,7 +2459,7 @@ bool GfaParser::parse_segments_in_chunks(
 }
 
 bool GfaParser::parse_links_in_chunks(
-    const char *data, const std::vector<gfaz::LineOffset> &offsets,
+    const char *data, const LineOffsets &offsets,
     size_t page_size, gfaz::GfaGraph &graph) {
   const size_t count = offsets.size();
   const std::vector<size_t> row_bases = chunk_row_bases(count);

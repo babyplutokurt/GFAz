@@ -12,6 +12,25 @@
 #include "compress/io/traversal_sink.hpp"
 #include "core/model/gfa_graph.hpp"
 
+// Allocator that leaves trivially constructible elements uninitialized, so a
+// large vector can be sized once and then filled (and first touched) by
+// several threads.
+template <typename T> struct DefaultInitAllocator : std::allocator<T> {
+  template <typename U> struct rebind {
+    using other = DefaultInitAllocator<U>;
+  };
+  DefaultInitAllocator() = default;
+  template <typename U>
+  DefaultInitAllocator(const DefaultInitAllocator<U> &) noexcept {}
+  template <typename U> void construct(U *p) { ::new (static_cast<void *>(p)) U; }
+  template <typename U, typename... Args> void construct(U *p, Args &&...args) {
+    ::new (static_cast<void *>(p)) U(std::forward<Args>(args)...);
+  }
+};
+
+using LineOffsets =
+    std::vector<gfaz::LineOffset, DefaultInitAllocator<gfaz::LineOffset>>;
+
 class GfaParser {
 public:
   GfaParser();
@@ -56,11 +75,11 @@ private:
   // leaving the graph as it found it, for any input the serial line parsers
   // treat specially; the caller then runs those.
   bool parse_segments_in_chunks(const char *data,
-                                const std::vector<gfaz::LineOffset> &offsets,
+                                const LineOffsets &offsets,
                                 size_t page_size, bool direct_segment_columns,
                                 gfaz::GfaGraph &graph);
   bool parse_links_in_chunks(const char *data,
-                             const std::vector<gfaz::LineOffset> &offsets,
+                             const LineOffsets &offsets,
                              size_t page_size, gfaz::GfaGraph &graph);
 
   void parse_segment_field(std::string_view field, size_t segment_index, gfaz::GfaGraph &graph);
