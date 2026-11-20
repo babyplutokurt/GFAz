@@ -17,7 +17,8 @@ namespace gfaz {
 
 class PackedSequences {
 public:
-  // Add text at the end. Call in order; the pieces may be cut anywhere.
+  // Add text at the end. Call in order; the pieces may be cut anywhere. A
+  // large piece is packed by several threads (OpenMP's current setting).
   void append(const char *text, size_t count);
 
   uint64_t size() const { return size_; }

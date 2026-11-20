@@ -9,6 +9,8 @@
 #include <handlegraph/util.hpp>
 
 #include <algorithm>
+#include <exception>
+#include <thread>
 #include <atomic>
 #include <fstream>
 #include <stdexcept>
@@ -165,11 +167,29 @@ GfazHandleGraph::GfazHandleGraph(const CompressedData &data,
   }
 
   number_nodes();
-  load_sequences(data);
-  if (owned)
-    release(owned->segment_sequences_zstd);
-  build_adjacency(data, options.num_threads);
+
+  // Sequences and edges come from different parts of the container; read them
+  // side by side.
+  std::exception_ptr sequence_error;
+  std::thread sequence_job([&]() {
+    try {
+      ScopedOMPThreads omp_scope(options.num_threads);
+      load_sequences(data);
+    } catch (...) {
+      sequence_error = std::current_exception();
+    }
+  });
+  try {
+    build_adjacency(data, options.num_threads);
+  } catch (...) {
+    sequence_job.join();
+    throw;
+  }
+  sequence_job.join();
+  if (sequence_error)
+    std::rethrow_exception(sequence_error);
   if (owned) {
+    release(owned->segment_sequences_zstd);
     release(owned->link_from_ids_zstd);
     release(owned->link_to_ids_zstd);
     release(owned->link_from_orients_zstd);
@@ -190,9 +210,20 @@ GfazHandleGraph::load(const std::string &path, GfazHandleGraphOptions options) {
 }
 
 void GfazHandleGraph::load_sequences(const CompressedData &data) {
+  // Decompression comes in small pieces; collect enough of them for the
+  // packing to be worth several threads.
+  constexpr size_t kPackBytes = size_t{64} << 20;
+  std::string pending;
+  pending.reserve(kPackBytes);
   Codec::zstd_decompress_in_pieces(
-      data.segment_sequences_zstd,
-      [&](const char *text, size_t count) { sequences_.append(text, count); });
+      data.segment_sequences_zstd, [&](const char *text, size_t count) {
+        pending.append(text, count);
+        if (pending.size() >= kPackBytes) {
+          sequences_.append(pending.data(), pending.size());
+          pending.clear();
+        }
+      });
+  sequences_.append(pending.data(), pending.size());
   const std::vector<uint32_t> &lengths = paths_.segment_lengths;
   sequence_starts_.reserve(lengths.size() / kSequenceStride + 1);
   uint64_t offset = 0;
