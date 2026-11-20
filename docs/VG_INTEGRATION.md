@@ -73,9 +73,10 @@ What the numbers say:
   or change a graph use the converted graph, as before.
 - Node ids are assigned by the rule of vg's own GFA import (numeric segment
   names are the ids), and segment names are reported through
-  `NamedNodeBackTranslation`; see the adapter doc. This rule has been checked
-  against vg's code, not yet against vg's output on a graph with non-numeric
-  names.
+  `NamedNodeBackTranslation`; see the adapter doc. On graphs named by
+  strings, by sparse numbers and by zero-padded numbers, `vg convert -f` gives
+  the same GFA from the `.gfaz` (read in place or converted) as from the
+  original GFA, up to which end an L-line is written from.
 - Read mapping with Giraffe needs a GBZ and its indexes. The route is
   `vg gbwt -x graph.gfaz -E --gbz-format -g graph.gbz`, which now reads the
   container in place.
