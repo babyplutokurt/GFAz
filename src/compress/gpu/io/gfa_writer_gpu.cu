@@ -3,7 +3,7 @@
 #include "compress/gpu/decompression/decompression_workflow_gpu_internal.hpp"
 #include "compress/gpu/decompression/traversal_decode_gpu.hpp"
 #include "compress/gpu/io/gfa_writer_gpu_direct.hpp"
-#include "compress/io/gfa_write_utils.hpp"
+#include "core/io/gfa_write_utils.hpp"
 #include "compress/io/gfa_writer.hpp"
 #include "core/utils/runtime_utils.hpp"
 #include "compress/decompression_debug.hpp"

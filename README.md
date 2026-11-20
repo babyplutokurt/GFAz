@@ -185,6 +185,15 @@ build/bin/gfaz pav -i example.gfa.gfaz -b ranges.bed -S -M -t 8
 # Derive a VCF relative to a reference path directly from compressed traversals.
 # The default matches `vg deconstruct` (one record per top-level snarl).
 build/bin/gfaz deconstruct -i example.gfa.gfaz -r chr1 -S -t 16 > example.vcf
+
+# Pull the subgraph around a reference region out as GFA, with every haplotype
+# that passes through it.
+build/bin/gfaz extract-region -i example.gfa.gfaz -r 'CHM13#0#chr6:30000000-30100000' > mhc.gfa
+
+# Where every path and walk visits a node. `index` saves the path index both
+# commands use, so later queries skip building it.
+build/bin/gfaz index -i example.gfa.gfaz
+build/bin/gfaz locate -i example.gfa.gfaz -n 2000000
 ```
 
 `growth` computes expected node accumulation curves from path/walk group
@@ -205,6 +214,14 @@ with less memory (see [Compute Engine Performance](#compute-engine-performance))
 The two legacy modes — `--snarl` (leaf-superbubble
 superset) and `--linear` (the flat reference-anchor heuristic) — are deprecated
 and will be removed in a future release.
+
+`extract-region` and `locate` read positions inside haplotypes through a path
+index instead of streaming every traversal from its start; see
+[REGION_WORKFLOW.md](docs/workflows/REGION_WORKFLOW.md) and
+[LOCATE_WORKFLOW.md](docs/workflows/LOCATE_WORKFLOW.md). The same index backs
+the Python `PathReader` and the libhandlegraph adapter that lets vg and other
+libhandlegraph tools read a `.gfaz` directly
+([HANDLEGRAPH_ADAPTER.md](docs/HANDLEGRAPH_ADAPTER.md)).
 
 Notes:
 
@@ -242,6 +259,19 @@ data = gfac.deserialize("example.gfaz")
 gfac.write_gfa_from_compressed_data(data, "example.streamed.gfa")
 ```
 
+Reading paths in place (no decompression; node ids come back as numpy arrays,
+negative for reverse orientation):
+
+```python
+import gfa_compression as gfac
+
+reader = gfac.PathReader("example.gfaz")       # index_path="example.gfaz.pidx" to reuse `gfaz index`
+ref = reader.haplotypes_on("CHM13#0#chr6")[0]
+first, nodes, starts = reader.steps_in_bases(ref, 30_000_000, 30_100_000)
+visits = reader.locate(int(abs(nodes[0])))     # arrays: haplotype, step, start, reverse
+name = reader.node_name(int(abs(nodes[0])))    # the segment's name in the GFA; node_id(name) goes back
+```
+
 GPU workflow:
 
 ```python
@@ -263,6 +293,7 @@ Useful Python entry points:
 - `deserialize(...)`
 - `write_gfa(...)`
 - `write_gfa_from_compressed_data(...)`
+- `PathReader(...)`: `steps`, `steps_in_bases`, `locate`, `node_lengths`
 - `extract_path_line(...)` / `extract_path_lines(...)`
 - `extract_walk_line(...)`
 - `extract_walk_line_by_name(...)`

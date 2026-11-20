@@ -50,6 +50,28 @@ std::string format_walk_line(const std::string &sample_id, uint32_t hap_index,
                              int64_t seq_end, const int32_t *walk_data,
                              size_t walk_size, const gfaz::SegmentNames &names);
 
+// Append one S-line for node `node_id` (1-based; optional fields are read at
+// row node_id - 1). The hints carry the place the last name was found from
+// one call to the next; declare them once outside the loop.
+void append_segment_line(std::string &line, uint32_t node_id,
+                         const char *sequence, size_t length,
+                         const std::vector<gfaz::OptionalFieldColumn> &fields,
+                         const FieldOffsets &field_offsets,
+                         const gfaz::SegmentNames &names,
+                         gfaz::SegmentNames::RunHint &hint);
+
+// Append the L-line stored at row `index` of `links`.
+void append_link_line(std::string &line, const gfaz::LinkData &links,
+                      size_t index,
+                      const std::vector<gfaz::OptionalFieldColumn> &fields,
+                      const FieldOffsets &field_offsets,
+                      const gfaz::SegmentNames &names,
+                      gfaz::SegmentNames::RunHint &from_hint,
+                      gfaz::SegmentNames::RunHint &to_hint);
+
+// Decode the six link columns of a container.
+gfaz::LinkData decompress_links(const gfaz::CompressedData &data);
+
 void write_segments(
     std::ofstream &out, const std::string &segment_sequences,
     const std::vector<uint32_t> &segment_lengths,

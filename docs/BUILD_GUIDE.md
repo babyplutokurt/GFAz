@@ -27,6 +27,9 @@ The build can also independently enable or disable:
 | `GFAZ_USE_SYSTEM_ZSTD` | `ON` | Use system-installed Zstd instead of the vendored copy in `extern/zstd`. |
 | `BUILD_PYTHON_BINDINGS` | `ON` | Build the `gfa_compression` Python extension module. |
 | `BUILD_CLI` | `ON` | Build the `gfaz` CLI executable. |
+| `GFAZ_BUILD_HANDLEGRAPH` | `OFF` | Build `gfaz_handlegraph`, the libhandlegraph adapter (see `HANDLEGRAPH_ADAPTER.md`). Needs `GFAZ_HANDLEGRAPH_INCLUDE_DIR`. |
+| `GFAZ_HANDLEGRAPH_INCLUDE_DIR` | empty | Directory containing `handlegraph/handle_graph.hpp`. |
+| `GFAZ_HANDLEGRAPH_LIBRARY` | empty | `libhandlegraph` to link the adapter's test program against; without it the test is not built. |
 | `CUDA_PATH` | empty | Optional CUDA toolkit root used to locate `nvcc`. |
 
 Related standard CMake settings:

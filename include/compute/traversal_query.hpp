@@ -129,6 +129,25 @@ void expand_rule_visit(uint32_t rule_id, bool reverse,
   }
 }
 
+// Cache-free expansion of one rule to its leaves. Random-access readers use
+// this: they decode short spans, so the per-rule `ready` table of a
+// RuleLeafCache would cost more memory than it saves time.
+template <typename Visitor>
+void expand_rule_leaves(uint32_t rule_id, bool reverse, const Rulebook &rules,
+                        Visitor &visit) {
+  const uint32_t idx = rule_id - rules.min_rule_id;
+  const int32_t children[2] = {rules.rules_first[idx], rules.rules_second[idx]};
+  for (int i = 0; i < 2; ++i) {
+    // A reversed rule emits its children last-to-first with flipped signs.
+    const int32_t child = reverse ? -children[1 - i] : children[i];
+    const uint32_t abs_child = static_cast<uint32_t>(std::abs(child));
+    if (abs_child >= rules.min_rule_id && abs_child < rules.max_rule_id)
+      expand_rule_leaves(abs_child, child < 0, rules, visit);
+    else
+      visit(child);
+  }
+}
+
 template <typename Visitor>
 void stream_hap_leaves(const int32_t *encoded, size_t encoded_len,
                        uint32_t min_rule_id, uint32_t max_rule_id,

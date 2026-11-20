@@ -125,6 +125,35 @@ headers over duplicating logic in your workflow.
 | `load_walk_identity(data, n, ctx) -> WalkIdentityColumns` | 269 | W-line sample/hap/seq/start/end columns. |
 | `reconstruct_strings(...)`, `decompress_strings(...)` | 237, 241 | String-payload helpers. |
 
+### Position-aware access (`include/compute/indexed_paths.hpp`)
+
+`stream_decoded_nodes` reads a haplotype from its start. An app that needs a
+position inside a haplotype, or the visits to a node, starts from
+`IndexedPaths` instead:
+
+```cpp
+IndexedPathsOptions paths_options;          // index_path empty: build in memory
+const IndexedPaths paths(data, paths_options);
+paths.access.for_each_step_in_bases(hap, bp_begin, bp_end,
+                                    [&](const PathStep &step) { /* ... */ });
+paths.access.for_each_step_on_nodes(node, node,
+                                    [&](size_t hap, const PathStep &step) { /* ... */ });
+```
+
+| Symbol | Header | Contract |
+|---|---|---|
+| `IndexedPaths` | `compute/indexed_paths.hpp` | Owns the pieces below for one container; the normal entry point. |
+| `TraversalSet` | `compute/traversal_set.hpp` | Decodes any span of top-level elements of a haplotype, given the `DeltaState` at its start. |
+| `PathIndex` | `compute/path_index.hpp` | Per-block checkpoints (encoded offset, step, base offset, delta state, node-id range); `build`, `save`, `load`, `block_of_step`, `block_of_bp`, `for_each_block_overlapping`. |
+| `PathAccess` | `compute/path_access.hpp` | `for_each_step`, `for_each_step_in_bases`, `for_each_step_on_nodes`; every callback gets a `PathStep` (step index, base offset, node, length). |
+| `HaplotypeCatalog` | `compute/haplotype_catalog.hpp` | Name, contig and contig offset of every haplotype; `on_contig(name)`. |
+
+Haplotypes are numbered `[paths... walks...]` everywhere. Nodes are numbered
+`1..N` in S-line order inside the engine; print one with `paths.names` (a
+`SegmentNames`, `core/model/segment_names.hpp`) and resolve a name a user typed
+with `SegmentNameLookup`, so output and input use the GFA's own segment names. `region_workflow.cpp`
+and `locate_workflow.cpp` are the worked examples.
+
 ### `include/compute/snarl_finder.hpp` (only if you need topology)
 
 | Symbol | Line | Contract |
@@ -215,6 +244,12 @@ app needs them — see
 - Walk-by-name lookup is currently an O(N) linear scan
   (`src/compress/extraction_workflow.cpp`); fine for whole-pangenome batch apps,
   but fix before any per-query service.
+- `IndexedPaths` decodes the whole rulebook and both traversal blocks up front.
+  That fixed cost (about 2 s on HPRC v1.1) is all that is left of a `locate`
+  once the index is saved; decoding columns on demand would remove it.
+- Aggregating on the grammar instead of on expanded paths does not pay: see
+  "Grammar-level aggregation" in
+  [`design/DOWNSTREAM_APPLICATIONS.md`](design/DOWNSTREAM_APPLICATIONS.md).
 - The repeated "decode reference profile + `offset_at` prefix sums + identity/
   grouping setup" boilerplate could be extracted into a shared helper once a 4th
   app needs the exact same prologue.

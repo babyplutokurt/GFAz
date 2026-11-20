@@ -51,6 +51,9 @@ HERMETIC_SUITES = [
     "tests/regression/test_similarity.py",
     "tests/regression/test_stats.py",
     "tests/regression/test_depth.py",
+    "tests/regression/test_extract_region.py",
+    "tests/regression/test_locate.py",
+    "tests/regression/test_handle_graph.py",
     "tests/concordance/test_pav_vs_odgi.py",
     "tests/concordance/test_growth_vs_panacus.py",
     "tests/concordance/test_similarity_vs_odgi.py",
@@ -65,6 +68,7 @@ HERMETIC_SUITES = [
 # binding-capable interpreter. GPU is skipped (experimental / often not built).
 BINDING_SUITES = [
     ("tests/regression/test_compression_regression.py", ["--skip-gpu"]),
+    ("tests/regression/test_path_reader.py", []),
 ]
 
 

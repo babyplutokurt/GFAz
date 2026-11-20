@@ -138,6 +138,34 @@ Framing for the paper / docs:
   pairwise distances, haplotype scoring/subsampling, extraction — with
   laptop-class memory on HPRC-scale inputs.
 
+## Grammar-level aggregation (measured 2026-11-19, not adopted)
+
+Idea: compute sums over path steps (depth, coverage) per grammar rule and push
+them down to nodes, so the work follows the grammar size instead of the total
+path length.
+
+Why it does not work as stated: traversals are delta-coded before the grammar
+is built, so a rule stands for a run of node-id *differences*. The nodes it
+covers depend on the value it starts from, and the unit to aggregate is the
+pair (rule, start value), not the rule.
+
+Measured by expanding level by level and merging equal pairs:
+
+| Graph | Steps | Top-level elements | Pairs sorted | Node updates after merging | Time | Streaming `depth` |
+|---|---|---|---|---|---|---|
+| HPRC chr6 | 0.40 B | 11.5 M | 97 M | 25 M | 2.0 s | 0.5 s |
+| HPRC v1.1 | 4.60 B | 204 M | 1.58 B | 451 M | 32 s | 7.7 s |
+
+Merging cuts the node updates 10 to 16 times, but it needs a sort over three to
+four times as many pairs, and a sorted pair costs far more than a streamed step
+(streaming runs at about 60 M steps per second per core). The probe's sort was
+only partly parallel; a fully parallel one would at best draw level with
+streaming while holding several GB of pairs. Per-group analyses (growth, PAV)
+are worse off: the group has to join the key or ride along as a bitset.
+
+Revisit only if a container variant stores traversals without the delta
+transform, where a rule does name fixed nodes.
+
 ## Open Questions
 
 - PanGenie memory profile: is the win from loading the panel, or from the k-mer
