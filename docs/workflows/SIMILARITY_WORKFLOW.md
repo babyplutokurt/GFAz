@@ -83,12 +83,14 @@ Streaming, reusing the shared traversal layer (see
    `I[a][b] += len(n) * min(visits_a, visits_b)`; the diagonal yields `L_g`.
    Emit.
 
-The CSR is the only large structure: 8 bytes per (group, node) entry, plus one
-counting array of 4 bytes per node for every thread. The traversals are decoded
-twice so that no per-path or per-group lists are held next to it. On HPRC v1.1
-by sample (46 groups, 16 threads) this takes 97 s and 40 GB; holding the lists
-took 194 s and 144 GB. Results are integer-exact and do not depend on the
-thread count.
+The CSR is the only large structure. An entry takes the fewest bytes that hold
+a group id (1, 2 or 4) plus one byte for the visit count; the rare counts of
+255 or more are kept in a side table. Every thread also has one counting array
+of 4 bytes per node. The traversals are decoded twice so that no per-path or
+per-group lists are held next to the CSR. On HPRC v1.1 by sample (46 groups,
+16 threads) this takes 97 s and 25 GB; holding the lists took 194 s and
+144 GB. HPRC v2.1 by sample (233 groups) takes about 20 minutes and 82 GB.
+Results are integer-exact and do not depend on the thread count.
 
 ## Benchmark
 
