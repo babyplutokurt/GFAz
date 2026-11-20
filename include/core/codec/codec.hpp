@@ -4,6 +4,7 @@
 #include "core/model/compressed_data.hpp"
 #include "core/model/gfa_graph.hpp"
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,11 @@ zstd_decompress_int32_vector(const ZstdCompressedBlock &block);
 
 ZstdCompressedBlock zstd_compress_string(const std::string &data);
 std::string zstd_decompress_string(const ZstdCompressedBlock &block);
+// Decompress a block piece by piece, without holding all of its output:
+// sink(bytes, count) gets consecutive pieces. Throws on a corrupt block.
+void zstd_decompress_in_pieces(
+    const ZstdCompressedBlock &block,
+    const std::function<void(const char *, size_t)> &sink);
 
 ZstdCompressedBlock
 zstd_compress_uint32_vector(const std::vector<uint32_t> &data);

@@ -190,7 +190,9 @@ GfazHandleGraph::load(const std::string &path, GfazHandleGraphOptions options) {
 }
 
 void GfazHandleGraph::load_sequences(const CompressedData &data) {
-  sequences_ = Codec::zstd_decompress_string(data.segment_sequences_zstd);
+  Codec::zstd_decompress_in_pieces(
+      data.segment_sequences_zstd,
+      [&](const char *text, size_t count) { sequences_.append(text, count); });
   const std::vector<uint32_t> &lengths = paths_.segment_lengths;
   sequence_starts_.reserve(lengths.size() / kSequenceStride + 1);
   uint64_t offset = 0;
@@ -216,28 +218,42 @@ uint64_t GfazHandleGraph::sequence_begin(uint32_t segment) const {
 
 void GfazHandleGraph::build_adjacency(const CompressedData &data,
                                       int num_threads) {
-  const LinkData links = gfa_write_utils::decompress_links(data);
   const uint32_t num_nodes = paths_.num_nodes();
   const size_t num_handles = 2 * static_cast<size_t>(num_nodes);
+
+  // Only the ends of the links are needed, not their overlaps or tags.
+  std::vector<uint32_t> from_ids = Codec::decompress_delta_varint_uint32(
+      data.link_from_ids_zstd, data.num_links);
+  std::vector<uint32_t> to_ids = Codec::decompress_delta_varint_uint32(
+      data.link_to_ids_zstd, data.num_links);
+  std::vector<char> from_orients = Codec::decompress_orientations(
+      data.link_from_orients_zstd, data.num_links);
+  std::vector<char> to_orients =
+      Codec::decompress_orientations(data.link_to_orients_zstd, data.num_links);
+  const size_t num_links =
+      std::min({from_ids.size(), to_ids.size(), from_orients.size(),
+                to_orients.size()});
 
   // Each link is stored from both ends: a -> b, and flip(b) -> flip(a). Call
   // visit(from, to) with packed handles for every stored direction.
   auto for_each_direction = [&](auto &&visit) {
-    for (size_t i = 0; i < links.from_ids.size(); ++i) {
-      const uint32_t from_id = links.from_ids[i];
-      const uint32_t to_id = links.to_ids[i];
+    for (size_t i = 0; i < num_links; ++i) {
+      const uint32_t from_id = from_ids[i];
+      const uint32_t to_id = to_ids[i];
       if (from_id == 0 || to_id == 0 || from_id > num_nodes || to_id > num_nodes)
         continue;
-      const uint32_t a = (from_id << 1) | (links.from_orients[i] == '-');
-      const uint32_t b = (to_id << 1) | (links.to_orients[i] == '-');
+      const uint32_t a = (from_id << 1) | (from_orients[i] == '-');
+      const uint32_t b = (to_id << 1) | (to_orients[i] == '-');
       visit(a, b);
       if ((b ^ 1) != a || (a ^ 1) != b)
         visit(b ^ 1, a ^ 1);
     }
   };
 
-  // Counting pass, then fill (handles start at 2, hence the shift).
-  std::vector<uint32_t> offsets(num_handles + 1, 0);
+  // Count the successors of every handle, then turn the counts into list
+  // starts (handles start at 2, hence the shift).
+  std::vector<uint32_t> &offsets = edge_offsets_;
+  offsets.assign(num_handles + 1, 0);
   uint64_t total = 0;
   for_each_direction([&](uint32_t from, uint32_t) {
     ++offsets[from - 2 + 1];
@@ -247,15 +263,22 @@ void GfazHandleGraph::build_adjacency(const CompressedData &data,
     throw std::runtime_error("gfaz handle graph: too many links");
   for (size_t h = 0; h < num_handles; ++h)
     offsets[h + 1] += offsets[h];
-  std::vector<uint32_t> targets(total);
-  {
-    std::vector<uint32_t> cursor(offsets.begin(), offsets.end() - 1);
-    for_each_direction(
-        [&](uint32_t from, uint32_t to) { targets[cursor[from - 2]++] = to; });
-  }
 
-  // Sort each list and drop repeated links, then close the gaps.
-  std::vector<uint32_t> kept(num_handles, 0);
+  // Fill, advancing each list's start as its cursor. Afterwards the start of
+  // list h sits where the start of list h + 1 belongs; shift them back.
+  std::vector<uint32_t> targets(total);
+  for_each_direction(
+      [&](uint32_t from, uint32_t to) { targets[offsets[from - 2]++] = to; });
+  for (size_t h = num_handles; h > 0; --h)
+    offsets[h] = offsets[h - 1];
+  offsets[0] = 0;
+  std::vector<uint32_t>().swap(from_ids);
+  std::vector<uint32_t>().swap(to_ids);
+  std::vector<char>().swap(from_orients);
+  std::vector<char>().swap(to_orients);
+
+  // Sort each list and drop repeated links. A dropped slot is marked with 0,
+  // which is not a handle.
   {
     ScopedOMPThreads omp_scope(num_threads);
 #pragma omp parallel for schedule(dynamic, 4096)
@@ -263,26 +286,33 @@ void GfazHandleGraph::build_adjacency(const CompressedData &data,
       uint32_t *begin = targets.data() + offsets[h];
       uint32_t *end = targets.data() + offsets[h + 1];
       std::sort(begin, end);
-      kept[h] = static_cast<uint32_t>(std::unique(begin, end) - begin);
+      std::fill(std::unique(begin, end), end, 0);
     }
   }
-  edge_offsets_.assign(num_handles + 1, 0);
+
+  // Close the gaps. The write position never passes the read position, so
+  // both the targets and the starts are rewritten in place.
   size_t write = 0;
   edge_count_ = 0;
   for (size_t h = 0; h < num_handles; ++h) {
-    edge_offsets_[h] = static_cast<uint32_t>(write);
+    const size_t begin = offsets[h];
+    const size_t end = offsets[h + 1];
+    offsets[h] = static_cast<uint32_t>(write);
     const uint32_t from = static_cast<uint32_t>(h + 2);
-    for (uint32_t i = 0; i < kept[h]; ++i) {
-      const uint32_t to = targets[offsets[h] + i];
+    for (size_t i = begin; i < end && targets[i] != 0; ++i) {
+      const uint32_t to = targets[i];
       targets[write++] = to;
       // Count an edge at the smaller of its two stored directions.
       if (std::make_pair(from, to) <= std::make_pair(to ^ 1, from ^ 1))
         ++edge_count_;
     }
   }
-  edge_offsets_[num_handles] = static_cast<uint32_t>(write);
+  offsets[num_handles] = static_cast<uint32_t>(write);
+  // Give back the slots of dropped links only when there are many: shrinking
+  // copies the whole array.
   targets.resize(write);
-  targets.shrink_to_fit();
+  if (targets.capacity() - targets.size() > targets.size() / 16)
+    targets.shrink_to_fit();
   edge_targets_ = std::move(targets);
 }
 
@@ -538,9 +568,9 @@ char GfazHandleGraph::get_base(const handle_t &handle, size_t index) const {
   const uint32_t id = segment_of_handle(handle);
   const uint64_t begin = sequence_begin(id);
   if (!get_is_reverse(handle))
-    return sequences_[begin + index];
+    return sequences_.at(begin + index);
   return complement_base(
-      sequences_[begin + paths_.segment_lengths[id - 1] - 1 - index]);
+      sequences_.at(begin + paths_.segment_lengths[id - 1] - 1 - index));
 }
 
 std::string GfazHandleGraph::get_subsequence(const handle_t &handle,

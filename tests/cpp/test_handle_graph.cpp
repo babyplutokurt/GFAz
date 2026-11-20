@@ -304,6 +304,31 @@ void check_steps_on_nodes(const gfaz::GfazHandleGraph &graph,
 
 } // namespace
 
+// Text goes in in uneven pieces and must come back unchanged, whether it stays
+// packed (few characters besides ACGT) or falls back to plain bytes (many).
+void check_packed_sequences() {
+  for (const uint32_t other_every : {0u, 97u, 3u}) {
+    std::string text;
+    uint32_t state = 12345 + other_every;
+    for (size_t i = 0; i < 300000; ++i) {
+      state = state * 1664525u + 1013904223u;
+      if (other_every != 0 && i % other_every == 0)
+        text.push_back("NnacgtRY"[(state >> 24) % 8]);
+      else
+        text.push_back("ACGT"[(state >> 24) % 4]);
+    }
+    gfaz::PackedSequences packed;
+    for (size_t at = 0, piece = 1; at < text.size(); at += piece, piece = piece * 3 % 4099 + 1)
+      packed.append(text.data() + at, std::min(piece, text.size() - at));
+    expect(packed.size() == text.size(), "packed size");
+    expect(packed.substr(0, text.size()) == text, "packed text");
+    for (size_t at = 0; at + 70 <= text.size(); at += 7919) {
+      expect(packed.substr(at, 70) == text.substr(at, 70), "packed substr");
+      expect(packed.at(at) == text[at], "packed at");
+    }
+  }
+}
+
 int main(int argc, char **argv) {
   if (argc < 3) {
     std::cerr << "usage: " << argv[0]
@@ -319,6 +344,7 @@ int main(int argc, char **argv) {
       gfaz::GfazHandleGraph::load(argv[1], options);
   const ExpectedGraph want = read_gfa(argv[2]);
 
+  check_packed_sequences();
   check_nodes(*graph, want);
   check_edges(*graph, want);
   check_paths(*graph, want);

@@ -332,6 +332,39 @@ std::string zstd_decompress_string(const ZstdCompressedBlock &block) {
   return result;
 }
 
+void zstd_decompress_in_pieces(
+    const ZstdCompressedBlock &block,
+    const std::function<void(const char *, size_t)> &sink) {
+  if (block.payload.empty())
+    return;
+  ZSTD_DCtx *context = ZSTD_createDCtx();
+  if (!context)
+    throw std::runtime_error("ZSTD decompression failed: no context");
+  std::vector<char> piece(ZSTD_DStreamOutSize());
+  ZSTD_inBuffer input{block.payload.data(), block.payload.size(), 0};
+  size_t status = 0;
+  while (input.pos < input.size) {
+    ZSTD_outBuffer output{piece.data(), piece.size(), 0};
+    status = ZSTD_decompressStream(context, &output, &input);
+    if (ZSTD_isError(status)) {
+      ZSTD_freeDCtx(context);
+      throw std::runtime_error(std::string("ZSTD decompression failed: ") +
+                               ZSTD_getErrorName(status));
+    }
+    if (output.pos > 0)
+      sink(piece.data(), output.pos);
+  }
+  // Input is used up; anything still buffered in the context comes out now.
+  while (status != 0) {
+    ZSTD_outBuffer output{piece.data(), piece.size(), 0};
+    status = ZSTD_decompressStream(context, &output, &input);
+    if (ZSTD_isError(status) || output.pos == 0)
+      break;
+    sink(piece.data(), output.pos);
+  }
+  ZSTD_freeDCtx(context);
+}
+
 ZstdCompressedBlock
 zstd_compress_uint32_vector(const std::vector<uint32_t> &data) {
   return zstd_compress_bytes(data.data(), data.size() * sizeof(uint32_t));

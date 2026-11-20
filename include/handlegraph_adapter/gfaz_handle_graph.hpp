@@ -26,6 +26,7 @@
 // -DGFAZ_BUILD_HANDLEGRAPH=ON; see docs/HANDLEGRAPH_ADAPTER.md.
 
 #include "compute/indexed_paths.hpp"
+#include "handlegraph_adapter/packed_sequences.hpp"
 #include "core/defaults.hpp"
 #include "core/model/compressed_data.hpp"
 
@@ -194,7 +195,7 @@ private:
   // segment k * kSequenceStride + 1 starts; the segments in between are found
   // by adding up their lengths.
   static constexpr uint32_t kSequenceStride = 32;
-  std::string sequences_;
+  PackedSequences sequences_;
   std::vector<uint64_t> sequence_starts_;
   uint64_t total_length_ = 0;
 
