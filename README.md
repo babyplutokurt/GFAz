@@ -267,6 +267,7 @@ reader = gfac.PathReader("example.gfaz")       # index_path="example.gfaz.pidx" 
 ref = reader.haplotypes_on("CHM13#0#chr6")[0]
 first, nodes, starts = reader.steps_in_bases(ref, 30_000_000, 30_100_000)
 visits = reader.locate(int(abs(nodes[0])))     # arrays: haplotype, step, start, reverse
+name = reader.node_name(int(abs(nodes[0])))    # the segment's name in the GFA; node_id(name) goes back
 ```
 
 GPU workflow:

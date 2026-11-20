@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Runs the libhandlegraph adapter cross-check (tests/cpp/test_handle_graph.cpp)
-on the fixtures and on the generated multi-block graph, at several index block
-sizes. The checker compares every interface method of GfazHandleGraph with a
+on the fixtures and on the generated multi-block graph (under three segment
+namings), at several index block sizes. The checker compares every interface method of GfazHandleGraph with a
 brute-force answer from the decompressed GFA.
 
 SKIPs unless the build has the adapter: configure with
@@ -25,7 +25,11 @@ from tests.regression.regression_utils import (
     run_command,
     run_main,
 )
-from tests.regression.test_extract_region import FIXTURES, make_synthetic
+from tests.regression.test_extract_region import (
+    FIXTURES,
+    SEGMENT_NAMINGS,
+    make_synthetic,
+)
 
 CHECKER = BUILD_DIR / "gfaz_handle_graph_test"
 
@@ -37,9 +41,13 @@ def main():
   cli = str(CLI_PATH)
   with tempfile.TemporaryDirectory(prefix="gfaz_handle_") as tmp_name:
     tmp = Path(tmp_name)
-    synthetic = tmp / "synthetic.gfa"
-    make_synthetic(synthetic)
-    graphs = [synthetic] + [FIXTURES / name for name in (
+    # The generated graph with its segments named 1..N, by other numbers
+    # (which become the node ids) and by strings (ids 1..N plus names).
+    synthetic = []
+    for label, name_of in SEGMENT_NAMINGS.items():
+      synthetic.append(tmp / f"synthetic_{label}.gfa")
+      make_synthetic(synthetic[-1], name_of)
+    graphs = synthetic + [FIXTURES / name for name in (
         "deconstruct_links_fixture.gfa",
         "growth_fixture_walks.gfa",
         "deconstruct_inversion_fixture.gfa",

@@ -2,8 +2,9 @@
 #define COMPUTE_INDEXED_PATHS_HPP
 
 // The bundle a position-aware compute app starts from: decoded traversals,
-// their PathIndex, segment lengths, haplotype names, and a PathAccess over
-// them. Construct one from a container and use `access` and `catalog`.
+// their PathIndex, segment lengths and names, haplotype names, and a
+// PathAccess over them. Construct one from a container and use `access` and
+// `catalog`; print a node with `names`.
 
 #include "compute/haplotype_catalog.hpp"
 #include "compute/path_access.hpp"
@@ -11,6 +12,7 @@
 #include "compute/traversal_set.hpp"
 #include "core/defaults.hpp"
 #include "core/model/compressed_data.hpp"
+#include "core/model/segment_names.hpp"
 
 #include <cstdint>
 #include <string>
@@ -33,6 +35,7 @@ struct IndexedPaths {
   IndexedPaths &operator=(const IndexedPaths &) = delete;
 
   std::vector<uint32_t> segment_lengths; // segment_lengths[n - 1] for node n
+  SegmentNames names;                    // the GFA's name of node n
   TraversalSet traversals;
   PathIndex index;
   HaplotypeCatalog catalog;

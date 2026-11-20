@@ -35,6 +35,15 @@ handlegraph::handle_t unpacked(uint32_t value) {
   return handlegraph::as_handle(static_cast<uint64_t>(value));
 }
 
+// The segment number a handle packs, and the handle of an oriented segment.
+uint32_t segment_of_handle(const handlegraph::handle_t &handle) {
+  return static_cast<uint32_t>(number_bool_packing::unpack_number(handle));
+}
+
+handlegraph::handle_t segment_handle(uint32_t segment, bool is_reverse = false) {
+  return number_bool_packing::pack(segment, is_reverse);
+}
+
 handlegraph::step_handle_t make_step(size_t path, int64_t index) {
   handlegraph::step_handle_t step;
   as_integers(step)[0] = static_cast<int64_t>(path);
@@ -134,6 +143,7 @@ GfazHandleGraph::GfazHandleGraph(const CompressedData &data,
             "gfaz handle graph: a path visits a node that has no segment");
     }
 
+  number_nodes();
   load_sequences(data);
   build_adjacency(data, options.num_threads);
   name_paths(data, options.reference_samples);
@@ -303,17 +313,98 @@ void GfazHandleGraph::name_paths(
 // HandleGraph
 // ---------------------------------------------------------------------------
 
+// Node ids are assigned the way vg's GFA import assigns them
+// (GFAParser::assign_new_sequence_id), so that a graph read here and the same
+// GFA read by vg agree: in S-line order, a name made of digits with a positive
+// value is the id, until the first name that is not; from there on every
+// segment gets the largest id so far plus one.
+void GfazHandleGraph::number_nodes() {
+  const uint32_t num_nodes = paths_.num_nodes();
+  min_node_id_ = num_nodes == 0 ? 0 : 1;
+  max_node_id_ = num_nodes;
+  const SegmentNames &names = paths_.names;
+  if (names.dense())
+    return;
+
+  std::vector<nid_t> ids(num_nodes);
+  if (names.plain_numbers()) {
+    ids.assign(names.numbers().begin(), names.numbers().end());
+  } else {
+    bool numeric = true;
+    nid_t largest = 0;
+    std::string name;
+    for (uint32_t segment = 1; segment <= num_nodes; ++segment) {
+      nid_t id = 0;
+      if (numeric) {
+        name.clear();
+        names.append(name, segment);
+        numeric = !name.empty() && name.size() <= 18 &&
+                  name.find_first_not_of("0123456789") == std::string::npos;
+        if (numeric) {
+          id = std::stoll(name);
+          numeric = id > 0;
+        }
+      }
+      if (!numeric)
+        id = largest + 1;
+      largest = std::max(largest, id);
+      ids[segment - 1] = id;
+    }
+  }
+
+  std::vector<std::pair<nid_t, uint32_t>> by_id(num_nodes);
+  bool identity = true;
+  for (uint32_t i = 0; i < num_nodes; ++i) {
+    by_id[i] = {ids[i], i + 1};
+    identity = identity && ids[i] == static_cast<nid_t>(i + 1);
+  }
+  if (identity)
+    return;
+  std::sort(by_id.begin(), by_id.end());
+  // Two names with one value ("7" and "007") cannot both be that id.
+  for (size_t i = 1; i < by_id.size(); ++i)
+    if (by_id[i].first == by_id[i - 1].first)
+      return;
+  node_ids_ = std::move(ids);
+  nodes_by_id_ = std::move(by_id);
+  min_node_id_ = nodes_by_id_.front().first;
+  max_node_id_ = nodes_by_id_.back().first;
+}
+
+uint32_t GfazHandleGraph::segment_of(nid_t node_id) const {
+  if (node_ids_.empty())
+    return node_id >= 1 && static_cast<uint64_t>(node_id) <= paths_.num_nodes()
+               ? static_cast<uint32_t>(node_id)
+               : 0;
+  const auto it =
+      std::lower_bound(nodes_by_id_.begin(), nodes_by_id_.end(),
+                       std::make_pair(node_id, uint32_t{0}));
+  return it != nodes_by_id_.end() && it->first == node_id ? it->second : 0;
+}
+
 bool GfazHandleGraph::has_node(nid_t node_id) const {
-  return node_id >= 1 && static_cast<uint64_t>(node_id) <= paths_.num_nodes();
+  return segment_of(node_id) != 0;
 }
 
 handlegraph::handle_t GfazHandleGraph::get_handle(const nid_t &node_id,
                                                   bool is_reverse) const {
-  return number_bool_packing::pack(static_cast<uint64_t>(node_id), is_reverse);
+  return segment_handle(segment_of(node_id), is_reverse);
 }
 
 handlegraph::nid_t GfazHandleGraph::get_id(const handle_t &handle) const {
-  return static_cast<nid_t>(number_bool_packing::unpack_number(handle));
+  const uint32_t segment = segment_of_handle(handle);
+  return node_ids_.empty() ? static_cast<nid_t>(segment)
+                           : node_ids_[segment - 1];
+}
+
+std::vector<handlegraph::oriented_node_range_t> GfazHandleGraph::translate_back(
+    const handlegraph::oriented_node_range_t &range) const {
+  return {range};
+}
+
+std::string
+GfazHandleGraph::get_back_graph_node_name(const nid_t &back_node_id) const {
+  return paths_.names.name(segment_of(back_node_id));
 }
 
 bool GfazHandleGraph::get_is_reverse(const handle_t &handle) const {
@@ -325,7 +416,7 @@ handlegraph::handle_t GfazHandleGraph::flip(const handle_t &handle) const {
 }
 
 size_t GfazHandleGraph::get_length(const handle_t &handle) const {
-  return paths_.segment_lengths[get_id(handle) - 1];
+  return paths_.segment_lengths[segment_of_handle(handle) - 1];
 }
 
 std::string GfazHandleGraph::get_sequence(const handle_t &handle) const {
@@ -335,11 +426,11 @@ std::string GfazHandleGraph::get_sequence(const handle_t &handle) const {
 size_t GfazHandleGraph::get_node_count() const { return paths_.num_nodes(); }
 
 handlegraph::nid_t GfazHandleGraph::min_node_id() const {
-  return paths_.num_nodes() == 0 ? 0 : 1;
+  return min_node_id_;
 }
 
 handlegraph::nid_t GfazHandleGraph::max_node_id() const {
-  return paths_.num_nodes();
+  return max_node_id_;
 }
 
 size_t GfazHandleGraph::get_degree(const handle_t &handle, bool go_left) const {
@@ -354,7 +445,7 @@ size_t GfazHandleGraph::get_total_length() const {
 }
 
 char GfazHandleGraph::get_base(const handle_t &handle, size_t index) const {
-  const nid_t id = get_id(handle);
+  const uint32_t id = segment_of_handle(handle);
   const uint64_t begin = sequence_offsets_[id - 1];
   if (!get_is_reverse(handle))
     return sequences_[begin + index];
@@ -363,7 +454,7 @@ char GfazHandleGraph::get_base(const handle_t &handle, size_t index) const {
 
 std::string GfazHandleGraph::get_subsequence(const handle_t &handle,
                                              size_t index, size_t size) const {
-  const nid_t id = get_id(handle);
+  const uint32_t id = segment_of_handle(handle);
   const size_t length = get_length(handle);
   index = std::min(index, length);
   size = std::min(size, length - index);
@@ -395,14 +486,15 @@ bool GfazHandleGraph::for_each_handle_impl(
   const long long num_nodes = paths_.num_nodes();
   if (!parallel) {
     for (long long id = 1; id <= num_nodes; ++id)
-      if (!iteratee(get_handle(id)))
+      if (!iteratee(segment_handle(id)))
         return false;
     return true;
   }
   std::atomic<bool> keep_going{true};
 #pragma omp parallel for schedule(dynamic, 1024)
   for (long long id = 1; id <= num_nodes; ++id) {
-    if (keep_going.load(std::memory_order_relaxed) && !iteratee(get_handle(id)))
+    if (keep_going.load(std::memory_order_relaxed) &&
+        !iteratee(segment_handle(id)))
       keep_going.store(false, std::memory_order_relaxed);
   }
   return keep_going.load();
@@ -478,7 +570,7 @@ GfazHandleGraph::get_handle_of_step(const step_handle_t &step_handle) const {
   const uint32_t step = static_cast<uint32_t>(index_of(step_handle));
   const DecodedBlock &block = block_with_step(path_of(step_handle), step);
   const NodeId node = block.nodes[step - block.step_begin];
-  return get_handle(tquery::abs_node_id(node), node < 0);
+  return segment_handle(tquery::abs_node_id(node), node < 0);
 }
 
 handlegraph::path_handle_t GfazHandleGraph::get_path_handle_of_step(
@@ -581,7 +673,7 @@ bool GfazHandleGraph::for_each_step_position_on_handle(
     const handle_t &handle,
     const std::function<bool(const step_handle_t &, const bool &,
                              const size_t &)> &iteratee) const {
-  const uint32_t node = static_cast<uint32_t>(get_id(handle));
+  const uint32_t node = segment_of_handle(handle);
   const bool handle_reverse = get_is_reverse(handle);
 
   // Only blocks whose node-id range covers the node can visit it. They go

@@ -76,10 +76,25 @@ rGFA tags on S-lines are not turned into paths.
 
 ## Node ids
 
-Node ids are the container's 1-based ids, the ones `gfaz decompress` writes. A
-`.gfaz` does not keep the original segment names, so a graph whose GFA segment
-names were not `1..N` is renumbered. Coordinates in other files (GAM, GAF,
-annotations) that use the original names do not line up with it.
+Node ids are assigned by the rule vg's GFA import uses
+(`GFAParser::assign_new_sequence_id`), so a `.gfaz` read through the adapter
+and the same GFA read by vg number their nodes alike:
+
+- Segment names that are positive numbers are the node ids, whether or not
+  they run `1..N`.
+- From the first name that is not such a number, every segment gets the
+  largest id so far plus one. A graph named `s1, s2, ...` therefore has the ids
+  `1..N` in S-line order.
+
+The graph also implements `handlegraph::NamedNodeBackTranslation`:
+`get_back_graph_node_name(id)` returns the segment's name in the GFA. vg looks
+for that interface (`algorithms::find_translation`) when it writes segment
+names.
+
+A handle packs the segment's position in the file, not its id, so every query
+other than `get_handle(id)` costs the same either way; when the ids are not
+`1..N`, `get_handle(id)` is a binary search. `segment_of(id)` gives the
+position, which is the node number the native API (`paths()`) uses.
 
 ## Validation
 

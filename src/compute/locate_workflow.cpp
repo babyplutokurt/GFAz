@@ -15,26 +15,29 @@ void locate_nodes_to_tsv(const CompressedData &data,
   paths_options.num_threads = options.num_threads;
   const IndexedPaths paths(data, paths_options);
 
-  for (uint32_t node : options.nodes)
-    if (node == 0 || node > paths.num_nodes())
-      throw std::runtime_error("locate: node " + std::to_string(node) +
-                               " is outside 1.." +
-                               std::to_string(paths.num_nodes()));
+  const SegmentNameLookup lookup(paths.names, paths.num_nodes());
+  std::vector<uint32_t> nodes;
+  nodes.reserve(options.nodes.size());
+  for (const std::string &name : options.nodes) {
+    nodes.push_back(lookup.find(name));
+    if (nodes.back() == 0)
+      throw std::runtime_error("locate: the graph has no segment named '" +
+                               name + "'");
+  }
 
   // One buffer per requested node keeps the output in request order while the
   // lookups run in parallel.
-  std::vector<std::string> rows(options.nodes.size());
+  std::vector<std::string> rows(nodes.size());
   {
     ScopedOMPThreads omp_scope(options.num_threads);
 #pragma omp parallel for schedule(dynamic, 1)
-    for (long long i = 0; i < static_cast<long long>(options.nodes.size());
-         ++i) {
-      const uint32_t node = options.nodes[i];
+    for (long long i = 0; i < static_cast<long long>(nodes.size()); ++i) {
+      const uint32_t node = nodes[i];
       std::string &text = rows[i];
       paths.access.for_each_step_on_nodes(
           node, node, [&](size_t hap, const PathStep &step) {
             const Haplotype &haplotype = paths.catalog[hap];
-            text += std::to_string(node);
+            text += options.nodes[i];
             text += '\t';
             text += haplotype.contig;
             text += step.node < 0 ? "\t-\t" : "\t+\t";

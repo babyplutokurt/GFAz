@@ -32,7 +32,7 @@ int do_locate(int argc, char *argv[]) {
       input_path = optarg;
       break;
     case 'n':
-      options.nodes.push_back(static_cast<uint32_t>(std::stoul(optarg)));
+      options.nodes.emplace_back(optarg);
       break;
     case 'x':
       options.index_path = optarg;

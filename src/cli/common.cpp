@@ -419,8 +419,8 @@ USAGE:
 
 OPTIONS:
     -i, --input <FILE>      Input .gfaz file.
-    -n, --node <ID>         Node id (the ids `gfaz decompress` writes). May be
-                            given more than once.
+    -n, --node <NAME>       Segment name, as in the GFA. May be given more
+                            than once.
     -x, --index <FILE>      Path index to use [default: <input>.pidx if it
                             exists; otherwise one is built for the query].
     -t, --threads <N>       Threads: >0 explicit, 0 auto, <0 inherit OpenMP.

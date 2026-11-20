@@ -21,7 +21,8 @@ PathIndex load_or_build_index(const CompressedData &data,
 
 IndexedPaths::IndexedPaths(const CompressedData &data,
                            const IndexedPathsOptions &options)
-    : segment_lengths(tquery::load_segment_lengths(data)), traversals(data),
+    : segment_lengths(tquery::load_segment_lengths(data)),
+      names(SegmentNames::decode(data)), traversals(data),
       index(load_or_build_index(data, traversals, segment_lengths, options)),
       catalog(data), access(traversals, index, segment_lengths) {}
 

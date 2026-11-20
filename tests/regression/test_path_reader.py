@@ -23,14 +23,31 @@ from tests.regression.regression_utils import (
     run_command,
     run_main,
 )
-from tests.regression.test_extract_region import Graph, make_synthetic
-
-
-def signed(node, orient):
-  return node if orient in "+>" else -node
+from tests.regression.test_extract_region import (
+    SEGMENT_NAMINGS,
+    Graph,
+    make_synthetic,
+)
 
 
 def check_reader(reader, graph: Graph):
+  # The reader speaks node ids (1..N in S-line order); the GFA speaks names.
+  def signed(name, orient):
+    return graph.ids[name] if orient in "+>" else -graph.ids[name]
+
+  names = sorted(graph.ids, key=graph.ids.get)
+  if reader.node_names() != names:
+    raise AssertionError("node names differ")
+  for node in (1, 250, len(names)):
+    if reader.node_name(node) != names[node - 1] or \
+       reader.node_id(names[node - 1]) != node:
+      raise AssertionError(f"node {node}: name and id do not convert back")
+  try:
+    reader.node_id("no_such_segment")
+    raise AssertionError("an unknown segment name was accepted")
+  except KeyError:
+    pass
+
   haps = graph.haps
   if reader.num_haplotypes != len(haps) or reader.num_nodes != len(graph.lengths):
     raise AssertionError("haplotype or node count differs")
@@ -39,7 +56,7 @@ def check_reader(reader, graph: Graph):
   if list(reader.contig_offsets) != [h["offset"] for h in haps]:
     raise AssertionError("contig offsets differ")
   lengths = reader.node_lengths()
-  if [int(x) for x in lengths] != [graph.lengths[n] for n in sorted(graph.lengths)]:
+  if [int(x) for x in lengths] != [graph.lengths[n] for n in names]:
     raise AssertionError("node lengths differ")
 
   for h, hap in enumerate(haps):
@@ -67,7 +84,7 @@ def check_reader(reader, graph: Graph):
   for node in (1, 250, 1499, 3000):
     want = [(h, i, signed(n, o) < 0)
             for h, hap in enumerate(haps)
-            for i, (n, o) in enumerate(hap["steps"]) if n == node]
+            for i, (n, o) in enumerate(hap["steps"]) if graph.ids[n] == node]
     got = reader.locate(node)
     rows = list(zip(got["haplotype"].tolist(), got["step"].tolist(),
                     got["reverse"].tolist()))
@@ -92,22 +109,23 @@ def main():
   cli = str(CLI_PATH)
   with tempfile.TemporaryDirectory(prefix="gfaz_reader_") as tmp_name:
     tmp = Path(tmp_name)
-    gfa = tmp / "synthetic.gfa"
-    make_synthetic(gfa)
-    gfaz, full = tmp / "synthetic.gfaz", tmp / "full.gfa"
-    require_success(run_command([cli, "compress", str(gfa), str(gfaz)]), "compress")
-    require_success(run_command([cli, "decompress", str(gfaz), str(full)]),
-                    "decompress")
-    graph = Graph(full.read_text())
+    for label, name_of in SEGMENT_NAMINGS.items():
+      gfa = tmp / f"{label}.gfa"
+      make_synthetic(gfa, name_of)
+      gfaz, full = tmp / f"{label}.gfaz", tmp / f"{label}.full.gfa"
+      require_success(run_command([cli, "compress", str(gfa), str(gfaz)]), "compress")
+      require_success(run_command([cli, "decompress", str(gfaz), str(full)]),
+                      "decompress")
+      graph = Graph(full.read_text())
 
-    for block_steps in (1, 7, 4096):
-      check_reader(gfa_compression.PathReader(str(gfaz), block_steps=block_steps),
+      for block_steps in (1, 7, 4096):
+        check_reader(gfa_compression.PathReader(str(gfaz), block_steps=block_steps),
+                     graph)
+      index = tmp / f"{label}.pidx"
+      require_success(run_command([cli, "index", "-i", str(gfaz), "-o", str(index),
+                                   "-b", "9"]), "index")
+      check_reader(gfa_compression.PathReader(str(gfaz), index_path=str(index)),
                    graph)
-    index = tmp / "saved.pidx"
-    require_success(run_command([cli, "index", "-i", str(gfaz), "-o", str(index),
-                                 "-b", "9"]), "index")
-    check_reader(gfa_compression.PathReader(str(gfaz), index_path=str(index)),
-                 graph)
   print("✅ PathReader regression checks passed")
 
 

@@ -148,7 +148,10 @@ paths.access.for_each_step_on_nodes(node, node,
 | `PathAccess` | `compute/path_access.hpp` | `for_each_step`, `for_each_step_in_bases`, `for_each_step_on_nodes`; every callback gets a `PathStep` (step index, base offset, node, length). |
 | `HaplotypeCatalog` | `compute/haplotype_catalog.hpp` | Name, contig and contig offset of every haplotype; `on_contig(name)`. |
 
-Haplotypes are numbered `[paths... walks...]` everywhere. `region_workflow.cpp`
+Haplotypes are numbered `[paths... walks...]` everywhere. Nodes are numbered
+`1..N` in S-line order inside the engine; print one with `paths.names` (a
+`SegmentNames`, `core/model/segment_names.hpp`) and resolve a name a user typed
+with `SegmentNameLookup`, so output and input use the GFA's own segment names. `region_workflow.cpp`
 and `locate_workflow.cpp` are the worked examples.
 
 ### `include/compute/snarl_finder.hpp` (only if you need topology)

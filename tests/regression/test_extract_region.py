@@ -37,8 +37,9 @@ class Graph:
 
   def __init__(self, text: str):
     self.header = []
-    self.segments = {}   # id -> line
-    self.lengths = {}    # id -> bases
+    self.segments = {}   # segment name -> line
+    self.lengths = {}    # segment name -> bases
+    self.ids = {}        # segment name -> 1-based number in S-line order
     self.links = []      # (from, to, line)
     self.haps = []       # dict(kind, contig, offset, steps, fields)
     for line in text.splitlines():
@@ -46,12 +47,13 @@ class Graph:
       if f[0] == "H":
         self.header.append(line)
       elif f[0] == "S":
-        self.segments[int(f[1])] = line
-        self.lengths[int(f[1])] = len(f[2])
+        self.segments[f[1]] = line
+        self.lengths[f[1]] = len(f[2])
+        self.ids[f[1]] = len(self.ids) + 1
       elif f[0] == "L":
-        self.links.append((int(f[1]), int(f[3]), line))
+        self.links.append((f[1], f[3], line))
       elif f[0] == "P":
-        steps = [(int(s[:-1]), s[-1]) for s in f[2].split(",")]
+        steps = [(s[:-1], s[-1]) for s in f[2].split(",")]
         self.haps.append(dict(kind="P", contig=f[1], offset=0, steps=steps,
                               fields=f))
       elif f[0] == "W":
@@ -60,7 +62,7 @@ class Graph:
           j = i + 1
           while j < len(walk) and walk[j] not in "<>":
             j += 1
-          steps.append((int(walk[i + 1:j]), walk[i]))
+          steps.append((walk[i + 1:j], walk[i]))
           i = j
         offset = int(f[4]) if f[4] != "*" else 0
         self.haps.append(dict(kind="W", contig=f"{f[1]}#{f[2]}#{f[3]}",
@@ -116,13 +118,27 @@ def expected_region(graph: Graph, regions, max_gap: int):
   return lines
 
 
-def make_synthetic(path: Path):
-  """A graph whose haplotypes span many index blocks."""
+# Ways to name segment number n of a generated graph: as the number itself,
+# as other numbers, as strings, and as numbers that turn into strings.
+SEGMENT_NAMINGS = {
+    "dense": str,
+    "sparse": lambda n: str(1000 + 3 * n),
+    "named": lambda n: f"s{n}x",
+    "mixed": lambda n: f"{n + 5:04d}" if n < 100 else f"utg{n}",
+}
+
+
+def make_synthetic(path: Path, name_of=str):
+  """A graph whose haplotypes span many index blocks. name_of gives the name
+  of the n-th segment."""
   rng = random.Random(7)
   num_nodes = 3000
   out = ["H\tVN:Z:1.1"]
+  lengths = {}
   for n in range(1, num_nodes + 1):
-    out.append(f"S\t{n}\t{''.join(rng.choice('ACGT') for _ in range(rng.randint(1, 9)))}")
+    sequence = "".join(rng.choice("ACGT") for _ in range(rng.randint(1, 9)))
+    lengths[n] = len(sequence)
+    out.append(f"S\t{name_of(n)}\t{sequence}")
   links = set()
   haps = []
   for h in range(10):
@@ -144,11 +160,10 @@ def make_synthetic(path: Path):
     for (a, ao), (b, bo) in zip(steps, steps[1:]):
       links.add((a, ao, b, bo))
   for a, ao, b, bo in sorted(links):
-    out.append(f"L\t{a}\t{ao}\t{b}\t{bo}\t0M")
-  lengths = {int(l.split("\t")[1]): len(l.split("\t")[2]) for l in out if l[0] == "S"}
+    out.append(f"L\t{name_of(a)}\t{ao}\t{name_of(b)}\t{bo}\t0M")
   for h, steps in enumerate(haps):
     if h < 4:
-      body = ",".join(f"{n}{o}" for n, o in steps)
+      body = ",".join(f"{name_of(n)}{o}" for n, o in steps)
       out.append(f"P\tp{h}#1#chrS\t{body}\t*")
     else:
       # Two walks on one contig, the second starting where the first ends.
@@ -156,7 +171,8 @@ def make_synthetic(path: Path):
       first = sum(lengths[n] for n, _ in steps[:cut])
       total = sum(lengths[n] for n, _ in steps)
       for part, begin, end in ((steps[:cut], 0, first), (steps[cut:], first, total)):
-        body = "".join(f"{'>' if o == '+' else '<'}{n}" for n, o in part)
+        body = "".join(f"{'>' if o == '+' else '<'}{name_of(n)}"
+                       for n, o in part)
         out.append(f"W\tw{h}\t1\tchrS\t{begin}\t{end}\t{body}")
   path.write_text("\n".join(out) + "\n")
 
@@ -228,15 +244,16 @@ def main():
         (["ref#0#chr1:5-11"], 100000),
         (["HG002#1#chr1:18-25"], 0),
     ], tmp)
-    synthetic = tmp / "synthetic.gfa"
-    make_synthetic(synthetic)
-    check(cli, synthetic, [
-        (["p0#1#chrS:2000-2400"], 100000),
-        (["p0#1#chrS:2000-2400"], 0),
-        (["p1#1#chrS:100-9000"], 50),
-        (["w5#1#chrS:6000-9000"], 300),
-        (["w7#1#chrS:0-40", "p3#1#chrS:12000-12100"], 1000),
-    ], tmp)
+    for label, name_of in SEGMENT_NAMINGS.items():
+      synthetic = tmp / f"synthetic_{label}.gfa"
+      make_synthetic(synthetic, name_of)
+      check(cli, synthetic, [
+          (["p0#1#chrS:2000-2400"], 100000),
+          (["p0#1#chrS:2000-2400"], 0),
+          (["p1#1#chrS:100-9000"], 50),
+          (["w5#1#chrS:6000-9000"], 300),
+          (["w7#1#chrS:0-40", "p3#1#chrS:12000-12100"], 1000),
+      ], tmp)
     test_errors(cli, tmp)
   print("✅ extract-region regression checks passed")
 

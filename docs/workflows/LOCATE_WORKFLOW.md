@@ -24,7 +24,8 @@ by haplotype and position:
 - `[start, end)`: the bases the node covers on that sequence (for a W-line,
   including the walk's own start offset).
 
-Node ids are the container's 1-based ids, the ones `gfaz decompress` writes.
+`-n` takes a segment's name as the GFA writes it (`2000000`, `s17`, `utg000042l`),
+and the `#node` column repeats it.
 
 ## The path index
 

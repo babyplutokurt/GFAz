@@ -20,13 +20,16 @@
 //     thread's cache. Neighbouring nodes share blocks, so a local neighbourhood
 //     is cheap; a loop over every node of a large graph is still slow.
 //
-// Node ids are the container's 1-based ids. Built only with
+// Node ids follow the GFA the way vg's GFA import does: segment names that are
+// numbers are the node ids, and other names get new ids; the names themselves
+// are reported through NamedNodeBackTranslation. Built only with
 // -DGFAZ_BUILD_HANDLEGRAPH=ON; see docs/HANDLEGRAPH_ADAPTER.md.
 
 #include "compute/indexed_paths.hpp"
 #include "core/defaults.hpp"
 #include "core/model/compressed_data.hpp"
 
+#include <handlegraph/named_node_back_translation.hpp>
 #include <handlegraph/path_position_handle_graph.hpp>
 
 #include <cstdint>
@@ -35,6 +38,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace gfaz {
@@ -55,7 +59,8 @@ struct GfazHandleGraphOptions {
   int num_threads = kDefaultNumThreads;
 };
 
-class GfazHandleGraph : public handlegraph::PathPositionHandleGraph {
+class GfazHandleGraph : public handlegraph::PathPositionHandleGraph,
+                        public handlegraph::NamedNodeBackTranslation {
 public:
   using handle_t = handlegraph::handle_t;
   using path_handle_t = handlegraph::path_handle_t;
@@ -121,8 +126,17 @@ public:
       const std::function<bool(const step_handle_t &, const bool &,
                                const size_t &)> &iteratee) const override;
 
+  // NamedNodeBackTranslation: a node is one whole GFA segment, so a range
+  // translates to itself and the name is the segment's.
+  std::vector<handlegraph::oriented_node_range_t> translate_back(
+      const handlegraph::oriented_node_range_t &range) const override;
+  std::string get_back_graph_node_name(const nid_t &back_node_id) const override;
+
   // The underlying GFAz objects, for callers that want the native API too.
   const IndexedPaths &paths() const { return paths_; }
+  // The container's 1-based segment number of a node id, or 0 if there is no
+  // such node. This is the number the native API (`paths()`) uses.
+  uint32_t segment_of(nid_t node_id) const;
 
 protected:
   bool follow_edges_impl(
@@ -141,6 +155,7 @@ private:
   class BlockCache;
   BlockCache &thread_cache() const;
 
+  void number_nodes();
   void load_sequences(const CompressedData &data);
   void build_adjacency(const CompressedData &data, int num_threads);
   void name_paths(const CompressedData &data,
@@ -153,13 +168,23 @@ private:
   uint64_t instance_id_ = 0; // tells cached blocks of different graphs apart
   size_t cached_blocks_ = 0;
 
-  // Node n occupies sequences_[sequence_offsets_[n - 1], sequence_offsets_[n]).
+  // Node ids when they are not simply the segment numbers (see number_nodes):
+  // node_ids_[n - 1] is the id of segment n, and nodes_by_id_ is the same
+  // pairing sorted by id. Both are empty when segment n has id n.
+  std::vector<nid_t> node_ids_;
+  std::vector<std::pair<nid_t, uint32_t>> nodes_by_id_;
+  nid_t min_node_id_ = 0;
+  nid_t max_node_id_ = 0;
+
+  // Segment n occupies
+  // sequences_[sequence_offsets_[n - 1], sequence_offsets_[n]).
   std::string sequences_;
   std::vector<uint64_t> sequence_offsets_;
 
-  // Successors of every oriented node, as packed handles: the list of handle h
-  // is edge_targets_[edge_offsets_[h - 2], edge_offsets_[h - 1]) (the smallest
-  // packed handle is 2: node 1 forward).
+  // A handle packs a segment number and an orientation, whatever the node ids
+  // are. Successors of every oriented node, as packed handles: the list of
+  // handle h is edge_targets_[edge_offsets_[h - 2], edge_offsets_[h - 1]) (the
+  // smallest packed handle is 2: segment 1 forward).
   std::vector<uint32_t> edge_offsets_;
   std::vector<uint32_t> edge_targets_;
   size_t edge_count_ = 0;

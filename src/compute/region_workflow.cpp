@@ -312,7 +312,7 @@ void write_links(const CompressedData &data,
 }
 
 void write_subpaths(const IndexedPaths &ctx, const RegionSubgraph &subgraph,
-                    const SegmentNames &names, std::ostream &out) {
+                    std::ostream &out) {
   namespace wu = gfa_write_utils;
   for (const Subpath &subpath : subgraph.subpaths) {
     const Haplotype &hap = ctx.catalog[subpath.haplotype];
@@ -331,7 +331,7 @@ void write_subpaths(const IndexedPaths &ctx, const RegionSubgraph &subgraph,
                : static_cast<int64_t>(hap.contig_offset + subpath.bp_end);
       line = wu::format_walk_line(hap.sample, hap.hap_index, hap.seq_id, start,
                                   end, subpath.nodes.data(),
-                                  subpath.nodes.size(), names);
+                                  subpath.nodes.size(), ctx.names);
     } else {
       // A partial P-line is named NAME:START-END, the PanSN subrange form.
       std::string name = hap.name;
@@ -339,7 +339,7 @@ void write_subpaths(const IndexedPaths &ctx, const RegionSubgraph &subgraph,
         name += ":" + std::to_string(subpath.bp_begin) + "-" +
                 std::to_string(subpath.bp_end);
       line = wu::format_path_line(name, subpath.nodes.data(),
-                                  subpath.nodes.size(), "*", names);
+                                  subpath.nodes.size(), "*", ctx.names);
     }
     out.write(line.data(), static_cast<std::streamsize>(line.size()));
   }
@@ -360,10 +360,10 @@ void extract_regions_to_gfa(const CompressedData &data,
 
   if (!data.header_line.empty())
     out << data.header_line << '\n';
-  const SegmentNames names = SegmentNames::decode(data);
-  write_segments(data, ctx.segment_lengths, subgraph.node_selected, names, out);
-  write_links(data, subgraph.node_selected, names, out);
-  write_subpaths(ctx, subgraph, names, out);
+  write_segments(data, ctx.segment_lengths, subgraph.node_selected, ctx.names,
+                 out);
+  write_links(data, subgraph.node_selected, ctx.names, out);
+  write_subpaths(ctx, subgraph, out);
 }
 
 } // namespace gfaz

@@ -15,8 +15,8 @@
 namespace gfaz {
 
 struct LocateOptions {
-  // Node ids to look up (the container's 1-based ids).
-  std::vector<uint32_t> nodes;
+  // Segments to look up, by their names in the GFA.
+  std::vector<std::string> nodes;
   // A saved path index (`gfaz index`) to use; empty builds one for the query.
   std::string index_path;
   int num_threads = kDefaultNumThreads;

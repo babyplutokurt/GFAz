@@ -29,6 +29,10 @@ struct ExpectedPath {
 };
 
 struct ExpectedGraph {
+  // Node ids as vg's GFA import assigns them: a numeric name is the id until
+  // the first name that is not a number; after that, the largest id plus one.
+  std::map<std::string, nid_t> ids;
+  std::map<nid_t, std::string> names;
   std::map<nid_t, std::string> sequences;
   std::set<std::pair<std::pair<nid_t, bool>, std::pair<nid_t, bool>>> edges;
   std::vector<ExpectedPath> paths; // P-lines first, then W-lines
@@ -70,28 +74,50 @@ std::string reverse_complement(const std::string &s) {
   return out;
 }
 
+bool is_number(const std::string &name) {
+  return !name.empty() && name.size() <= 9 &&
+         name.find_first_not_of("0123456789") == std::string::npos &&
+         std::stoll(name) > 0;
+}
+
 ExpectedGraph read_gfa(const std::string &path) {
   ExpectedGraph graph;
   std::vector<ExpectedPath> walks;
-  std::ifstream in(path);
   std::string line;
+  {
+    bool numbers = true;
+    nid_t largest = 0;
+    std::ifstream segments(path);
+    while (std::getline(segments, line)) {
+      if (line.rfind("S\t", 0) != 0)
+        continue;
+      const std::string name = split(line, '\t')[1];
+      numbers = numbers && is_number(name);
+      const nid_t id = numbers ? std::stoll(name) : largest + 1;
+      largest = std::max(largest, id);
+      graph.ids[name] = id;
+      graph.names[id] = name;
+    }
+  }
+  const auto id_of = [&](const std::string &name) { return graph.ids.at(name); };
+  std::ifstream in(path);
   while (std::getline(in, line)) {
     if (line.empty())
       continue;
     const std::vector<std::string> f = split(line, '\t');
     if (f[0] == "S") {
-      graph.sequences[std::stoll(f[1])] = f[2];
+      graph.sequences[id_of(f[1])] = f[2];
     } else if (f[0] == "L") {
-      const std::pair<nid_t, bool> a{std::stoll(f[1]), f[2] == "-"};
-      const std::pair<nid_t, bool> b{std::stoll(f[3]), f[4] == "-"};
+      const std::pair<nid_t, bool> a{id_of(f[1]), f[2] == "-"};
+      const std::pair<nid_t, bool> b{id_of(f[3]), f[4] == "-"};
       // Store an edge in both directions so lookups need no canonical form.
       graph.edges.insert({a, b});
       graph.edges.insert({{b.first, !b.second}, {a.first, !a.second}});
     } else if (f[0] == "P") {
       ExpectedPath p;
       for (const std::string &step : split(f[2], ','))
-        p.steps.push_back({std::stoll(step.substr(0, step.size() - 1)),
-                           step.back() == '-'});
+        p.steps.push_back(
+            {id_of(step.substr(0, step.size() - 1)), step.back() == '-'});
       graph.paths.push_back(std::move(p));
     } else if (f[0] == "W") {
       ExpectedPath p;
@@ -100,7 +126,7 @@ ExpectedGraph read_gfa(const std::string &path) {
         size_t j = i + 1;
         while (j < walk.size() && walk[j] != '<' && walk[j] != '>')
           ++j;
-        p.steps.push_back({std::stoll(walk.substr(i + 1, j - i - 1)),
+        p.steps.push_back({id_of(walk.substr(i + 1, j - i - 1)),
                            walk[i] == '<'});
         i = j;
       }
@@ -113,14 +139,18 @@ ExpectedGraph read_gfa(const std::string &path) {
 
 void check_nodes(const gfaz::GfazHandleGraph &graph, const ExpectedGraph &want) {
   expect(graph.get_node_count() == want.sequences.size(), "node count");
-  expect(graph.min_node_id() == 1 &&
-             graph.max_node_id() == static_cast<nid_t>(want.sequences.size()),
+  expect(want.sequences.empty() ||
+             (graph.min_node_id() == want.sequences.begin()->first &&
+              graph.max_node_id() == want.sequences.rbegin()->first),
          "node id range");
   size_t total = 0, seen = 0;
   graph.for_each_handle([&](const handle_t &handle) {
     const nid_t id = graph.get_id(handle);
     const std::string &sequence = want.sequences.at(id);
     expect(graph.has_node(id) && !graph.get_is_reverse(handle), "handle");
+    expect(graph.get_handle(id) == handle, "get_handle of get_id");
+    expect(graph.get_back_graph_node_name(id) == want.names.at(id),
+           "segment name of a node");
     expect(graph.get_sequence(handle) == sequence, "forward sequence");
     expect(graph.get_sequence(graph.flip(handle)) == reverse_complement(sequence),
            "reverse sequence");
@@ -136,8 +166,11 @@ void check_nodes(const gfaz::GfazHandleGraph &graph, const ExpectedGraph &want) 
   });
   expect(seen == want.sequences.size(), "for_each_handle visits every node");
   expect(graph.get_total_length() == total, "total length");
-  expect(!graph.has_node(0) && !graph.has_node(want.sequences.size() + 1),
+  expect(!graph.has_node(0) && !graph.has_node(graph.max_node_id() + 1),
          "has_node outside range");
+  for (nid_t id = graph.min_node_id(); id <= graph.max_node_id(); ++id)
+    expect(graph.has_node(id) == (want.sequences.count(id) != 0),
+           "has_node agrees with the segments");
 }
 
 void check_edges(const gfaz::GfazHandleGraph &graph, const ExpectedGraph &want) {
@@ -243,8 +276,11 @@ void check_steps_on_nodes(const gfaz::GfazHandleGraph &graph,
           {p, i, want.paths[p].steps[i].second});
 
   const size_t stride = std::max<size_t>(1, want.sequences.size() / 400);
-  for (nid_t id = 1; id <= static_cast<nid_t>(want.sequences.size());
-       id += stride) {
+  size_t rank = 0;
+  for (const auto &entry : want.sequences) {
+    const nid_t id = entry.first;
+    if (rank++ % stride != 0)
+      continue;
     std::set<std::tuple<size_t, size_t, bool>> got;
     const handle_t handle = graph.get_handle(id, true);
     graph.for_each_step_position_on_handle(

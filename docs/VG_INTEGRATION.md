@@ -71,9 +71,11 @@ What the numbers say:
 
 - Read-only. `vg mod`, `vg clip`, `vg convert` and other commands that build
   or change a graph use the converted graph, as before.
-- Node ids are GFAz's `1..N` renumbering (see the adapter doc). Converting
-  the same `.gfaz` gives the same ids, so the two paths agree with each other,
-  but not with files that use the original segment names.
+- Node ids are assigned by the rule of vg's own GFA import (numeric segment
+  names are the ids), and segment names are reported through
+  `NamedNodeBackTranslation`; see the adapter doc. This rule has been checked
+  against vg's code, not yet against vg's output on a graph with non-numeric
+  names.
 - Read mapping with Giraffe needs a GBZ and its indexes. The route is
   `vg gbwt -x graph.gfaz -E --gbz-format -g graph.gbz`, which now reads the
   container in place.

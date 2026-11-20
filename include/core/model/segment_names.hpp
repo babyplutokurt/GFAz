@@ -53,6 +53,12 @@ public:
   bool dense() const { return encoding_ == SegmentNameEncoding::kDense; }
   // Number of stored names; 0 for dense names.
   size_t size() const;
+  // True when every stored name is a plain decimal number; numbers()[id - 1]
+  // is then the number segment `id` is called by.
+  bool plain_numbers() const {
+    return encoding_ == SegmentNameEncoding::kNumbered && prefix_.empty();
+  }
+  const std::vector<uint32_t> &numbers() const { return numbers_; }
 
   // The longest text write() can produce.
   size_t max_length() const { return max_length_; }
