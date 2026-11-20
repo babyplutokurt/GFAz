@@ -102,6 +102,42 @@ struct RecordingVisitor final : gfaz::GfaRecordVisitor {
   }
 };
 
+// Overrides the named callback only: checks names arrive next to the numbers
+// that links and paths use.
+struct NamingVisitor final : gfaz::GfaRecordVisitor {
+  std::vector<std::string> events;
+
+  void on_named_segment(uint32_t id, const std::string &name,
+                        const std::string &sequence,
+                        const gfaz::GfaTagList &) override {
+    events.push_back("S|" + std::to_string(id) + "|" + name + "|" + sequence);
+  }
+
+  void on_link(uint32_t from_id, bool, uint32_t to_id, bool,
+               const std::string &, const gfaz::GfaTagList &) override {
+    events.push_back("L|" + std::to_string(from_id) + "|" +
+                     std::to_string(to_id));
+  }
+
+  void on_path(const std::string &name, const std::vector<gfaz::NodeId> &visits,
+               const std::string &, const gfaz::GfaTagList &) override {
+    events.push_back("P|" + name + "|" + visits_text(visits));
+  }
+};
+
+const char *const named_gfa = "H\tVN:Z:1.0\n"
+                              "S\tutg7\tA\n"
+                              "S\t12\tCC\n"
+                              "S\tchrM\tGGG\n"
+                              "L\tutg7\t+\t12\t-\t0M\n"
+                              "L\t12\t-\tchrM\t+\t0M\n"
+                              "P\tp\tutg7+,12-,chrM+\t*\n";
+
+const std::vector<std::string> expected_named_events = {
+    "S|1|utg7|A", "S|2|12|CC", "S|3|chrM|GGG",
+    "L|1|2",      "L|2|3",     "P|p|1,-2,3",
+};
+
 class UnseekableMemoryBuffer final : public std::streambuf {
 public:
   explicit UnseekableMemoryBuffer(std::string &bytes) {
@@ -192,6 +228,16 @@ int main(int argc, char **argv) {
     gfaz::decode_gfa_records(unseekable, stream_visitor, 2);
     require_events(stream_visitor.events, expected_events,
                    "unseekable stream");
+
+    const std::string named_path = temp_gfaz + ".named.gfa";
+    std::ofstream(named_path) << named_gfa;
+    const gfaz::CompressedData named =
+        compress_gfa(named_path, 4, 2, 1, 2, false);
+    std::remove(named_path.c_str());
+    NamingVisitor naming_visitor;
+    gfaz::decode_gfa_records(named, naming_visitor, 2);
+    require_events(naming_visitor.events, expected_named_events,
+                   "named segments");
 
     std::remove(temp_gfaz.c_str());
     std::cout << "PASS front-door GFA decoder\n";
