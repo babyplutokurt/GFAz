@@ -74,16 +74,21 @@ Streaming, reusing the shared traversal layer (see
 
 1. `load_traversals` + `load_rulebook`; build per-slice group ids
    (`path_group_key` / `walk_group_key`).
-2. Pass 1 (parallel over slices): `stream_decoded_nodes` → per-slice node visit
-   counts.
-3. Pass 2 (parallel over groups): merge member slices → per-group `cov_g(n)`.
-4. Build a node-major CSR of `(group, cov)` (groups ascending per node).
-5. Pairwise (parallel over nodes): `I[a][b] += min(cov_a, cov_b)`; the diagonal
-   yields `L_g`. Emit.
+2. First decode (parallel over groups): each thread counts one group's visits
+   in an array over all nodes; the result is the number of groups on each node,
+   which sizes a node-major CSR.
+3. Second decode: the same counts are written into the CSR as
+   `(group, visits)`, one entry per group and node the group visits.
+4. Pairwise (parallel over nodes): sort the node's groups, then
+   `I[a][b] += len(n) * min(visits_a, visits_b)`; the diagonal yields `L_g`.
+   Emit.
 
-Memory is O(Σ_g distinct nodes per group) for the coverage/CSR plus a tiny N×N
-group matrix — far below a materialized graph. Determinism comes from per-thread
-merges, integer-exact atomic accumulation, and sorted emission.
+The CSR is the only large structure: 8 bytes per (group, node) entry, plus one
+counting array of 4 bytes per node for every thread. The traversals are decoded
+twice so that no per-path or per-group lists are held next to it. On HPRC v1.1
+by sample (46 groups, 16 threads) this takes 97 s and 40 GB; holding the lists
+took 194 s and 144 GB. Results are integer-exact and do not depend on the
+thread count.
 
 ## Benchmark
 

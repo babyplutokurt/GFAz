@@ -121,106 +121,123 @@ void similarity_to_tsv(const CompressedData &data,
       make_rule_cache(min_rule_id, rules_first, rules_second,
                       "GFAZ_SIMILARITY_RULE_CACHE_BYTES", /*default_budget=*/0);
 
-  // --- Pass 1: per-slice node visit counts (parallel over slices). ---
-  const size_t num_slices = slices.size();
-  std::vector<std::vector<std::pair<uint32_t, uint32_t>>> slice_visits(
-      num_slices); // (node, visit count), node-sorted
-  {
+  // Per node, the groups that visit it and how often: a node-major CSR. It is
+  // by far the largest structure here (one entry per group and node the group
+  // visits), so it is filled straight from the traversals, which are decoded
+  // twice: once to size each node's list, once to fill it. Decoding is cheap
+  // next to holding per-group lists as well.
+  //
+  // A thread counts one group's visits in an array over all nodes and keeps
+  // the nodes it touched, so that clearing costs what the group used.
+  struct VisitCounter {
+    explicit VisitCounter(uint32_t num_nodes) : visits(num_nodes + 1, 0) {}
+    std::vector<uint32_t> visits;
+    std::vector<uint32_t> touched;
+    std::vector<NodeId> scratch;
+  };
+  // Calls use(gid, counter) once per group with that group's counts and the
+  // nodes it visits in increasing order, in parallel over groups.
+  auto for_each_group_counted = [&](auto &&use) {
     ScopedOMPThreads omp_scope(options.num_threads);
     const int T = std::max(1, omp_scope.effective_threads());
 #pragma omp parallel num_threads(T)
     {
-      std::vector<NodeId> scratch;
-      std::unordered_map<uint32_t, uint32_t> counts;
-#pragma omp for schedule(dynamic, 16)
-      for (long long sll = 0; sll < static_cast<long long>(num_slices); ++sll) {
-        const uint32_t s = static_cast<uint32_t>(sll);
-        counts.clear();
+      VisitCounter counter(num_nodes);
+#pragma omp for schedule(dynamic, 1)
+      for (long long gll = 0; gll < static_cast<long long>(num_groups); ++gll) {
+        const uint32_t gid = static_cast<uint32_t>(gll);
         auto visit = [&](NodeId signed_node) {
           const uint32_t node = abs_node_id(signed_node);
           if (node == 0 || node > num_nodes)
             return;
-          ++counts[node];
+          if (counter.visits[node]++ == 0)
+            counter.touched.push_back(node);
         };
-        stream_decoded_nodes(slices[s], delta_round, min_rule_id, max_rule_id,
-                             rules_first, rules_second, rule_cache, scratch,
-                             visit);
-        std::vector<std::pair<uint32_t, uint32_t>> v(counts.begin(),
-                                                     counts.end());
-        std::sort(v.begin(), v.end());
-        slice_visits[s] = std::move(v);
+        for (uint32_t s : meta.groups[gid])
+          stream_decoded_nodes(slices[s], delta_round, min_rule_id, max_rule_id,
+                               rules_first, rules_second, rule_cache,
+                               counter.scratch, visit);
+        // Hand the nodes over in increasing order, so that the caller walks
+        // its per-node arrays forwards. A group that visits a good part of
+        // the graph is cheaper to read off the array than to sort.
+        std::vector<uint32_t> &touched = counter.touched;
+        if (touched.size() > num_nodes / 32) {
+          touched.clear();
+          for (uint32_t node = 1; node <= num_nodes; ++node)
+            if (counter.visits[node] != 0)
+              touched.push_back(node);
+        } else {
+          std::sort(touched.begin(), touched.end());
+        }
+        use(gid, counter);
+        for (uint32_t node : touched)
+          counter.visits[node] = 0;
+        touched.clear();
       }
     }
-  }
+  };
 
-  // --- Pass 2: per-group coverage (parallel over groups). ---
-  // cov_g(node) = node_length * (total visits of the group on that node).
-  std::vector<std::vector<std::pair<uint32_t, uint64_t>>> group_cov(num_groups);
+  // First decode: how many groups visit each node.
+  std::vector<uint32_t> groups_on_node(static_cast<size_t>(num_nodes) + 1, 0);
+  for_each_group_counted([&](uint32_t, const VisitCounter &counter) {
+    for (uint32_t node : counter.touched) {
+#pragma omp atomic
+      ++groups_on_node[node];
+    }
+  });
+  std::vector<uint64_t> node_off(static_cast<size_t>(num_nodes) + 2, 0);
+  for (uint32_t node = 1; node <= num_nodes; ++node)
+    node_off[node + 1] = node_off[node] + groups_on_node[node];
+  const uint64_t total_entries = node_off[static_cast<size_t>(num_nodes) + 1];
+
+  // Second decode: fill. Each group takes the next free slot of every node it
+  // visits, counting groups_on_node back down, so a node's groups come in no
+  // particular order.
+  std::vector<uint32_t> csr_gid(total_entries);
+  std::vector<uint32_t> csr_visits(total_entries);
+  for_each_group_counted([&](uint32_t gid, const VisitCounter &counter) {
+    for (uint32_t node : counter.touched) {
+      uint32_t slot;
+#pragma omp atomic capture
+      slot = --groups_on_node[node];
+      const uint64_t k = node_off[node] + slot;
+      csr_gid[k] = gid;
+      csr_visits[k] = counter.visits[node];
+    }
+  });
+  std::vector<uint32_t>().swap(groups_on_node);
+
+  // --- Pairwise intersection, per node: with cov_g = length * visits_g,
+  // I[a][b] += min(cov_a, cov_b) = length * min(visits_a, visits_b). A node's
+  // groups are put in increasing order first, so that for one group the
+  // updates run along a row of the matrix. ---
+  std::vector<uint64_t> inter(tri_size, 0);
   {
     ScopedOMPThreads omp_scope(options.num_threads);
     const int T = std::max(1, omp_scope.effective_threads());
 #pragma omp parallel num_threads(T)
     {
-      std::unordered_map<uint32_t, uint64_t> visits; // node -> total visits
-#pragma omp for schedule(dynamic, 1)
-      for (long long gll = 0; gll < static_cast<long long>(num_groups); ++gll) {
-        const uint32_t gid = static_cast<uint32_t>(gll);
-        visits.clear();
-        for (uint32_t s : meta.groups[gid])
-          for (const auto &nc : slice_visits[s])
-            visits[nc.first] += nc.second;
-        std::vector<std::pair<uint32_t, uint64_t>> cov;
-        cov.reserve(visits.size());
-        for (const auto &nv : visits)
-          cov.emplace_back(nv.first, nv.second *
-                                         static_cast<uint64_t>(
-                                             segment_lengths[nv.first - 1]));
-        std::sort(cov.begin(), cov.end());
-        group_cov[gid] = std::move(cov);
-      }
-    }
-  }
-  slice_visits = std::vector<std::vector<std::pair<uint32_t, uint32_t>>>();
-
-  // --- Build node-major CSR of (group, cov), groups ascending per node. ---
-  std::vector<uint64_t> node_off(static_cast<size_t>(num_nodes) + 2, 0);
-  for (const auto &cov : group_cov)
-    for (const auto &nc : cov)
-      ++node_off[nc.first + 1];
-  for (size_t i = 1; i < node_off.size(); ++i)
-    node_off[i] += node_off[i - 1];
-  const uint64_t total_entries = node_off[node_off.size() - 1];
-  std::vector<uint32_t> csr_gid(total_entries);
-  std::vector<uint64_t> csr_cov(total_entries);
-  {
-    std::vector<uint64_t> cursor(node_off.begin(), node_off.end() - 1);
-    for (uint32_t gid = 0; gid < static_cast<uint32_t>(num_groups); ++gid)
-      for (const auto &nc : group_cov[gid]) {
-        const uint64_t k = cursor[nc.first]++;
-        csr_gid[k] = gid;
-        csr_cov[k] = nc.second;
-      }
-  }
-  group_cov = std::vector<std::vector<std::pair<uint32_t, uint64_t>>>();
-
-  // --- Pairwise intersection: I[a][b] += min(cov_a, cov_b), per node. ---
-  std::vector<uint64_t> inter(tri_size, 0);
-  {
-    ScopedOMPThreads omp_scope(options.num_threads);
-    const int T = std::max(1, omp_scope.effective_threads());
-#pragma omp parallel for schedule(dynamic, 256) num_threads(T)
-    for (long long node = 1; node <= static_cast<long long>(num_nodes);
-         ++node) {
-      const uint64_t lo = node_off[node];
-      const uint64_t hi = node_off[node + 1];
-      for (uint64_t i = lo; i < hi; ++i) {
-        const uint32_t ga = csr_gid[i];
-        const uint64_t ca = csr_cov[i];
-        for (uint64_t j = i; j < hi; ++j) { // csr ascending => ga <= gb
-          const uint64_t add = std::min(ca, csr_cov[j]);
-          uint64_t &slot = inter[tri(ga, csr_gid[j])];
+      std::vector<std::pair<uint32_t, uint32_t>> on_node; // (group, visits)
+#pragma omp for schedule(dynamic, 256)
+      for (long long node = 1; node <= static_cast<long long>(num_nodes);
+           ++node) {
+        const uint64_t lo = node_off[node];
+        const uint64_t hi = node_off[node + 1];
+        on_node.clear();
+        for (uint64_t i = lo; i < hi; ++i)
+          on_node.emplace_back(csr_gid[i], csr_visits[i]);
+        std::sort(on_node.begin(), on_node.end());
+        const uint64_t length = segment_lengths[node - 1];
+        for (size_t i = 0; i < on_node.size(); ++i) {
+          const uint32_t va = on_node[i].second;
+          uint64_t *row = inter.data() + tri(on_node[i].first, on_node[i].first) -
+                          on_node[i].first;
+          for (size_t j = i; j < on_node.size(); ++j) {
+            const uint64_t add = length * std::min(va, on_node[j].second);
+            uint64_t &slot = row[on_node[j].first];
 #pragma omp atomic
-          slot += add;
+            slot += add;
+          }
         }
       }
     }
