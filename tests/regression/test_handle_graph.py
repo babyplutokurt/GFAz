@@ -68,6 +68,14 @@ def main():
                          str(cached_blocks)]),
             f"adapter check {gfa.name} block_steps={block_steps} "
             f"cached_blocks={cached_blocks}")
+      # A saved index next to the container is used when its blocks are no
+      # longer than the ones asked for, and passed over otherwise.
+      require_success(run_command([cli, "index", "-i", str(gfaz), "-b", "4"]),
+                      f"index {gfa.name}")
+      for block_steps in (2, 7):
+        require_success(
+            run_command([str(CHECKER), str(gfaz), str(full), str(block_steps)]),
+            f"adapter check {gfa.name} saved index, block_steps={block_steps}")
   print("✅ libhandlegraph adapter checks passed")
 
 

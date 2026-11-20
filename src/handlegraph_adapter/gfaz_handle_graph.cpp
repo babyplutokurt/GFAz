@@ -245,8 +245,13 @@ GfazHandleGraph::~GfazHandleGraph() = default;
 
 std::unique_ptr<GfazHandleGraph>
 GfazHandleGraph::load(const std::string &path, GfazHandleGraphOptions options) {
-  if (options.index_path.empty() && std::ifstream(path + ".pidx").good())
-    options.index_path = path + ".pidx";
+  // A saved index with coarser blocks than asked for would make every node
+  // lookup slower for as long as the graph is used; building one is quicker.
+  if (options.index_path.empty()) {
+    const uint32_t saved = PathIndex::saved_block_steps(path + ".pidx");
+    if (saved != 0 && saved <= options.block_steps)
+      options.index_path = path + ".pidx";
+  }
   auto data =
       std::make_unique<CompressedData>(deserialize_compressed_data(path));
   const CompressedData &container = *data;

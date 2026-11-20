@@ -71,8 +71,9 @@ public:
 
   GfazHandleGraph(const CompressedData &data,
                   const GfazHandleGraphOptions &options = {});
-  // Read a .gfaz file. The saved index <path>.pidx is used when present and
-  // options.index_path is empty. Sequences, edges and paths are each read
+  // Read a .gfaz file. When options.index_path is empty the saved index
+  // <path>.pidx is used if it exists and its blocks are no longer than
+  // options.block_steps (`gfaz index -b 1024` for the default). Sequences, edges and paths are each read
   // when first asked for (see Part), so a caller that only wants names and
   // counts does not wait for them; an error in one is thrown at that point.
   static std::unique_ptr<GfazHandleGraph>

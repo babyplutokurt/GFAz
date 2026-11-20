@@ -42,11 +42,28 @@ that order, before its own `libhandlegraph`.
 Paths are never expanded as a whole. A step is found by decoding the index
 block that holds it; each thread keeps the last few decoded blocks.
 
-`GfazHandleGraph::load` frees each compressed column of the container once it
-has been decoded, and loads sequences and edges at the same time. HPRC v1.1
-(92.9 M nodes, 4.6 B steps) loads in about 9 s with a peak of 8.4 GB at 16
-threads; with a saved 1024-step index, 5.3 s and 8.0 GB. A graph built from a
-`CompressedData` the caller keeps cannot free those columns.
+`GfazHandleGraph::load` reads names, lengths and node ids at once and the
+three large parts when they are first used:
+
+| Part | First used by |
+|---|---|
+| Sequences | `get_sequence`, `get_subsequence`, `get_base` |
+| Edges | `follow_edges`, `get_degree`, `get_edge_count` |
+| Paths (decoded traversals and the index) | anything that takes or returns a step, `get_step_count`, `get_path_length` |
+
+Asking for the edges reads only the edges. Asking for sequences or paths
+starts all three side by side on their own threads, because a caller that
+walks paths or reads bases goes on to use the rest. So listing path names
+reads none of them (`vg paths -L` on HPRC chr6: 0.06 s), counting nodes and
+edges reads the edges (`vg stats -z -l`: 0.21 s, 0.32 GB), and a full workload
+loads as fast as before: HPRC v1.1 (92.9 M nodes, 4.6 B steps) in about 9 s
+with a peak of 8.4 GB at 16 threads, or 5.3 s and 8.0 GB with a saved
+1024-step index. An error in a part (a truncated column, a stale index) is
+thrown where that part is first used. Each compressed column is freed once
+decoded.
+
+A graph constructed from a `CompressedData` the caller keeps reads everything
+in the constructor and frees nothing.
 
 ## Cost of each operation
 
@@ -61,10 +78,12 @@ The last row is the one to watch. The index lists, for each zone of 256 node
 ids, the blocks that visit a node in it: about 100 blocks for a typical zone of
 HPRC chr6, but tens of thousands in repeat-rich zones. A smaller `block_steps`
 (default 1024 here, 4096 for the CLI) makes each decode cheaper and the index
-larger. A saved index is used as it is, so for this adapter write it with
-`gfaz index -b 1024`: `vg deconstruct` on chr6 takes 85 s with a 1024-step
-index and 103 s with a 4096-step one. GBWT-based graphs answer the query
-natively.
+larger. `load` therefore uses the saved index `<path>.pidx` only when its
+blocks are no longer than `block_steps`, and builds one otherwise; write it
+with `gfaz index -b 1024` for this adapter. (`vg deconstruct` on chr6 takes
+85 s with 1024-step blocks and 103 s with 4096-step ones.) An index named in
+`GfazHandleGraphOptions::index_path` is always used. GBWT-based graphs answer
+the query natively.
 
 The graph cannot be modified. Algorithms that need a mutable graph must convert
 first.
@@ -104,7 +123,7 @@ names.
 A handle packs the segment's position in the file, not its id, so every query
 other than `get_handle(id)` costs the same either way; when the ids are not
 `1..N`, `get_handle(id)` is a binary search. `segment_of(id)` gives the
-position, which is the node number the native API (`paths()`) uses.
+position, which is the node number GFAz's own API uses.
 
 ## Validation
 
