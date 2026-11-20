@@ -12,6 +12,8 @@
 #include <exception>
 #include <thread>
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <fstream>
 #include <stdexcept>
 #include <utility>
@@ -129,9 +131,81 @@ private:
   size_t next_ = 0;
 };
 
-GfazHandleGraph::GfazHandleGraph(const CompressedData &data,
-                                 const GfazHandleGraphOptions &options)
-    : GfazHandleGraph(data, options, nullptr) {}
+// The decoded traversals with their index, and access to them by position.
+struct GfazHandleGraph::PathStore {
+  PathStore(const CompressedData &data, const GfazHandleGraphOptions &options,
+            const std::vector<uint32_t> &segment_lengths, uint64_t fingerprint)
+      : traversals(data),
+        index(options.index_path.empty()
+                  ? PathIndex::build(traversals, segment_lengths,
+                                     PathIndexOptions{options.block_steps,
+                                                      options.num_threads})
+                  : PathIndex::load(options.index_path, fingerprint)),
+        access(traversals, index, segment_lengths) {}
+
+  TraversalSet traversals;
+  PathIndex index;
+  PathAccess access;
+};
+
+// Runs the loading of each part once, on a thread of its own: a part may be
+// first asked for from inside a parallel region, where the loading could not
+// use several threads itself.
+class GfazHandleGraph::Loader {
+public:
+  Loader(GfazHandleGraph &graph, const CompressedData &data,
+         std::unique_ptr<CompressedData> owned)
+      : graph_(graph), data_(data), owned_(std::move(owned)) {}
+
+  ~Loader() {
+    for (std::thread &thread : threads_)
+      if (thread.joinable())
+        thread.join();
+  }
+
+  // Start loading a part unless that has been done.
+  void start(Part part) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (started_[part])
+      return;
+    started_[part] = true;
+    threads_[part] = std::thread([this, part]() {
+      std::exception_ptr error;
+      try {
+        graph_.load_part(part, data_, owned_.get());
+      } catch (...) {
+        error = std::current_exception();
+      }
+      {
+        std::lock_guard<std::mutex> done_lock(mutex_);
+        errors_[part] = error;
+        finished_[part] = true;
+      }
+      if (!error)
+        graph_.ready_[part].store(true, std::memory_order_release);
+      finished_one_.notify_all();
+    });
+  }
+
+  // Block until a started part is loaded; throws what its loading threw.
+  void wait(Part part) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    finished_one_.wait(lock, [&]() { return finished_[part]; });
+    if (errors_[part])
+      std::rethrow_exception(errors_[part]);
+  }
+
+private:
+  GfazHandleGraph &graph_;
+  const CompressedData &data_;
+  std::unique_ptr<CompressedData> owned_;
+  std::mutex mutex_;
+  std::condition_variable finished_one_;
+  bool started_[kNumParts] = {};
+  bool finished_[kNumParts] = {};
+  std::exception_ptr errors_[kNumParts];
+  std::thread threads_[kNumParts];
+};
 
 namespace {
 
@@ -142,71 +216,105 @@ void release(ZstdCompressedBlock &block) {
 } // namespace
 
 GfazHandleGraph::GfazHandleGraph(const CompressedData &data,
+                                 const GfazHandleGraphOptions &options)
+    : GfazHandleGraph(data, options, nullptr) {}
+
+GfazHandleGraph::GfazHandleGraph(const CompressedData &data,
                                  const GfazHandleGraphOptions &options,
-                                 CompressedData *owned)
-    : paths_(data,
-             IndexedPathsOptions{options.index_path, options.block_steps,
-                                 options.num_threads}),
-      instance_id_(next_instance_id.fetch_add(1)),
-      cached_blocks_(options.cached_blocks) {
-  // A step on a node without an S-line cannot be given a handle.
-  for (size_t hap = 0; hap < paths_.index.num_haplotypes(); ++hap)
-    for (size_t b = 0; b < paths_.index.num_blocks(hap); ++b) {
-      const PathBlock &block = paths_.index.block(hap, b);
-      if (block.min_node == 0 || block.max_node > paths_.num_nodes())
-        throw std::runtime_error(
-            "gfaz handle graph: a path visits a node that has no segment");
-    }
-
-  // The traversals are decoded now.
-  if (owned) {
-    release(owned->rules_first_zstd);
-    release(owned->rules_second_zstd);
-    release(owned->paths_zstd);
-    release(owned->walks_zstd);
-  }
-
+                                 std::unique_ptr<CompressedData> owned)
+    : options_(options), instance_id_(next_instance_id.fetch_add(1)),
+      segment_lengths_(tquery::load_segment_lengths(data)),
+      names_(SegmentNames::decode(data)) {
+  for (const uint32_t length : segment_lengths_)
+    total_length_ += length;
   number_nodes();
-
-  // Sequences and edges come from different parts of the container; read them
-  // side by side.
-  std::exception_ptr sequence_error;
-  std::thread sequence_job([&]() {
-    try {
-      ScopedOMPThreads omp_scope(options.num_threads);
-      load_sequences(data);
-    } catch (...) {
-      sequence_error = std::current_exception();
-    }
-  });
-  try {
-    build_adjacency(data, options.num_threads);
-  } catch (...) {
-    sequence_job.join();
-    throw;
-  }
-  sequence_job.join();
-  if (sequence_error)
-    std::rethrow_exception(sequence_error);
-  if (owned) {
-    release(owned->segment_sequences_zstd);
-    release(owned->link_from_ids_zstd);
-    release(owned->link_to_ids_zstd);
-    release(owned->link_from_orients_zstd);
-    release(owned->link_to_orients_zstd);
-  }
   name_paths(data, options.reference_samples);
+
+  const bool load_now = !owned;
+  loader_ = std::make_unique<Loader>(*this, data, std::move(owned));
+  if (load_now) {
+    // The caller's container may not outlive this constructor.
+    for (int part = 0; part < kNumParts; ++part)
+      loader_->start(static_cast<Part>(part));
+    for (int part = 0; part < kNumParts; ++part)
+      loader_->wait(static_cast<Part>(part));
+  }
 }
 
 GfazHandleGraph::~GfazHandleGraph() = default;
 
 std::unique_ptr<GfazHandleGraph>
 GfazHandleGraph::load(const std::string &path, GfazHandleGraphOptions options) {
-  if (options.index_path.empty() && std::ifstream(path + ".pidx").good())
-    options.index_path = path + ".pidx";
-  CompressedData data = deserialize_compressed_data(path);
+  // A saved index with coarser blocks than asked for would make every node
+  // lookup slower for as long as the graph is used; building one is quicker.
+  if (options.index_path.empty()) {
+    const uint32_t saved = PathIndex::saved_block_steps(path + ".pidx");
+    if (saved != 0 && saved <= options.block_steps)
+      options.index_path = path + ".pidx";
+  }
+  auto data =
+      std::make_unique<CompressedData>(deserialize_compressed_data(path));
+  const CompressedData &container = *data;
   return std::unique_ptr<GfazHandleGraph>(
-      new GfazHandleGraph(data, options, &data));
+      new GfazHandleGraph(container, options, std::move(data)));
+}
+
+void GfazHandleGraph::wait_for(Part part) const {
+  if (part != kEdges)
+    for (int other = 0; other < kNumParts; ++other)
+      loader_->start(static_cast<Part>(other));
+  loader_->start(part);
+  loader_->wait(part);
+}
+
+void GfazHandleGraph::load_part(Part part, const CompressedData &data,
+                                CompressedData *owned) {
+  ScopedOMPThreads omp_scope(options_.num_threads);
+  switch (part) {
+  case kSequences:
+    load_sequences(data);
+    if (owned)
+      release(owned->segment_sequences_zstd);
+    break;
+  case kEdges:
+    build_adjacency(data);
+    if (owned) {
+      release(owned->link_from_ids_zstd);
+      release(owned->link_to_ids_zstd);
+      release(owned->link_from_orients_zstd);
+      release(owned->link_to_orients_zstd);
+    }
+    break;
+  case kPaths:
+    load_paths(data, owned);
+    break;
+  default:
+    break;
+  }
+}
+
+void GfazHandleGraph::load_paths(const CompressedData &data,
+                                 CompressedData *owned) {
+  // The fingerprint reads the sizes of columns that are emptied below.
+  const uint64_t fingerprint = PathIndex::fingerprint(data);
+  auto store = std::make_unique<PathStore>(data, options_, segment_lengths_,
+                                           fingerprint);
+  // A step on a node without an S-line cannot be given a handle.
+  const PathIndex &index = store->index;
+  for (size_t hap = 0; hap < index.num_haplotypes(); ++hap)
+    for (size_t b = 0; b < index.num_blocks(hap); ++b) {
+      const PathBlock &block = index.block(hap, b);
+      if (block.min_node == 0 || block.max_node > num_nodes())
+        throw std::runtime_error(
+            "gfaz handle graph: a path visits a node that has no segment");
+    }
+  path_store_ = std::move(store);
+  if (owned) {
+    release(owned->rules_first_zstd);
+    release(owned->rules_second_zstd);
+    release(owned->paths_zstd);
+    release(owned->walks_zstd);
+  }
 }
 
 void GfazHandleGraph::load_sequences(const CompressedData &data) {
@@ -224,7 +332,7 @@ void GfazHandleGraph::load_sequences(const CompressedData &data) {
         }
       });
   sequences_.append(pending.data(), pending.size());
-  const std::vector<uint32_t> &lengths = paths_.segment_lengths;
+  const std::vector<uint32_t> &lengths = segment_lengths_;
   sequence_starts_.reserve(lengths.size() / kSequenceStride + 1);
   uint64_t offset = 0;
   for (size_t i = 0; i < lengths.size(); ++i) {
@@ -232,7 +340,6 @@ void GfazHandleGraph::load_sequences(const CompressedData &data) {
       sequence_starts_.push_back(offset);
     offset += lengths[i];
   }
-  total_length_ = offset;
   if (offset > sequences_.size())
     throw std::runtime_error(
         "gfaz handle graph: segment sequence column is truncated");
@@ -243,13 +350,12 @@ uint64_t GfazHandleGraph::sequence_begin(uint32_t segment) const {
   const size_t first = index - index % kSequenceStride;
   uint64_t offset = sequence_starts_[index / kSequenceStride];
   for (size_t i = first; i < index; ++i)
-    offset += paths_.segment_lengths[i];
+    offset += segment_lengths_[i];
   return offset;
 }
 
-void GfazHandleGraph::build_adjacency(const CompressedData &data,
-                                      int num_threads) {
-  const uint32_t num_nodes = paths_.num_nodes();
+void GfazHandleGraph::build_adjacency(const CompressedData &data) {
+  const uint32_t num_nodes = this->num_nodes();
   const size_t num_handles = 2 * static_cast<size_t>(num_nodes);
 
   // Only the ends of the links are needed, not their overlaps or tags.
@@ -310,15 +416,12 @@ void GfazHandleGraph::build_adjacency(const CompressedData &data,
 
   // Sort each list and drop repeated links. A dropped slot is marked with 0,
   // which is not a handle.
-  {
-    ScopedOMPThreads omp_scope(num_threads);
 #pragma omp parallel for schedule(dynamic, 4096)
-    for (long long h = 0; h < static_cast<long long>(num_handles); ++h) {
-      uint32_t *begin = targets.data() + offsets[h];
-      uint32_t *end = targets.data() + offsets[h + 1];
-      std::sort(begin, end);
-      std::fill(std::unique(begin, end), end, 0);
-    }
+  for (long long h = 0; h < static_cast<long long>(num_handles); ++h) {
+    uint32_t *begin = targets.data() + offsets[h];
+    uint32_t *end = targets.data() + offsets[h + 1];
+    std::sort(begin, end);
+    std::fill(std::unique(begin, end), end, 0);
   }
 
   // Close the gaps. The write position never passes the read position, so
@@ -355,7 +458,7 @@ void GfazHandleGraph::name_paths(
 
   // Names follow what vg's GFA import produces, so a path has the same name
   // whether the graph was converted or is read through this adapter.
-  const HaplotypeCatalog &catalog = paths_.catalog;
+  const HaplotypeCatalog catalog(data);
   path_names_.reserve(catalog.size());
   for (size_t hap = 0; hap < catalog.size(); ++hap) {
     const Haplotype &haplotype = catalog[hap];
@@ -420,10 +523,10 @@ void GfazHandleGraph::name_paths(
 // value is the id, until the first name that is not; from there on every
 // segment gets the largest id so far plus one.
 void GfazHandleGraph::number_nodes() {
-  const uint32_t num_nodes = paths_.num_nodes();
+  const uint32_t num_nodes = this->num_nodes();
   min_node_id_ = num_nodes == 0 ? 0 : 1;
   max_node_id_ = num_nodes;
-  const SegmentNames &names = paths_.names;
+  const SegmentNames &names = names_;
   if (names.dense())
     return;
 
@@ -517,7 +620,7 @@ handlegraph::nid_t GfazHandleGraph::id_of_segment(uint32_t segment) const {
 
 uint32_t GfazHandleGraph::segment_of(nid_t node_id) const {
   if (id_runs_.empty())
-    return node_id >= 1 && static_cast<uint64_t>(node_id) <= paths_.num_nodes()
+    return node_id >= 1 && static_cast<uint64_t>(node_id) <= num_nodes()
                ? static_cast<uint32_t>(node_id)
                : 0;
   // The last run that starts at or before the id, if the id is inside it.
@@ -528,7 +631,7 @@ uint32_t GfazHandleGraph::segment_of(nid_t node_id) const {
     return 0;
   const uint32_t r = *(it - 1);
   const uint32_t end = r + 1 < id_runs_.size() ? id_runs_[r + 1].segment
-                                               : paths_.num_nodes() + 1;
+                                               : num_nodes() + 1;
   const uint64_t offset = static_cast<uint64_t>(node_id - id_runs_[r].id);
   return offset < end - id_runs_[r].segment
              ? id_runs_[r].segment + static_cast<uint32_t>(offset)
@@ -555,7 +658,7 @@ std::vector<handlegraph::oriented_node_range_t> GfazHandleGraph::translate_back(
 
 std::string
 GfazHandleGraph::get_back_graph_node_name(const nid_t &back_node_id) const {
-  return paths_.names.name(segment_of(back_node_id));
+  return names_.name(segment_of(back_node_id));
 }
 
 bool GfazHandleGraph::get_is_reverse(const handle_t &handle) const {
@@ -567,14 +670,14 @@ handlegraph::handle_t GfazHandleGraph::flip(const handle_t &handle) const {
 }
 
 size_t GfazHandleGraph::get_length(const handle_t &handle) const {
-  return paths_.segment_lengths[segment_of_handle(handle) - 1];
+  return segment_lengths_[segment_of_handle(handle) - 1];
 }
 
 std::string GfazHandleGraph::get_sequence(const handle_t &handle) const {
   return get_subsequence(handle, 0, get_length(handle));
 }
 
-size_t GfazHandleGraph::get_node_count() const { return paths_.num_nodes(); }
+size_t GfazHandleGraph::get_node_count() const { return num_nodes(); }
 
 handlegraph::nid_t GfazHandleGraph::min_node_id() const {
   return min_node_id_;
@@ -585,11 +688,15 @@ handlegraph::nid_t GfazHandleGraph::max_node_id() const {
 }
 
 size_t GfazHandleGraph::get_degree(const handle_t &handle, bool go_left) const {
+  require(kEdges);
   const uint32_t from = go_left ? packed(handle) ^ 1 : packed(handle);
   return edge_offsets_[from - 1] - edge_offsets_[from - 2];
 }
 
-size_t GfazHandleGraph::get_edge_count() const { return edge_count_; }
+size_t GfazHandleGraph::get_edge_count() const {
+  require(kEdges);
+  return edge_count_;
+}
 
 size_t GfazHandleGraph::get_total_length() const {
   return total_length_;
@@ -599,9 +706,9 @@ char GfazHandleGraph::get_base(const handle_t &handle, size_t index) const {
   const uint32_t id = segment_of_handle(handle);
   const uint64_t begin = sequence_begin(id);
   if (!get_is_reverse(handle))
-    return sequences_.at(begin + index);
+    return sequences().at(begin + index);
   return complement_base(
-      sequences_.at(begin + paths_.segment_lengths[id - 1] - 1 - index));
+      sequences().at(begin + segment_lengths_[id - 1] - 1 - index));
 }
 
 std::string GfazHandleGraph::get_subsequence(const handle_t &handle,
@@ -611,10 +718,10 @@ std::string GfazHandleGraph::get_subsequence(const handle_t &handle,
   index = std::min(index, length);
   size = std::min(size, length - index);
   if (!get_is_reverse(handle))
-    return sequences_.substr(sequence_begin(id) + index, size);
+    return sequences().substr(sequence_begin(id) + index, size);
   // The reverse strand reads the stored sequence backwards from its end.
   std::string result =
-      sequences_.substr(sequence_begin(id) + length - index - size, size);
+      sequences().substr(sequence_begin(id) + length - index - size, size);
   reverse_complement_inplace(result);
   return result;
 }
@@ -622,6 +729,7 @@ std::string GfazHandleGraph::get_subsequence(const handle_t &handle,
 bool GfazHandleGraph::follow_edges_impl(
     const handle_t &handle, bool go_left,
     const std::function<bool(const handle_t &)> &iteratee) const {
+  require(kEdges);
   // Predecessors of h are the flipped successors of flip(h).
   const uint32_t from = go_left ? packed(handle) ^ 1 : packed(handle);
   for (uint32_t i = edge_offsets_[from - 2]; i < edge_offsets_[from - 1]; ++i) {
@@ -635,7 +743,7 @@ bool GfazHandleGraph::follow_edges_impl(
 bool GfazHandleGraph::for_each_handle_impl(
     const std::function<bool(const handle_t &)> &iteratee,
     bool parallel) const {
-  const long long num_nodes = paths_.num_nodes();
+  const long long num_nodes = this->num_nodes();
   if (!parallel) {
     for (long long id = 1; id <= num_nodes; ++id)
       if (!iteratee(segment_handle(id)))
@@ -662,7 +770,7 @@ GfazHandleGraph::BlockCache &GfazHandleGraph::thread_cache() const {
   thread_local std::unordered_map<uint64_t, std::unique_ptr<BlockCache>> caches;
   std::unique_ptr<BlockCache> &cache = caches[instance_id_];
   if (!cache)
-    cache = std::make_unique<BlockCache>(cached_blocks_);
+    cache = std::make_unique<BlockCache>(options_.cached_blocks);
   return *cache;
 }
 
@@ -672,13 +780,14 @@ GfazHandleGraph::decoded_block(size_t path, size_t block) const {
   const uint64_t key = block_key(path, block);
   if (const DecodedBlock *hit = cache.find(key))
     return *hit;
+  const PathStore &paths = path_store();
 
   DecodedBlock &entry = cache.recycle(key);
-  entry.step_begin = paths_.index.block(path, block).step_begin;
+  entry.step_begin = paths.index.block(path, block).step_begin;
   entry.nodes.clear();
   entry.positions.clear();
-  paths_.access.for_each_step_in_blocks(path, block, block + 1,
-                                        [&](const PathStep &step) {
+  paths.access.for_each_step_in_blocks(path, block, block + 1,
+                                       [&](const PathStep &step) {
     entry.nodes.push_back(step.node);
     entry.positions.push_back(step.bp_begin);
   });
@@ -687,7 +796,7 @@ GfazHandleGraph::decoded_block(size_t path, size_t block) const {
 
 const GfazHandleGraph::DecodedBlock &
 GfazHandleGraph::block_with_step(size_t path, uint32_t step) const {
-  return decoded_block(path, paths_.index.block_of_step(path, step));
+  return decoded_block(path, path_store().index.block_of_step(path, step));
 }
 
 size_t GfazHandleGraph::get_path_count() const { return path_names_.size(); }
@@ -714,7 +823,7 @@ bool GfazHandleGraph::get_is_circular(const path_handle_t &) const {
 }
 
 size_t GfazHandleGraph::get_step_count(const path_handle_t &path_handle) const {
-  return paths_.index.step_count(as_integer(path_handle));
+  return path_store().index.step_count(as_integer(path_handle));
 }
 
 handlegraph::handle_t
@@ -754,7 +863,7 @@ GfazHandleGraph::path_front_end(const path_handle_t &path_handle) const {
 
 bool GfazHandleGraph::has_next_step(const step_handle_t &step_handle) const {
   return index_of(step_handle) + 1 <
-         static_cast<int64_t>(paths_.index.step_count(path_of(step_handle)));
+         static_cast<int64_t>(path_store().index.step_count(path_of(step_handle)));
 }
 
 bool GfazHandleGraph::has_previous_step(const step_handle_t &step_handle) const {
@@ -793,14 +902,14 @@ bool GfazHandleGraph::for_each_step_on_handle_impl(
 // ---------------------------------------------------------------------------
 
 size_t GfazHandleGraph::get_path_length(const path_handle_t &path_handle) const {
-  return paths_.index.bp_length(as_integer(path_handle));
+  return path_store().index.bp_length(as_integer(path_handle));
 }
 
 size_t GfazHandleGraph::get_position_of_step(const step_handle_t &step) const {
   const size_t path = path_of(step);
   const int64_t index = index_of(step);
-  if (index >= static_cast<int64_t>(paths_.index.step_count(path)))
-    return paths_.index.bp_length(path);
+  if (index >= static_cast<int64_t>(path_store().index.step_count(path)))
+    return path_store().index.bp_length(path);
   const DecodedBlock &block =
       block_with_step(path, static_cast<uint32_t>(index));
   return block.positions[index - block.step_begin];
@@ -810,10 +919,10 @@ handlegraph::step_handle_t
 GfazHandleGraph::get_step_at_position(const path_handle_t &path_handle,
                                       const size_t &position) const {
   const size_t path = as_integer(path_handle);
-  if (position >= paths_.index.bp_length(path))
+  if (position >= path_store().index.bp_length(path))
     return path_end(path_handle);
   const DecodedBlock &block =
-      decoded_block(path, paths_.index.block_of_bp(path, position));
+      decoded_block(path, path_store().index.block_of_bp(path, position));
   // The last step that starts at or before the position.
   const auto it = std::upper_bound(block.positions.begin(),
                                    block.positions.end(), position);
@@ -832,7 +941,7 @@ bool GfazHandleGraph::for_each_step_position_on_handle(
   // through the block cache, so asking about a run of neighbouring nodes
   // decodes each block once.
   std::vector<std::pair<uint32_t, uint32_t>> blocks;
-  paths_.index.for_each_block_overlapping(
+  path_store().index.for_each_block_overlapping(
       node, node, [&](size_t path, size_t block) {
         blocks.emplace_back(static_cast<uint32_t>(path),
                             static_cast<uint32_t>(block));

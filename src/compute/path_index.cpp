@@ -254,6 +254,17 @@ void PathIndex::save(const std::string &path, uint64_t fingerprint) const {
     throw std::runtime_error("path index: cannot write " + path);
 }
 
+uint32_t PathIndex::saved_block_steps(const std::string &path) {
+  std::ifstream in(path, std::ios::binary);
+  IndexFileHeader header{};
+  in.read(reinterpret_cast<char *>(&header), sizeof(header));
+  if (!in || std::memcmp(header.magic, kIndexMagic, sizeof(kIndexMagic)) != 0 ||
+      header.block_bytes != sizeof(PathBlock) ||
+      header.zone_shift != kZoneShift)
+    return 0;
+  return header.block_steps;
+}
+
 PathIndex PathIndex::load(const std::string &path, uint64_t fingerprint) {
   std::ifstream in(path, std::ios::binary);
   IndexFileHeader header{};

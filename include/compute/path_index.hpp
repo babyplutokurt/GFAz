@@ -59,6 +59,9 @@ public:
   // not an index, or was built from a container with another fingerprint.
   void save(const std::string &path, uint64_t fingerprint) const;
   static PathIndex load(const std::string &path, uint64_t fingerprint);
+  // Steps per block of a saved index, read from its header; 0 if the file is
+  // missing or is not an index this build reads.
+  static uint32_t saved_block_steps(const std::string &path);
 
   uint32_t block_steps() const { return block_steps_; }
 

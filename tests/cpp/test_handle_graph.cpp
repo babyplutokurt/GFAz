@@ -5,6 +5,7 @@
 // The GFA must be the `gfaz decompress` output of the container, so node ids
 // agree. Every interface method is compared with a brute-force answer.
 
+#include "core/codec/serialization.hpp"
 #include "handlegraph_adapter/gfaz_handle_graph.hpp"
 
 #include <handlegraph/util.hpp>
@@ -349,6 +350,30 @@ int main(int argc, char **argv) {
   check_edges(*graph, want);
   check_paths(*graph, want);
   check_steps_on_nodes(*graph, want);
+
+  // Parts are loaded on first use: the order of use must not matter.
+  {
+    const std::unique_ptr<gfaz::GfazHandleGraph> paths_first =
+        gfaz::GfazHandleGraph::load(argv[1], options);
+    check_steps_on_nodes(*paths_first, want);
+    check_paths(*paths_first, want);
+    check_edges(*paths_first, want);
+    check_nodes(*paths_first, want);
+  }
+  // A graph built from a container the caller keeps loads everything at once
+  // and must not need the container afterwards.
+  {
+    std::unique_ptr<gfaz::GfazHandleGraph> borrowed;
+    {
+      const gfaz::CompressedData data =
+          gfaz::deserialize_compressed_data(argv[1]);
+      borrowed = std::make_unique<gfaz::GfazHandleGraph>(data, options);
+    }
+    check_nodes(*borrowed, want);
+    check_edges(*borrowed, want);
+    check_paths(*borrowed, want);
+    check_steps_on_nodes(*borrowed, want);
+  }
   std::cout << "handle graph adapter checks passed (" << graph->get_node_count()
             << " nodes, " << graph->get_edge_count() << " edges, "
             << graph->get_path_count() << " paths)\n";

@@ -7,7 +7,7 @@
 // other libhandlegraph tools) can run on it without first converting the graph
 // to its own format. Paths stay grammar-compressed in memory and are decoded a
 // block at a time through the PathIndex; node sequences and an adjacency list
-// are decoded once at load.
+// are decoded once, when first used.
 //
 // Cost model, so callers know what to expect:
 //   - node, sequence and edge queries: O(1), plain arrays;
@@ -15,10 +15,10 @@
 //     one block decode per `block_steps` steps (decoded blocks are cached per
 //     thread);
 //   - a step by position, or the position of a step: one block decode;
-//   - the steps on a node (for_each_step_on_handle): a scan of every haplotype
-//     block whose node-id range covers the node, decoding the ones not in the
+//   - the steps on a node (for_each_step_on_handle): a scan of every block
+//     the index lists for the node's zone of ids, decoding the ones not in the
 //     thread's cache. Neighbouring nodes share blocks, so a local neighbourhood
-//     is cheap; a loop over every node of a large graph is still slow.
+//     is cheap; repeat-rich zones list many blocks and are slow.
 //
 // Node ids follow the GFA the way vg's GFA import does: segment names that are
 // numbers are the node ids, and other names get new ids; the names themselves
@@ -33,6 +33,7 @@
 #include <handlegraph/named_node_back_translation.hpp>
 #include <handlegraph/path_position_handle_graph.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -70,8 +71,11 @@ public:
 
   GfazHandleGraph(const CompressedData &data,
                   const GfazHandleGraphOptions &options = {});
-  // Read a .gfaz file. The saved index <path>.pidx is used when present and
-  // options.index_path is empty.
+  // Read a .gfaz file. When options.index_path is empty the saved index
+  // <path>.pidx is used if it exists and its blocks are no longer than
+  // options.block_steps (`gfaz index -b 1024` for the default). Sequences, edges and paths are each read
+  // when first asked for (see Part), so a caller that only wants names and
+  // counts does not wait for them; an error in one is thrown at that point.
   static std::unique_ptr<GfazHandleGraph>
   load(const std::string &path, GfazHandleGraphOptions options = {});
 
@@ -133,10 +137,8 @@ public:
       const handlegraph::oriented_node_range_t &range) const override;
   std::string get_back_graph_node_name(const nid_t &back_node_id) const override;
 
-  // The underlying GFAz objects, for callers that want the native API too.
-  const IndexedPaths &paths() const { return paths_; }
   // The container's 1-based segment number of a node id, or 0 if there is no
-  // such node. This is the number the native API (`paths()`) uses.
+  // such node. This is the node number GFAz's own API uses.
   uint32_t segment_of(nid_t node_id) const;
 
 protected:
@@ -156,27 +158,56 @@ private:
   class BlockCache;
   BlockCache &thread_cache() const;
 
-  // `owned` is the container when this graph may empty the parts of it that
-  // it has finished reading, so they do not stay in memory next to their
-  // decoded form; null leaves the container untouched.
+  // The parts that take time to read from the container. Each is read at
+  // most once, on its own thread. Asking for the edges reads only them;
+  // asking for sequences or paths starts all three side by side, since a
+  // caller that walks paths or reads bases goes on to use the rest.
+  enum Part { kSequences, kEdges, kPaths, kNumParts };
+  class Loader;
+  struct PathStore;
+  void require(Part part) const {
+    if (!ready_[part].load(std::memory_order_acquire))
+      wait_for(part);
+  }
+  void wait_for(Part part) const;
+  void load_part(Part part, const CompressedData &data, CompressedData *owned);
+
+  // `owned` is the container when this graph keeps it and reads from it
+  // later, emptying each column once it is decoded; null reads everything
+  // now and leaves the caller's container untouched.
   GfazHandleGraph(const CompressedData &data,
-                  const GfazHandleGraphOptions &options, CompressedData *owned);
+                  const GfazHandleGraphOptions &options,
+                  std::unique_ptr<CompressedData> owned);
 
   void number_nodes();
   nid_t id_of_segment(uint32_t segment) const;
   // Where a segment's sequence starts in sequences_.
   uint64_t sequence_begin(uint32_t segment) const;
   void load_sequences(const CompressedData &data);
-  void build_adjacency(const CompressedData &data, int num_threads);
+  void build_adjacency(const CompressedData &data);
+  void load_paths(const CompressedData &data, CompressedData *owned);
   void name_paths(const CompressedData &data,
                   const std::unordered_set<std::string> &reference_samples);
+  const PackedSequences &sequences() const {
+    require(kSequences);
+    return sequences_;
+  }
+  const PathStore &path_store() const {
+    require(kPaths);
+    return *path_store_;
+  }
   // The decoded block holding a step, from this thread's cache.
   const DecodedBlock &block_with_step(size_t path, uint32_t step) const;
   const DecodedBlock &decoded_block(size_t path, size_t block) const;
 
-  IndexedPaths paths_;
+  GfazHandleGraphOptions options_;
   uint64_t instance_id_ = 0; // tells cached blocks of different graphs apart
-  size_t cached_blocks_ = 0;
+
+  std::vector<uint32_t> segment_lengths_; // segment_lengths_[n - 1], segment n
+  SegmentNames names_;
+  uint32_t num_nodes() const {
+    return static_cast<uint32_t>(segment_lengths_.size());
+  }
 
   // Node ids when they are not simply the segment numbers (see number_nodes),
   // as runs: the segments from id_runs_[r].segment up to the next run have the
@@ -209,6 +240,14 @@ private:
 
   std::vector<std::string> path_names_;
   std::unordered_map<std::string, uint32_t> path_by_name_;
+
+  // Decoded traversals and their index.
+  std::unique_ptr<PathStore> path_store_;
+
+  // Set once a part is loaded. The loader is declared last so that its
+  // threads end before anything they write to goes away.
+  mutable std::atomic<bool> ready_[kNumParts] = {};
+  std::unique_ptr<Loader> loader_;
 };
 
 } // namespace gfaz

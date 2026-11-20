@@ -31,8 +31,13 @@ two runs each, the slower shown:
 | `deconstruct -p grch38#chr6` | 103 s, 3.8 GB | 128 s, 9.8 GB | 7.0 s, 5.1 GB |
 
 The deconstruct VCF and the path FASTA are byte-identical between the two vg
-runs. With the saved index written by `gfaz index -b 1024`, deconstruct on the
-`.gfaz` takes 85 s.
+runs. This table was taken with a saved 4096-step index, which vg no longer
+picks up (see the adapter doc); with 1024-step blocks, built at load or saved
+by `gfaz index -b 1024`, deconstruct on the `.gfaz` takes 85 s.
+
+Both tables predate loading on first use. With it, on chr6, `stats -z -l`
+takes 0.21 s and 0.32 GB and `paths -L` 0.06 s; the HPRC v1.1 rows have not
+been re-measured on a quiet machine.
 
 HPRC v1.1 (50.8 GB GFA, 92.9 M nodes, 30,640 walks, 4.6 B steps; `.gfaz`
 2.27 GB built in 25 s, GBZ 3.28 GB built in 497 s), one run each, no saved
