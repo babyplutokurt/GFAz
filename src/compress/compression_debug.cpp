@@ -167,6 +167,10 @@ CompressionRatio collect_walk_ratio(const gfaz::CompressedData &data) {
 CompressionRatio collect_segment_link_ratio(const gfaz::CompressedData &data) {
   return sum_ratios({block_ratio(data.segment_sequences_zstd),
                      block_ratio(data.segment_seq_lengths_zstd),
+                     block_ratio(data.segment_name_numbers_zstd),
+                     block_ratio(data.segment_name_run_starts_zstd),
+                     block_ratio(data.segment_names_zstd),
+                     block_ratio(data.segment_name_lengths_zstd),
                      block_ratio(data.link_from_ids_zstd),
                      block_ratio(data.link_to_ids_zstd),
                      block_ratio(data.link_from_orients_zstd),

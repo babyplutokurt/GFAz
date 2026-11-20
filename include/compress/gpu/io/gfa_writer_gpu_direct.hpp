@@ -3,6 +3,7 @@
 #include "compress/gpu/decompression/path_decompression_gpu_rolling.hpp"
 #include "compress/io/gfa_write_utils.hpp"
 #include "core/model/compressed_data.hpp"
+#include "core/model/segment_names.hpp"
 
 #include <cstdint>
 #include <fstream>
@@ -37,12 +38,14 @@ struct GpuDirectWriterStaticFields {
   std::vector<std::string> containment_rest_fields;
   gfaz::gfa_write_utils::FieldOffsets segment_offsets;
   gfaz::gfa_write_utils::FieldOffsets link_offsets;
+  gfaz::SegmentNames segment_names;
   double decode_ms = 0.0;
 };
 
 struct GpuPathWriterMetadata {
   std::vector<std::string> names;
   std::vector<std::string> overlaps;
+  gfaz::SegmentNames segment_names;
   double decode_ms = 0.0;
 };
 
@@ -52,6 +55,7 @@ struct GpuWalkWriterMetadata {
   std::vector<std::string> seq_ids;
   std::vector<int64_t> seq_starts;
   std::vector<int64_t> seq_ends;
+  gfaz::SegmentNames segment_names;
   double decode_ms = 0.0;
 };
 

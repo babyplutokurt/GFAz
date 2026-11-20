@@ -4,9 +4,8 @@ Round-trip coverage for GFA features that the other fixtures miss: J-lines,
 C-lines, and S-line optional fields of every type (i / f / A / Z / B,i / B,f).
 
 This is a pure-CLI round-trip (compress -> decompress) with no Python bindings,
-so it runs even when the bindings are not built. gfaz reconstructs segment names
-as dense numeric IDs and may reorder lines by type, so the fixture already uses
-numeric IDs and the comparison is line-set based (sorted), not positional.
+so it runs even when the bindings are not built. gfaz may reorder
+lines by type, so the comparison is line-set based (sorted), not positional.
 
 Compression uses default settings (delta encoding on). This also guards a
 regression that previously dropped segments on small / monotonic graphs under

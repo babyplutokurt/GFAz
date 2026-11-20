@@ -1,5 +1,6 @@
 #include "compress/decompression_workflow.hpp"
 #include "core/codec/codec.hpp"
+#include "core/model/segment_names.hpp"
 #include "core/utils/debug_log.hpp"
 #include "core/utils/runtime_utils.hpp"
 #include "core/utils/threading_utils.hpp"
@@ -442,17 +443,15 @@ void decompress_gfa(const gfaz::CompressedData &data, gfaz::GfaGraph &graph,
   debug_stages.push_back({"decode segment/link columns", elapsed_ms(t0, t1)});
 
   // Reconstruct segments (index 0 is placeholder for 1-based IDs).
-  // CPU .gfaz intentionally restores dense numeric names instead of original
-  // segment names, because the serialized CPU representation stores segments
-  // by implicit 1-based ID order only.
   t0 = Clock::now();
+  const gfaz::SegmentNames names = gfaz::SegmentNames::decode(data);
   graph.segments.node_id_to_name.push_back("");
   graph.segments.node_sequences.push_back("");
 
   size_t offset = 0;
   for (size_t i = 0; i < seg_lens.size(); ++i) {
     uint32_t id = static_cast<uint32_t>(i + 1);
-    std::string name = std::to_string(id);
+    std::string name = names.name(id);
     uint32_t len = seg_lens[i];
 
     std::string seq;

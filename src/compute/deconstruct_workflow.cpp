@@ -1,6 +1,7 @@
 #include "compute/deconstruct_workflow.hpp"
 
 #include "core/codec/codec.hpp"
+#include "core/model/segment_names.hpp"
 #include "core/utils/sequence_utils.hpp"
 #include "core/utils/threading_utils.hpp"
 #include "compute/snarl_finder.hpp"
@@ -72,6 +73,7 @@ struct SegmentSeqs {
   std::vector<uint64_t> offset; // offset[n] = start of node (n+1) in concat
   std::vector<uint32_t> lengths;
   uint32_t num_nodes = 0;
+  SegmentNames names; // original segment names, for AT / ID
 
   uint32_t length_of(NodeId signed_node) const {
     const uint32_t n = abs_node_id(signed_node);
@@ -132,6 +134,7 @@ SegmentSeqs load_segments(const CompressedData &data) {
       p[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(p[i])));
   }
   seg.lengths = load_segment_lengths(data);
+  seg.names = SegmentNames::decode(data);
   seg.num_nodes = static_cast<uint32_t>(seg.lengths.size());
   seg.offset.assign(seg.num_nodes + 1, 0);
   for (uint32_t i = 0; i < seg.num_nodes; ++i)
@@ -234,12 +237,10 @@ std::string vcf_chrom_name(const std::string &reference_name, bool graph_info) {
 }
 
 // Append one oriented node to a graph-path string in vg's AT/snarl-id spelling:
-// '>' for forward, '<' for reverse, followed by the (1-based) node number. The
-// number is gfaz's own node id (the .gfaz node space); original GFA segment
-// names are not retained.
-void append_oriented_node(std::string &s, NodeId n) {
+// '>' for forward, '<' for reverse, followed by the segment's name in the GFA.
+void append_oriented_node(std::string &s, NodeId n, const SegmentNames &names) {
   s += (n >= 0) ? '>' : '<';
-  s += std::to_string(n >= 0 ? n : -n);
+  names.append(s, static_cast<uint32_t>(n >= 0 ? n : -n));
 }
 
 std::string format_af(uint64_t ac, uint64_t an) {
@@ -934,8 +935,8 @@ uint64_t deconstruct_contig_snarl(
         std::string id_field = ".";
         if (options.emit_at) {
           id_field.clear();
-          append_oriented_node(id_field, ref_nodes[src_ref_index]);
-          append_oriented_node(id_field, ref_nodes[sink_ref_index]);
+          append_oriented_node(id_field, ref_nodes[src_ref_index], seg.names);
+          append_oriented_node(id_field, ref_nodes[sink_ref_index], seg.names);
         }
         std::ostringstream line;
         const uint64_t pos = write_record_head(line, contig_name, guard,
@@ -953,16 +954,16 @@ uint64_t deconstruct_contig_snarl(
             if (a)
               line << ',';
             std::string at;
-            append_oriented_node(at, ref_nodes[src_ref_index]);
+            append_oriented_node(at, ref_nodes[src_ref_index], seg.names);
             if (a == 0) {
               for (uint32_t i = src_ref_index + 1; i < sink_ref_index; ++i)
-                append_oriented_node(at, ref_nodes[i]);
+                append_oriented_node(at, ref_nodes[i], seg.names);
             } else {
               const auto &ext = allele_src[a];
               for (uint32_t i = 0; i < ext.second; ++i)
-                append_oriented_node(at, interior_pool[ext.first + i]);
+                append_oriented_node(at, interior_pool[ext.first + i], seg.names);
             }
-            append_oriented_node(at, ref_nodes[sink_ref_index]);
+            append_oriented_node(at, ref_nodes[sink_ref_index], seg.names);
             line << at;
           }
         }
@@ -1222,7 +1223,7 @@ void deconstruct_to_vcf(const CompressedData &data,
   // legacy --linear mode (which emits no AT values).
   if (options.emit_at && options.use_snarls) {
     out << "##INFO=<ID=AT,Number=R,Type=String,Description=\"Allele Traversal "
-           "as path in graph (gfaz 1-based node ids)\">\n";
+           "as path in graph\">\n";
   }
   if (options.max_site_length != 0) {
     out << "##ALT=<ID=CPX,Description=\"Complex region exceeding "

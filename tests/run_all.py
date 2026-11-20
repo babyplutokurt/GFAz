@@ -46,6 +46,7 @@ HERMETIC_SUITES = [
     "tests/regression/test_rule_scan_equivalence.py",
     "tests/regression/test_degenerate_inputs.py",
     "tests/regression/test_input_robustness.py",
+    "tests/regression/test_segment_names.py",
     "tests/regression/test_pansn_grouping.py",
     "tests/regression/test_similarity.py",
     "tests/regression/test_stats.py",

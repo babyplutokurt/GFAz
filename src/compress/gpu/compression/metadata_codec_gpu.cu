@@ -2,6 +2,7 @@
 #include "compress/gpu/compression/compression_workflow_gpu_internal.hpp"
 #include "compress/gpu/compression/metadata_codec_gpu.hpp"
 
+#include "core/model/segment_names.hpp"
 #include "core/utils/runtime_utils.hpp"
 
 #include <chrono>
@@ -342,6 +343,16 @@ void compress_graph_metadata_gpu(const GfaGraph_gpu &gpu_graph,
   compress_segment_sequences_gpu(gpu_graph.node_sequences,
                                  data.segment_sequences_zstd,
                                  data.segment_seq_lengths_zstd);
+  {
+    // Segment names (entry 0 is the placeholder of the 1-based layout).
+    const FlattenedStrings &names = gpu_graph.node_names;
+    const std::vector<uint32_t> lengths(
+        names.lengths.begin() + (names.lengths.empty() ? 0 : 1),
+        names.lengths.end());
+    gfaz::SegmentNames::from_strings(
+        std::string(names.data.begin(), names.data.end()), lengths)
+        .encode(data);
+  }
 
   data.header_line = gpu_graph.header_line;
 
@@ -566,11 +577,13 @@ void decompress_optional_columns(
   }
 }
 
-FlattenedStrings build_numeric_node_names(size_t num_segments) {
+FlattenedStrings build_node_names(const gfaz::CompressedData &data,
+                                  size_t num_segments) {
+  const gfaz::SegmentNames names = gfaz::SegmentNames::decode(data);
   FlattenedStrings result;
   result.lengths.reserve(num_segments);
   for (size_t i = 1; i <= num_segments; ++i) {
-    const std::string name = std::to_string(i);
+    const std::string name = names.name(static_cast<uint32_t>(i));
     result.lengths.push_back(static_cast<uint32_t>(name.size()));
     result.data.insert(result.data.end(), name.begin(), name.end());
   }
@@ -611,7 +624,7 @@ void decompress_graph_metadata_gpu(const gfaz::CompressedData &data,
   prepend_placeholder_length(result.node_sequences);
   result.header_line = data.header_line;
   result.node_names =
-      build_numeric_node_names(result.node_sequences.lengths.size() - 1);
+      build_node_names(data, result.node_sequences.lengths.size() - 1);
   prepend_placeholder_length(result.node_names);
 
   if (data.num_links > 0) {

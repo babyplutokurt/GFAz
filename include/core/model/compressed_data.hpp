@@ -72,6 +72,22 @@ struct CompressedData {
   ZstdCompressedBlock segment_seq_lengths_zstd;
   std::vector<CompressedOptionalFieldColumn> segment_optional_fields_zstd;
 
+  // Segment names by ID; see core/model/segment_names.hpp. Encoding 0 means
+  // the names are the decimal IDs 1..N and nothing is stored.
+  uint8_t segment_name_encoding = 0;
+  std::string segment_name_prefix;               // numbered names
+  std::string segment_name_suffix;               // numbered names
+  uint8_t segment_name_width = 0;                // numbered names; 0 = no padding
+  // Numbered names: one number per segment (run count 0), or the first number
+  // and the first segment of each run of consecutive numbers.
+  uint64_t segment_name_run_count = 0;
+  ZstdCompressedBlock segment_name_numbers_zstd;
+  ZstdCompressedBlock segment_name_run_starts_zstd;
+  ZstdCompressedBlock segment_names_zstd;        // string names
+  ZstdCompressedBlock segment_name_lengths_zstd; // string names
+
+  bool has_segment_names() const { return segment_name_encoding != 0; }
+
   // Links (L-lines)
   size_t num_links = 0;
   ZstdCompressedBlock link_from_ids_zstd;

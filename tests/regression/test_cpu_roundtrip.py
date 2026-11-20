@@ -16,10 +16,9 @@ The binding-based structural round-trip suite
 (tests/regression/test_compression_regression.py) is the deeper check when the
 bindings are built; this CLI suite is the always-runnable floor.
 
-Comparison: gfaz canonicalizes segment names to dense numeric IDs and reorders
-lines by type, so equivalence is checked as a sorted, blank-stripped line set.
-Fixtures therefore use dense numeric segment IDs (the canonical form), making the
-round-trip exact modulo line order.
+Comparison: gfaz reorders lines by type, so equivalence is checked as a sorted,
+blank-stripped line set. Segment names other than 1..N are covered by
+test_segment_names.py.
 """
 
 import sys

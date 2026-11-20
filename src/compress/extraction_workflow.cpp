@@ -1,6 +1,7 @@
 #include "compress/extraction_workflow.hpp"
 
 #include "core/codec/codec.hpp"
+#include "core/model/segment_names.hpp"
 #include "core/utils/threading_utils.hpp"
 
 #include <cmath>
@@ -131,10 +132,6 @@ std::vector<gfaz::NodeId> decode_sequence(const std::vector<int32_t> &encoded,
   return std::move(seqs[0]);
 }
 
-void append_node_name(std::string &line, uint32_t node_id) {
-  line += std::to_string(node_id);
-}
-
 std::pair<std::vector<int32_t>, std::vector<int32_t>>
 decode_rules(const gfaz::CompressedData &data) {
   std::vector<int32_t> first = gfaz::Codec::zstd_decompress_int32_vector(data.rules_first_zstd);
@@ -147,18 +144,20 @@ decode_rules(const gfaz::CompressedData &data) {
 
 std::string format_path_line(const std::string &path_name,
                              const std::vector<gfaz::NodeId> &path,
-                             const std::string &overlap) {
+                             const std::string &overlap,
+                             const gfaz::SegmentNames &names) {
   std::string line = "P\t";
   line += path_name;
   line += '\t';
 
+  gfaz::SegmentNames::RunHint hint;
   for (size_t i = 0; i < path.size(); ++i) {
     if (i > 0)
       line += ',';
 
     const gfaz::NodeId node = path[i];
     const bool is_reverse = node < 0;
-    append_node_name(line, static_cast<uint32_t>(is_reverse ? -node : node));
+    names.append(line, static_cast<uint32_t>(is_reverse ? -node : node), hint);
     line += (is_reverse ? '-' : '+');
   }
 
@@ -171,7 +170,8 @@ std::string format_path_line(const std::string &path_name,
 std::string format_walk_line(const std::string &sample_id, uint32_t hap_index,
                              const std::string &seq_id, int64_t seq_start,
                              int64_t seq_end,
-                             const std::vector<gfaz::NodeId> &walk) {
+                             const std::vector<gfaz::NodeId> &walk,
+                             const gfaz::SegmentNames &names) {
   std::string line = "W\t";
   line += sample_id;
   line += '\t';
@@ -184,10 +184,11 @@ std::string format_walk_line(const std::string &sample_id, uint32_t hap_index,
   line += (seq_end >= 0) ? std::to_string(seq_end) : "*";
   line += '\t';
 
+  gfaz::SegmentNames::RunHint hint;
   for (gfaz::NodeId node : walk) {
     const bool is_reverse = node < 0;
     line += (is_reverse ? '<' : '>');
-    append_node_name(line, static_cast<uint32_t>(is_reverse ? -node : node));
+    names.append(line, static_cast<uint32_t>(is_reverse ? -node : node), hint);
   }
 
   line += '\n';
@@ -237,6 +238,7 @@ extract_path_lines_by_name(const gfaz::CompressedData &data,
   const std::vector<std::string> overlaps =
       decompress_string_column(data.overlaps_zstd, data.overlap_lengths_zstd);
   const auto [rules_first, rules_second] = decode_rules(data);
+  const gfaz::SegmentNames names = gfaz::SegmentNames::decode(data);
   const std::vector<int32_t> flat =
       gfaz::Codec::zstd_decompress_int32_vector(data.paths_zstd);
 
@@ -257,7 +259,8 @@ extract_path_lines_by_name(const gfaz::CompressedData &data,
     const std::string overlap =
         (path_index < overlaps.size()) ? overlaps[path_index] : "";
     lines.push_back(
-        format_path_line(requested_path_names[request_idx], decoded, overlap));
+        format_path_line(requested_path_names[request_idx], decoded, overlap,
+                         names));
   }
   return lines;
 }
@@ -330,6 +333,7 @@ extract_walk_lines(const gfaz::CompressedData &data,
   }
 
   const auto [rules_first, rules_second] = decode_rules(data);
+  const gfaz::SegmentNames names = gfaz::SegmentNames::decode(data);
   const std::vector<int32_t> flat =
       gfaz::Codec::zstd_decompress_int32_vector(data.walks_zstd);
 
@@ -350,7 +354,7 @@ extract_walk_lines(const gfaz::CompressedData &data,
     const auto &walk_key = walk_keys[request_idx];
     lines.push_back(format_walk_line(walk_key.sample_id, walk_key.hap_index,
                                      walk_key.seq_id, walk_key.seq_start,
-                                     walk_key.seq_end, decoded));
+                                     walk_key.seq_end, decoded, names));
   }
   return lines;
 }

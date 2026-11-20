@@ -78,8 +78,11 @@ reference allele. Per-analysis timings and memory are reported in the paper.
 - CPU in-memory decompression is still available through `decompress_gfa(...)`
   and `gfaz decompress --legacy`.
 - GPU backend is still experimental.
-- Segment names are reconstructed canonically during decompression as dense
-  1-based numeric IDs.
+- Segment names are kept, in the cheapest of three forms: nothing at all when
+  they are `1..N` in file order (format version 5, as before); a shared prefix
+  and suffix plus one number per segment for names like `3463`, `s17` or
+  `utg000042l`; plain text for anything else. The last two make the file
+  format version 6.
 
 ## Build
 

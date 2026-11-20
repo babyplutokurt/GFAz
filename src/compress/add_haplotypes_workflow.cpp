@@ -1,6 +1,7 @@
 #include "compress/add_haplotypes_workflow.hpp"
 
 #include "core/codec/codec.hpp"
+#include "core/model/segment_names.hpp"
 #include "compress/grammar/packed_2mer.hpp"
 #include "compress/grammar/path_encoder.hpp"
 #include "core/utils/threading_utils.hpp"
@@ -9,6 +10,7 @@
 #include <cstdint>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -123,7 +125,34 @@
                : static_cast<gfaz::NodeId>(node_id);
   }
 
-  void parse_path_line(std::string_view line, AppendInput & out) {
+  // The node an appended line refers to. A container that stores segment
+  // names (`lookup` set) is addressed by those names; otherwise segments are
+  // the numbers 1..N.
+  gfaz::NodeId resolve_node(std::string_view name, char orientation,
+                            const gfaz::SegmentNameLookup *lookup,
+                            const char *record) {
+    if (lookup == nullptr) {
+      if (!is_numeric(name)) {
+        throw std::runtime_error(
+            std::string(kAddHaplotypesErrorPrefix) +
+            "the segments of this .gfaz are named 1..N; appended " + record +
+            "s must use those numbers, not '" + std::string(name) + "'");
+      }
+      return parse_numeric_node(name, orientation, "segment ID");
+    }
+    const uint32_t node_id = lookup->find(name);
+    if (node_id == 0) {
+      throw std::runtime_error(std::string(kAddHaplotypesErrorPrefix) +
+                               record + " refers to unknown segment '" +
+                               std::string(name) + "'");
+    }
+    return (orientation == '-' || orientation == '<')
+               ? -static_cast<gfaz::NodeId>(node_id)
+               : static_cast<gfaz::NodeId>(node_id);
+  }
+
+  void parse_path_line(std::string_view line, AppendInput & out,
+                       const gfaz::SegmentNameLookup *lookup) {
     size_t pos = 1;
     const std::string_view path_name = next_field(line, pos);
     const std::string_view nodes_str = next_field(line, pos);
@@ -155,14 +184,8 @@
           }
           const std::string_view node_name =
               node_token.substr(0, node_token.size() - 1);
-          if (!is_numeric(node_name)) {
-            throw std::runtime_error(std::string(kAddHaplotypesErrorPrefix) +
-                                     "CPU .gfaz does not store original "
-                                     "segment names; appended P-lines "
-                                     "must use numeric segment IDs");
-          }
           path.push_back(
-              parse_numeric_node(node_name, orientation, "P-line segment ID"));
+              resolve_node(node_name, orientation, lookup, "P-line"));
         }
         node_start = i + 1;
       }
@@ -174,7 +197,8 @@
     out.has_paths = true;
   }
 
-  void parse_walk_line(std::string_view line, AppendInput & out) {
+  void parse_walk_line(std::string_view line, AppendInput & out,
+                       const gfaz::SegmentNameLookup *lookup) {
     size_t pos = 1;
     const std::string_view sample_id = next_field(line, pos);
     const std::string_view hap_index = next_field(line, pos);
@@ -206,14 +230,7 @@
 
       const std::string_view node_name =
           walk_str.substr(name_start, name_end - name_start);
-      if (!is_numeric(node_name)) {
-        throw std::runtime_error(
-            std::string(kAddHaplotypesErrorPrefix) +
-            "CPU .gfaz does not store original segment names; appended W-lines "
-            "must use numeric segment IDs");
-      }
-      walk.push_back(
-          parse_numeric_node(node_name, orientation, "W-line segment ID"));
+      walk.push_back(resolve_node(node_name, orientation, lookup, "W-line"));
       walk_pos = name_end;
     }
 
@@ -229,7 +246,8 @@
     out.has_walks = true;
   }
 
-  AppendInput parse_append_file(const std::string &haplotypes_path) {
+  AppendInput parse_append_file(const std::string &haplotypes_path,
+                                const gfaz::SegmentNameLookup *lookup) {
     std::ifstream input(haplotypes_path);
     if (!input.is_open()) {
       throw std::runtime_error(std::string(kAddHaplotypesErrorPrefix) +
@@ -255,7 +273,7 @@
                                    "input file mixes P-lines and W-lines; use "
                                    "a pure path or pure walk file");
         }
-        parse_path_line(line, parsed);
+        parse_path_line(line, parsed, lookup);
         continue;
       }
 
@@ -265,7 +283,7 @@
                                    "input file mixes P-lines and W-lines; use "
                                    "a pure path or pure walk file");
         }
-        parse_walk_line(line, parsed);
+        parse_walk_line(line, parsed, lookup);
         continue;
       }
 
@@ -580,7 +598,12 @@ void add_haplotypes(gfaz::CompressedData &data, const std::string &haplotypes_pa
                     int num_threads) {
   ScopedOMPThreads omp_scope(num_threads);
 
-  const AppendInput input = parse_append_file(haplotypes_path);
+  // Appended lines name segments the way the container does.
+  const gfaz::SegmentNames names = gfaz::SegmentNames::decode(data);
+  std::unique_ptr<gfaz::SegmentNameLookup> lookup;
+  if (!names.dense())
+    lookup = std::make_unique<gfaz::SegmentNameLookup>(names, names.size());
+  const AppendInput input = parse_append_file(haplotypes_path, lookup.get());
   const auto [rules_first, rules_second] = decode_rules(data);
   const std::vector<CompressionRules2Mer> layers =
       build_layered_rules(data, rules_first, rules_second);

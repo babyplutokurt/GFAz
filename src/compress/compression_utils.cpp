@@ -254,6 +254,13 @@ void print_compression_stats(const gfaz::CompressedData &d, size_t num_segments,
   total += d.overlap_lengths_zstd.payload.size();
   total += d.segment_sequences_zstd.payload.size();
   total += d.segment_seq_lengths_zstd.payload.size();
+  const size_t seg_names = d.segment_name_prefix.size() +
+                           d.segment_name_suffix.size() +
+                           d.segment_name_numbers_zstd.payload.size() +
+                           d.segment_name_run_starts_zstd.payload.size() +
+                           d.segment_names_zstd.payload.size() +
+                           d.segment_name_lengths_zstd.payload.size();
+  total += seg_names;
   total += seg_opt;
   total += d.link_from_ids_zstd.payload.size();
   total += d.link_to_ids_zstd.payload.size();
@@ -313,6 +320,9 @@ void print_compression_stats(const gfaz::CompressedData &d, size_t num_segments,
   std::cerr << "  segment_seq_lengths:    " << std::setw(12)
             << format_size(d.segment_seq_lengths_zstd.payload.size())
             << std::endl;
+  if (d.has_segment_names())
+    std::cerr << "  segment_names:          " << std::setw(12)
+              << format_size(seg_names) << std::endl;
   std::cerr << "  segment_optional_fields:" << std::setw(12)
             << format_size(seg_opt) << " ("
             << d.segment_optional_fields_zstd.size() << " columns)"

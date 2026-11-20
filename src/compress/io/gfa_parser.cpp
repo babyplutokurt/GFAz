@@ -569,8 +569,10 @@ void append_optional_value(gfaz::OptionalFieldColumn &col, char type,
   }
 }
 
+// True if `name` is the decimal number `expected` as it would be printed, so
+// that writing the ID back reproduces the name ("007" does not match 7).
 bool numeric_name_matches_id(std::string_view name, uint32_t expected) {
-  if (name.empty())
+  if (name.empty() || name[0] == '0')
     return false;
   uint64_t value = 0;
   for (char c : name) {
@@ -2560,6 +2562,14 @@ bool GfaParser::parse_segments_in_chunks(
         out += name.size();
       }
     }
+    graph.segments.node_names_concat = segment_name_arena_;
+    graph.segments.node_name_lengths.resize(count);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for (size_t i = 0; i < count; ++i)
+      graph.segments.node_name_lengths[i] =
+          static_cast<uint32_t>(name_views[i].size());
     node_name_lookup_.clear();
     node_name_lookup_.reserve(count);
     for (size_t i = 0; i < count && ok; ++i) {
@@ -2617,6 +2627,8 @@ bool GfaParser::parse_segments_in_chunks(
     segment_field_meta_.clear();
     node_name_lookup_.clear();
     segment_name_arena_ = {};
+    graph.segments.node_names_concat = {};
+    graph.segments.node_name_lengths = {};
     return false;
   }
 
@@ -2649,6 +2661,10 @@ bool GfaParser::parse_segments_in_chunks(
   if (!dense) {
     all_segment_names_numeric_ = false;
     numeric_name_table_ = std::move(table);
+    // The names are not the IDs, so the container has to carry them: as the
+    // numbers parsed above, or as the text copied for the name lookup.
+    if (!use_name_lookup)
+      graph.segments.node_name_numbers = std::move(name_numbers);
   }
   return true;
 }

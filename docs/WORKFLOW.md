@@ -314,5 +314,14 @@ Legacy GPU alias names are retained for compatibility in CUDA builds.
 ## Semantic Notes
 
 - `GfaGraph` now groups S-line state in `segments` (`SegmentData`) and P-line state in `paths_data` (`PathData`), while retaining `walks`, `links`, `jumps`, and `containments` as separate record groups.
-- Segment names are reconstructed canonically during decompression as dense 1-based numeric IDs.
-- Round-trip verification is therefore based on graph semantics rather than original segment-name strings.
+- Segments are identified by dense 1-based IDs in S-line order. Their names are kept in the container (`SegmentNames`, `include/core/model/segment_names.hpp`) and every writer prints the original name.
+- Segment names are stored in one of three forms, chosen per graph at compression time:
+
+  | Names | Stored as | Cost at 1 M segments |
+  |---|---|---|
+  | `1`, `2`, ... `N` in file order | nothing (format version 5) | 0 |
+  | one prefix + number + one suffix, the number plain or zero-padded: `3463`, `s17`, `utg000042l` | the prefix, suffix and width once, and the numbers: as runs of consecutive numbers when they mostly count up, else one delta-coded number per segment | about 50 bytes when the numbers run in order; 2.9 MB when they are in random order |
+  | anything else | the text and its lengths, zstd-compressed | 0.5 MB for two interleaved name patterns; 5.2 MB for unrelated 10-character names |
+
+  HPRC v1.1 (92.9 M segments numbered from 3463 with gaps) needs 408 KB in a 2.27 GB container. Its compression and decompression times and peak memory are the same as without the names (medians of four interleaved runs at 16 threads: 27.8 s against 28.0 s, and 12.2 s against 12.2 s).
+- Records are regrouped by type on decompression, so round-trip verification compares line sets rather than line order.

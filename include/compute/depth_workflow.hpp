@@ -22,8 +22,8 @@ struct DepthOptions {
 // With options.per_node (matching `odgi depth -d`) emits a per-node table:
 //   #node.id  depth  depth.uniq
 // where depth = total steps on the node (multiplicity-counted) and depth.uniq =
-// number of distinct paths visiting it. Node ids are GFAz's own 1-based ids (so
-// the table is byte-identical to odgi only when the GFA segment names are 1..N).
+// number of distinct paths visiting it. Rows are in S-line order and carry the
+// GFA's segment names.
 // See docs/workflows/DEPTH_WORKFLOW.md.
 void depth_to_tsv(const CompressedData &data, const DepthOptions &options,
                   std::ostream &out);

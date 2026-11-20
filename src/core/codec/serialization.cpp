@@ -218,7 +218,8 @@ void serialize_compressed_data(const CompressedData &data,
 
   // Magic and version
   write_val(out, GFAZ_MAGIC);
-  write_val(out, GFAZ_VERSION);
+  write_val(out, data.has_segment_names() ? GFAZ_VERSION_SEGMENT_NAMES
+                                         : GFAZ_MIN_VERSION);
 
   // Header
   write_str(out, data.header_line);
@@ -300,6 +301,19 @@ void serialize_compressed_data(const CompressedData &data,
   write_block(out, data.walk_seq_starts_zstd);
   write_block(out, data.walk_seq_ends_zstd);
 
+  // Segment names (v6 only)
+  if (data.has_segment_names()) {
+    write_val(out, data.segment_name_encoding);
+    write_str(out, data.segment_name_prefix);
+    write_str(out, data.segment_name_suffix);
+    write_val(out, data.segment_name_width);
+    write_val(out, data.segment_name_run_count);
+    write_block(out, data.segment_name_numbers_zstd);
+    write_block(out, data.segment_name_run_starts_zstd);
+    write_block(out, data.segment_names_zstd);
+    write_block(out, data.segment_name_lengths_zstd);
+  }
+
   out.close();
 
   // Report file size
@@ -322,10 +336,11 @@ CompressedData deserialize_compressed_data(std::istream &input) {
                              "invalid file format (magic mismatch)");
 
   uint32_t version = read_val<uint32_t>(r);
-  if (version != GFAZ_VERSION)
+  if (version < GFAZ_MIN_VERSION || version > GFAZ_VERSION)
     throw std::runtime_error(std::string(kSerializationErrorPrefix) +
                              "unsupported file version " +
                              std::to_string(version) + " (expected " +
+                             std::to_string(GFAZ_MIN_VERSION) + " to " +
                              std::to_string(GFAZ_VERSION) + ")");
 
   CompressedData data;
@@ -419,6 +434,23 @@ CompressedData deserialize_compressed_data(std::istream &input) {
   data.walk_seq_id_lengths_zstd = read_block(r);
   data.walk_seq_starts_zstd = read_block(r);
   data.walk_seq_ends_zstd = read_block(r);
+
+  // Segment names
+  if (version >= GFAZ_VERSION_SEGMENT_NAMES) {
+    data.segment_name_encoding = read_val<uint8_t>(r);
+    if (data.segment_name_encoding != 1 && data.segment_name_encoding != 2)
+      throw std::runtime_error(std::string(kSerializationErrorPrefix) +
+                               "unknown segment name encoding " +
+                               std::to_string(data.segment_name_encoding));
+    data.segment_name_prefix = read_str(r);
+    data.segment_name_suffix = read_str(r);
+    data.segment_name_width = read_val<uint8_t>(r);
+    data.segment_name_run_count = read_val<uint64_t>(r);
+    data.segment_name_numbers_zstd = read_block(r);
+    data.segment_name_run_starts_zstd = read_block(r);
+    data.segment_names_zstd = read_block(r);
+    data.segment_name_lengths_zstd = read_block(r);
+  }
 
   GFAZ_LOG("Deserialized from stream");
   return data;
