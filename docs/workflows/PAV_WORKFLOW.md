@@ -37,73 +37,46 @@ labels. The CLI (`pav_command.cpp`) handles arg parsing and printing only.
 
 ### Internal pipeline
 
-`compute_pav` runs three passes after a one-shot setup, all sharing a
-read-only rule-leaf cache built up front:
+After a one-shot setup (lengths, rules, traversal slices, groups, BED chroms
+resolved to reference traversals, rule-leaf cache), `compute_pav` runs four
+steps. Every step decodes traversals from their compressed form; nothing
+decoded is kept between steps.
 
-```
-                    +-----------------------------+
-                    |  Setup                      |
-                    |  - decompress lengths,      |
-                    |    rules, paths, walks      |
-                    |  - build slices             |
-                    |  - build group metadata     |
-                    |  - resolve BED chroms       |
-                    |  - build RuleLeafCache      |  (single-threaded, RO afterwards)
-                    +--------------+--------------+
-                                   |
-                                   v
-            +----------------------+----------------------+
-            |  Pass 1 — parallel slice decode             |
-            |  - one decode per slice                     |
-            |  - lock-free: each slice writes to its own  |
-            |    slice_nodes[s] (sorted unique node ids)  |
-            |  - reference slices additionally emit an    |
-            |    ordered node-id stream into ref_streams  |
-            +----------------------+----------------------+
-                                   |
-                                   v
-            +----------------------+----------------------+
-            |  Pass 2 — group-set assembly                |
-            |  - per-group concat + sort + unique         |
-            |    over slice_nodes                         |
-            |  - flatten to CSR                           |
-            |    (node_offsets, node_to_group_ids)        |
-            |  - free slice_nodes and group_nodes         |
-            +----------------------+----------------------+
-                                   |
-                                   v
-            +----------------------+----------------------+
-            |  Pass 3 — chrom sweep                       |
-            |  - parallel over distinct BED chroms        |
-            |  - for each chrom:                          |
-            |    walk its cached ref_stream, compute      |
-            |    node offsets on the fly, intersect with  |
-            |    sorted BED ranges, dedupe (window,node)  |
-            |  - per (window,node): atomic += length to   |
-            |    denominator and to numerators[w*G+gid]   |
-            |    for every gid in node_to_groups[node]    |
-            +---------------------------------------------+
-```
+1. **Mark the nodes in a range.** Each reference named in the BED is decoded
+   and swept against its sorted ranges; every node that overlaps a range is
+   flagged (one byte per node). Parallel over references.
+2. **Count groups per flagged node.** Parallel over groups: a group's
+   traversals are decoded into a per-thread `NodeSet` (a bitmap plus a short
+   list of the nodes set), restricted to flagged nodes, and each distinct node
+   gets its group count incremented.
+3. **Fill the node→groups table.** The counts give the CSR offsets
+   (`node_offsets`, `node_to_group_ids`). The same decode as step 2 runs
+   again and each group writes its id into the next free slot of every node it
+   visits.
+4. **Sweep the references.** Each reference is decoded and swept again; its
+   `(range, node)` pairs are sorted and deduplicated, and every pair adds the
+   node length to the range's denominator and to `numerators[range][gid]` for
+   each group on the node. A range belongs to exactly one reference, so its
+   row has a single writer and no atomics are needed.
 
-Key properties that fall out of this layout:
+Key properties:
 
-1. Each slice is decoded **exactly once** for the entire computation. The
-   reference walk's ordered stream is captured as a free side effect of the
-   pass 1 decode that the group-membership pass already performs.
-2. The hot inner loops are lock-free. Pass 1 writes to per-slice slots; pass
-   3 uses `#pragma omp atomic` only on the final accumulation, which is
-   contention-free in the common case (different threads handle different
-   chroms, hence different `wid` ranges).
-3. Memory layout is CSR for the node→groups index, eliminating the
-   `vector<vector<uint32_t>>` per-node header overhead.
-4. The rule-leaf cache turns the dominant per-leaf cost from recursive
+1. Peak memory is the node→groups table for the nodes that lie in a range,
+   plus per-node arrays (12 bytes per node while filling) and one bitmap per
+   thread. A BED that covers a few regions needs a small table however large
+   the graph is; whole-path BEDs need one entry per (node, group) pair.
+2. Traversals are decoded more than once (references twice, everything else
+   twice). Decoding is cheap next to holding the decoded steps: the previous
+   layout kept a node list per traversal, a second one per group and every
+   reference's step stream, all alive together.
+3. The rule-leaf cache turns the dominant per-leaf cost from recursive
    grammar descent into a flat array iteration whenever a rule's expansion
    fits the budget.
 
 ### Rule-leaf cache
 
 `RuleLeafCache` stores the forward leaf sequence of each cacheable rule.
-Built bottom-up before pass 1; read-only thereafter. Reverse expansions
+Built bottom-up before the first decode; read-only thereafter. Reverse expansions
 iterate the cached array in reverse with sign-negation, so we only store one
 direction.
 
@@ -277,10 +250,27 @@ diff -u "$WORK/odgi.sorted.tsv" "$WORK/gfaz.sorted.tsv" | head -40
 
 ## Reference benchmark numbers
 
-Captured on this machine with 32 threads. Datasets, BEDs, and binaries as
+Whole-path BEDs (one range per path or walk), 16 threads, on a machine with
+other load, old and new binaries run back to back. Outputs are byte-identical.
+
+| Graph, grouping | Before | Now |
+|---|---|---|
+| chr6 (1,410 paths), per path | 17.0 s, 6.6 GB | 9.9 s, 3.3 GB |
+| chr6, `-S` | 12.9 s, 6.2 GB | 7.9 s, 2.9 GB |
+| HPRC v1.1 (30,640 walks), per walk, `-M` | 269 s, 88.4 GB | 130 s, 35.4 GB |
+| HPRC v1.1, `-S` | 168 s, 75.9 GB | 100 s, 22.9 GB |
+| HPRC v2.1 (60,807 walks), per walk, `-M` | killed above 460 GB | 1,124 s, 190 GB |
+| HPRC v2.1, `-S` | not run | 842 s, 110 GB |
+
+The HPRC v2.1 output has nothing to be compared with: the earlier code did
+not finish on it.
+
+### Earlier comparison with odgi
+
+Captured with 32 threads, before the memory rewrite above. Datasets, BEDs, and binaries as
 in the commands above.
 
-### chr1 — path-only, 90 paths, 2,262 BED ranges
+#### chr1 — path-only, 90 paths, 2,262 BED ranges
 
 | Tool                | Time      | Max RSS     |
 |---------------------|-----------|-------------|
@@ -288,10 +278,9 @@ in the commands above.
 | GFAz pav (previous) | 84.06 s   | 4.30 GB     |
 | odgi pav            | 49 min 41 s | 29.91 GB  |
 
-Speedup vs. odgi: ~329×. Speedup vs. previous GFAz: ~9.3×. Memory regressed
-vs. previous GFAz (4.3 → 9.3 GB) — see "Future work" for the planned fix.
+Speedup vs. odgi: ~329×. Speedup vs. previous GFAz: ~9.3×.
 
-### HPRC `hprc-v1.1-mc-chm13.gfa` — 30,640 walks, 30,640 BED ranges
+#### HPRC `hprc-v1.1-mc-chm13.gfa` — 30,640 walks, 30,640 BED ranges
 
 | Tool                | Time      | Max RSS     |
 |---------------------|-----------|-------------|
@@ -299,8 +288,7 @@ vs. previous GFAz (4.3 → 9.3 GB) — see "Future work" for the planned fix.
 | GFAz pav (previous) | 16 min 45 s | 38.26 GB  |
 | odgi pav            | 10 min 53 s | 227.21 GB |
 
-Speedup vs. odgi: ~8.6×. Speedup vs. previous GFAz: ~13.2×. Memory regressed
-vs. previous GFAz (38.3 → 72 GB) — same root cause as on chr1.
+Speedup vs. odgi: ~8.6×. Speedup vs. previous GFAz: ~13.2×.
 
 For context, odgi additionally pays an ~4 min `odgi build` step (RSS 123 GB)
 that GFAz does not need; GFAz operates directly on the `.gfaz`.
@@ -326,16 +314,10 @@ divergence is specific to mixed P+W or PanSN subpath naming.
 
 ## Future work
 
-In rough priority order; (1) is the active next change.
+In rough priority order.
 
-1. **Memory reduction (next change).** Remove the per-slice
-   `slice_nodes[s]` retention. In pass 1, push each slice's deduped node
-   set straight into a per-thread, per-group accumulator and drop the
-   slice's local buffer. Merge per-group across threads before pass 2.
-   Free `ref_streams[c]` immediately after pass 3 sweeps it (use a
-   `vector<unique_ptr<vector<uint32_t>>>` so individual chroms can be
-   reclaimed inside the parallel loop). Expected: chr1 RSS back near
-   ~5 GB, HPRC RSS back near ~30 GB, no speed regression.
+1. **Narrower group ids.** `node_to_group_ids` holds 32-bit ids; with at
+   most 65,536 groups 16 bits would do and halve the table.
 
 2. **Pin down the numeric divergence vs. odgi.** Build a single-window BED
    on a name where the two disagree, hand-trace which group is misclassified
@@ -347,13 +329,13 @@ In rough priority order; (1) is the active next change.
 
 4. **Auxiliary per-slice node-set sidecar.** Optionally precompute a
    Roaring bitmap per path/walk during compression and persist it next to
-   the `.gfaz`. Pass 1 of `pav` then becomes "OR a few bitmaps" with no
+   the `.gfaz`. The group decodes of `pav` then become "OR a few bitmaps" with no
    grammar decoding at all. Roaring bitmaps for HPRC ≈ tens of MB total,
    smaller than the rule cache. Opt-in so non-PAV users don't pay storage.
 
 5. **`--stats` instrumentation.** Print time spent per phase (rule cache
    build, slice decode, group assembly, BED sweep) and counts (slices
-   decoded, distinct chroms, ref re-decodes — should now be 0). Helps
+   decoded, distinct chroms). Helps
    future tuning be data-driven instead of speculative.
 
 6. **Streaming output.** For matrix output on huge BEDs, format and emit
@@ -363,10 +345,10 @@ In rough priority order; (1) is the active next change.
 
 7. **Per-walk reference offset cache on disk.** Optional: cache the decoded
    reference offset stream in a sidecar so repeated PAV queries against
-   the same `.gfaz` skip pass 1 entirely for previously-seen reference
+   the same `.gfaz` skip the reference decodes for previously-seen reference
    walks. Pure win for repeated workloads, no help for one-shot.
 
-8. **GPU offload of pass 1.** Slice decoding is embarrassingly parallel
+8. **GPU offload of the traversal decodes.** Slice decoding is embarrassingly parallel
    and dominated by integer arithmetic over compact arrays. Worth
    exploring once the CPU pipeline is fully tuned and we have a clear
    roofline.

@@ -9,6 +9,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -49,6 +50,52 @@ std::vector<PavRange> read_bed(const std::string &path) {
     throw std::runtime_error("pav: BED file contains no ranges");
   return ranges;
 }
+
+// The distinct nodes of one group. Small sets are listed as they are found;
+// a set that outgrows the list is read back off the bitmap instead.
+class NodeSet {
+public:
+  explicit NodeSet(uint32_t num_nodes)
+      : bits_((static_cast<size_t>(num_nodes) >> 6) + 1, 0),
+        list_limit_(bits_.size()) {}
+
+  void insert(uint32_t node) {
+    uint64_t &word = bits_[node >> 6];
+    const uint64_t bit = uint64_t{1} << (node & 63);
+    if (word & bit)
+      return;
+    word |= bit;
+    if (listed_.size() < list_limit_)
+      listed_.push_back(node);
+    else
+      overflowed_ = true;
+  }
+
+  // Calls use(node) for every node in the set, then empties it.
+  template <typename Use> void drain(Use &&use) {
+    if (overflowed_) {
+      for (size_t w = 0; w < bits_.size(); ++w) {
+        uint64_t word = bits_[w];
+        bits_[w] = 0;
+        for (; word; word &= word - 1)
+          use(static_cast<uint32_t>((w << 6) + __builtin_ctzll(word)));
+      }
+    } else {
+      for (uint32_t node : listed_) {
+        bits_[node >> 6] = 0;
+        use(node);
+      }
+    }
+    listed_.clear();
+    overflowed_ = false;
+  }
+
+private:
+  std::vector<uint64_t> bits_;
+  std::vector<uint32_t> listed_;
+  size_t list_limit_;
+  bool overflowed_ = false;
+};
 
 struct TraversalMetadata {
   std::vector<std::string> path_names;
@@ -160,217 +207,152 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
   result.denominators.assign(num_windows, 0);
   result.numerators.assign(num_windows * num_groups, 0);
 
-  // Validate every BED chrom resolves to a slice; collect (chrom, slice_id)
-  // and a per-slice flag identifying reference targets.
-  const size_t num_slices = slices.size();
-  std::vector<std::vector<uint32_t> *> slice_to_ref_stream(num_slices, nullptr);
-  std::vector<std::vector<uint32_t>> ref_streams; // one per distinct chrom
-  ref_streams.reserve(ranges_by_chrom.size());
-  std::vector<std::pair<std::string, uint32_t>> chrom_list;
-  chrom_list.reserve(ranges_by_chrom.size());
-
-  for (const auto &entry : ranges_by_chrom) {
+  // One entry per distinct BED chrom: its reference traversal and its ranges
+  // in sweep order.
+  struct Reference {
+    uint32_t slice;
+    std::vector<uint32_t> range_ids;
+  };
+  std::vector<Reference> references;
+  references.reserve(ranges_by_chrom.size());
+  for (auto &entry : ranges_by_chrom) {
     auto pit = path_name_to_slice.find(entry.first);
     if (pit == path_name_to_slice.end())
       throw std::runtime_error("pav: BED reference path not found: " +
                                entry.first);
-    chrom_list.emplace_back(entry.first, pit->second);
-  }
-  ref_streams.resize(chrom_list.size());
-  for (size_t i = 0; i < chrom_list.size(); ++i) {
-    slice_to_ref_stream[chrom_list[i].second] = &ref_streams[i];
-  }
-
-  // -------------------------------------------------------------------------
-  // Pass 1: parallel over slices, lock-free.
-  //   - For every slice produce a sorted-unique list of visited node ids.
-  //   - For reference slices additionally emit the ordered node-id stream so
-  //     the BED sweep in pass 3 needs no further rule expansion.
-  // -------------------------------------------------------------------------
-  std::vector<std::vector<uint32_t>> slice_nodes(num_slices);
-
-  {
-    ScopedOMPThreads omp_scope(options.num_threads);
-    const int T = std::max(1, omp_scope.effective_threads());
-
-#pragma omp parallel num_threads(T)
-    {
-      std::vector<NodeId> local_decoded;
-      std::vector<uint32_t> local_nodes;
-
-#pragma omp for schedule(dynamic, 16)
-      for (long long sll = 0; sll < static_cast<long long>(num_slices); ++sll) {
-        const uint32_t s = static_cast<uint32_t>(sll);
-        std::vector<uint32_t> *ref_stream = slice_to_ref_stream[s];
-        local_nodes.clear();
-
-        if (ref_stream) {
-          auto visit = [&](NodeId signed_node) {
-            const uint32_t node = tquery::abs_node_id(signed_node);
-            if (node == 0 || node > num_nodes)
-              return;
-            local_nodes.push_back(node);
-            ref_stream->push_back(node);
-          };
-          tquery::stream_decoded_nodes(slices[s], delta_round, min_rule_id,
-                                       max_rule_id, rules_first, rules_second,
-                                       rule_cache, local_decoded, visit);
-        } else {
-          auto visit = [&](NodeId signed_node) {
-            const uint32_t node = tquery::abs_node_id(signed_node);
-            if (node == 0 || node > num_nodes)
-              return;
-            local_nodes.push_back(node);
-          };
-          tquery::stream_decoded_nodes(slices[s], delta_round, min_rule_id,
-                                       max_rule_id, rules_first, rules_second,
-                                       rule_cache, local_decoded, visit);
-        }
-
-        std::sort(local_nodes.begin(), local_nodes.end());
-        local_nodes.erase(
-            std::unique(local_nodes.begin(), local_nodes.end()),
-            local_nodes.end());
-        slice_nodes[s] = std::move(local_nodes);
-        local_nodes = std::vector<uint32_t>();
-      }
-    }
+    std::vector<uint32_t> &range_ids = entry.second;
+    std::sort(range_ids.begin(), range_ids.end(), [&](uint32_t a, uint32_t b) {
+      return std::tie(result.ranges[a].start, result.ranges[a].end, a) <
+             std::tie(result.ranges[b].start, result.ranges[b].end, b);
+    });
+    references.push_back({pit->second, std::move(range_ids)});
   }
 
-  // We no longer need the rule cache after slice decoding.
-  rule_cache.forward = std::vector<std::vector<int32_t>>();
-  rule_cache.ready = std::vector<uint8_t>();
-  rule_cache.bytes_used = 0;
-
-  // -------------------------------------------------------------------------
-  // Pass 2: build per-group sorted-unique node lists, then a
-  // CSR-shaped node->groups index. CSR avoids the per-node vector overhead
-  // (24 bytes empty * num_nodes) of the previous representation.
-  // -------------------------------------------------------------------------
-  std::vector<std::vector<uint32_t>> group_nodes(num_groups);
-  {
-    ScopedOMPThreads omp_scope(options.num_threads);
-    const int T = std::max(1, omp_scope.effective_threads());
-
-#pragma omp parallel for schedule(dynamic, 1) num_threads(T)
-    for (long long gll = 0; gll < static_cast<long long>(num_groups); ++gll) {
-      const uint32_t gid = static_cast<uint32_t>(gll);
-      auto &gn = group_nodes[gid];
-      size_t total = 0;
-      for (uint32_t s : meta.groups[gid])
-        total += slice_nodes[s].size();
-      gn.reserve(total);
-      for (uint32_t s : meta.groups[gid])
-        gn.insert(gn.end(), slice_nodes[s].begin(), slice_nodes[s].end());
-      std::sort(gn.begin(), gn.end());
-      gn.erase(std::unique(gn.begin(), gn.end()), gn.end());
-    }
-  }
-
-  // Free per-slice node lists; they are no longer needed.
-  slice_nodes = std::vector<std::vector<uint32_t>>();
-
-  // Build CSR: node_offsets[node..node+1] indexes into node_to_group_ids.
-  std::vector<uint64_t> node_offsets(static_cast<size_t>(num_nodes) + 2, 0);
-  for (const auto &gn : group_nodes) {
-    for (uint32_t node : gn) {
+  auto decode_slice = [&](uint32_t s, std::vector<NodeId> &scratch,
+                          auto &&visit) {
+    auto on_node = [&](NodeId signed_node) {
+      const uint32_t node = tquery::abs_node_id(signed_node);
       if (node != 0 && node <= num_nodes)
-        ++node_offsets[node + 1];
-    }
-  }
-  for (size_t i = 1; i < node_offsets.size(); ++i)
-    node_offsets[i] += node_offsets[i - 1];
+        visit(node);
+    };
+    tquery::stream_decoded_nodes(slices[s], delta_round, min_rule_id,
+                                 max_rule_id, rules_first, rules_second,
+                                 rule_cache, scratch, on_node);
+  };
 
-  const uint64_t total_entries = node_offsets[node_offsets.size() - 1];
-  std::vector<uint32_t> node_to_group_ids(total_entries);
-  {
-    std::vector<uint64_t> cursor(node_offsets.begin(),
-                                 node_offsets.end() - 1);
-    for (uint32_t gid = 0; gid < static_cast<uint32_t>(num_groups); ++gid) {
-      for (uint32_t node : group_nodes[gid]) {
-        if (node != 0 && node <= num_nodes)
-          node_to_group_ids[cursor[node]++] = gid;
+  // Walks a reference and calls emit(range id, node) for every node step that
+  // overlaps one of its ranges. A node is reported once per step and range.
+  auto sweep_reference = [&](const Reference &ref, std::vector<NodeId> &scratch,
+                             auto &&emit) {
+    const std::vector<uint32_t> &range_ids = ref.range_ids;
+    size_t next_range = 0;
+    uint64_t offset = 0;
+    decode_slice(ref.slice, scratch, [&](uint32_t node) {
+      const uint64_t node_start = offset;
+      const uint64_t node_end = offset + segment_lengths[node - 1];
+      offset = node_end;
+      while (next_range < range_ids.size() &&
+             result.ranges[range_ids[next_range]].end <= node_start)
+        ++next_range;
+      for (size_t j = next_range; j < range_ids.size(); ++j) {
+        const PavRange &r = result.ranges[range_ids[j]];
+        if (r.start >= node_end)
+          break;
+        if (r.end > node_start)
+          emit(range_ids[j], node);
       }
+    });
+  };
+
+  ScopedOMPThreads omp_scope(options.num_threads);
+  const int T = std::max(1, omp_scope.effective_threads());
+  const long long num_references = static_cast<long long>(references.size());
+
+  // --- Which nodes lie in a range. Only these need their groups known. ---
+  std::vector<uint8_t> in_range(static_cast<size_t>(num_nodes) + 1, 0);
+#pragma omp parallel num_threads(T)
+  {
+    std::vector<NodeId> scratch;
+#pragma omp for schedule(dynamic, 1)
+    for (long long r = 0; r < num_references; ++r) {
+      sweep_reference(references[r], scratch, [&](uint32_t, uint32_t node) {
+        uint8_t marked;
+#pragma omp atomic read
+        marked = in_range[node];
+        if (!marked) {
+#pragma omp atomic write
+          in_range[node] = 1;
+        }
+      });
     }
   }
-  group_nodes = std::vector<std::vector<uint32_t>>();
 
-  // -------------------------------------------------------------------------
-  // Pass 3: parallel over distinct BED chroms, sweep using
-  // the cached reference node streams. No rule expansion happens here.
-  // -------------------------------------------------------------------------
-  {
-    ScopedOMPThreads omp_scope(options.num_threads);
-    const int T = std::max(1, omp_scope.effective_threads());
-
+  // --- Node -> groups table for the nodes in a range, filled straight from
+  // the traversals: one decode counts the groups on each node, a second one
+  // writes them. Nothing is kept per traversal or per group in between. ---
+  auto for_each_group_node = [&](auto &&use) {
 #pragma omp parallel num_threads(T)
     {
-      std::vector<std::pair<uint32_t, uint32_t>> local_window_nodes;
-
+      NodeSet seen(num_nodes);
+      std::vector<NodeId> scratch;
 #pragma omp for schedule(dynamic, 1)
-      for (long long cll = 0;
-           cll < static_cast<long long>(chrom_list.size()); ++cll) {
-        const std::string &chrom = chrom_list[cll].first;
-        const std::vector<uint32_t> &ref_stream = ref_streams[cll];
+      for (long long gll = 0; gll < static_cast<long long>(num_groups); ++gll) {
+        const uint32_t gid = static_cast<uint32_t>(gll);
+        for (uint32_t s : meta.groups[gid])
+          decode_slice(s, scratch, [&](uint32_t node) {
+            if (in_range[node])
+              seen.insert(node);
+          });
+        seen.drain([&](uint32_t node) { use(gid, node); });
+      }
+    }
+  };
 
-        auto rit = ranges_by_chrom.find(chrom);
-        if (rit == ranges_by_chrom.end())
-          continue;
-
-        std::vector<uint32_t> range_ids = rit->second;
-        std::sort(range_ids.begin(), range_ids.end(),
-                  [&](uint32_t a, uint32_t b) {
-                    return std::tie(result.ranges[a].start,
-                                    result.ranges[a].end, a) <
-                           std::tie(result.ranges[b].start,
-                                    result.ranges[b].end, b);
-                  });
-
-        local_window_nodes.clear();
-        size_t next_range = 0;
-        uint64_t offset = 0;
-        for (uint32_t node : ref_stream) {
-          if (node == 0 || node > num_nodes)
-            continue;
-          const uint64_t len = segment_lengths[node - 1];
-          const uint64_t node_start = offset;
-          const uint64_t node_end = offset + len;
-          while (next_range < range_ids.size() &&
-                 result.ranges[range_ids[next_range]].end <= node_start) {
-            ++next_range;
-          }
-          for (size_t j = next_range; j < range_ids.size(); ++j) {
-            const PavRange &r = result.ranges[range_ids[j]];
-            if (r.start >= node_end)
-              break;
-            if (r.end > node_start && r.start < node_end)
-              local_window_nodes.emplace_back(range_ids[j], node);
-          }
-          offset = node_end;
-        }
-
-        std::sort(local_window_nodes.begin(), local_window_nodes.end());
-        local_window_nodes.erase(
-            std::unique(local_window_nodes.begin(),
-                        local_window_nodes.end()),
-            local_window_nodes.end());
-
-        for (const auto &wn : local_window_nodes) {
-          const uint32_t wid = wn.first;
-          const uint32_t node = wn.second;
-          const uint64_t len = segment_lengths[node - 1];
+  std::vector<uint32_t> groups_on_node(static_cast<size_t>(num_nodes) + 1, 0);
+  for_each_group_node([&](uint32_t, uint32_t node) {
 #pragma omp atomic
-          result.denominators[wid] += len;
-          const uint64_t start = node_offsets[node];
-          const uint64_t end = node_offsets[node + 1];
-          for (uint64_t k = start; k < end; ++k) {
-            const uint32_t gid = node_to_group_ids[k];
-            const size_t idx =
-                static_cast<size_t>(wid) * num_groups + gid;
-#pragma omp atomic
-            result.numerators[idx] += len;
-          }
-        }
+    ++groups_on_node[node];
+  });
+  std::vector<uint64_t> node_offsets(static_cast<size_t>(num_nodes) + 2, 0);
+  for (uint32_t node = 1; node <= num_nodes; ++node)
+    node_offsets[node + 1] = node_offsets[node] + groups_on_node[node];
+  std::vector<uint32_t> node_to_group_ids(node_offsets[num_nodes + 1]);
+  // Each group takes the next free slot of a node, counting groups_on_node
+  // back down, so a node's groups come in no particular order.
+  for_each_group_node([&](uint32_t gid, uint32_t node) {
+    uint32_t slot;
+#pragma omp atomic capture
+    slot = --groups_on_node[node];
+    node_to_group_ids[node_offsets[node] + slot] = gid;
+  });
+  std::vector<uint32_t>().swap(groups_on_node);
+  std::vector<uint8_t>().swap(in_range);
+
+  // --- Sweep each reference again and add every distinct (range, node) to
+  // the range's row. A range belongs to one reference, so its row has one
+  // writer. ---
+#pragma omp parallel num_threads(T)
+  {
+    std::vector<NodeId> scratch;
+    std::vector<std::pair<uint32_t, uint32_t>> range_nodes;
+#pragma omp for schedule(dynamic, 1)
+    for (long long r = 0; r < num_references; ++r) {
+      range_nodes.clear();
+      sweep_reference(references[r], scratch,
+                      [&](uint32_t range_id, uint32_t node) {
+                        range_nodes.emplace_back(range_id, node);
+                      });
+      std::sort(range_nodes.begin(), range_nodes.end());
+      range_nodes.erase(std::unique(range_nodes.begin(), range_nodes.end()),
+                        range_nodes.end());
+      for (const auto &rn : range_nodes) {
+        const uint32_t node = rn.second;
+        const uint64_t len = segment_lengths[node - 1];
+        result.denominators[rn.first] += len;
+        uint64_t *row = result.numerators.data() +
+                        static_cast<size_t>(rn.first) * num_groups;
+        for (uint64_t k = node_offsets[node]; k < node_offsets[node + 1]; ++k)
+          row[node_to_group_ids[k]] += len;
       }
     }
   }
