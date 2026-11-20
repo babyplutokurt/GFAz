@@ -34,27 +34,37 @@ that order, before its own `libhandlegraph`.
 | Part | Representation |
 |---|---|
 | Paths and walks | The container's grammar-compressed traversals, plus a `PathIndex` (see [workflows/LOCATE_WORKFLOW.md](workflows/LOCATE_WORKFLOW.md)) |
-| Node sequences | One decoded string and an offset per node |
+| Node sequences | 2 bits per base, with a side list for bases other than `ACGT`; a start offset for every 32nd node |
 | Edges | Sorted successor lists for both orientations of every node |
+| Node ids | Nothing when they are `1..N`; otherwise one entry per run of consecutive ids |
 | Path names | One string per path |
 
 Paths are never expanded as a whole. A step is found by decoding the index
 block that holds it; each thread keeps the last few decoded blocks.
 
+`GfazHandleGraph::load` frees each compressed column of the container once it
+has been decoded, and loads sequences and edges at the same time. HPRC v1.1
+(92.9 M nodes, 4.6 B steps) loads in about 9 s with a peak of 8.4 GB at 16
+threads; with a saved 1024-step index, 5.3 s and 8.0 GB. A graph built from a
+`CompressedData` the caller keeps cannot free those columns.
+
 ## Cost of each operation
 
 | Operation | Cost |
 |---|---|
-| Node, sequence, edge and degree queries | O(1), plain arrays |
+| Node, sequence, edge and degree queries | O(1); a sequence is unpacked on request |
 | Walking a path (`get_next_step`, `get_previous_step`, `for_each_step_in_path`) | Amortized O(1): one block decode per `block_steps` steps |
 | `get_step_at_position`, `get_position_of_step`, `get_path_length` | One block decode, or none if the block is cached |
-| `for_each_step_on_handle`, `for_each_step_position_on_handle`, `steps_of_handle` | One block decode per haplotype block whose node-id range covers the node |
+| `for_each_step_on_handle`, `for_each_step_position_on_handle`, `steps_of_handle` | One block decode per block listed for the node's zone of 256 ids |
 
-The last row is the one to watch. On a graph numbered along the genome it is
-about one block per haplotype, which is fine for a handful of nodes and slow as
-the inner loop of an algorithm that asks for the steps on every node. A smaller
-`block_steps` (default 1024 here, 4096 for the CLI) makes each decode cheaper
-and the index larger. GBWT-based graphs answer that query natively.
+The last row is the one to watch. The index lists, for each zone of 256 node
+ids, the blocks that visit a node in it: about 100 blocks for a typical zone of
+HPRC chr6, but tens of thousands in repeat-rich zones. A smaller `block_steps`
+(default 1024 here, 4096 for the CLI) makes each decode cheaper and the index
+larger. A saved index is used as it is, so for this adapter write it with
+`gfaz index -b 1024`: `vg deconstruct` on chr6 takes 85 s with a 1024-step
+index and 103 s with a 4096-step one. GBWT-based graphs answer the query
+natively.
 
 The graph cannot be modified. Algorithms that need a mutable graph must convert
 first.

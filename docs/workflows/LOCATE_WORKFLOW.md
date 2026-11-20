@@ -32,33 +32,36 @@ and the `#node` column repeats it.
 A container stores each haplotype as a compressed sequence that can only be
 decoded from its start. The index cuts every haplotype into blocks of about
 4096 steps and records, per block, where it starts (in encoded elements, steps
-and bases), the decoder state at that point, and the smallest and largest node
-id it visits. Two things follow:
+and bases) and the decoder state at that point. Node ids are grouped into zones
+of 256 consecutive ids, and each zone lists the blocks that visit one of its
+nodes. Two things follow:
 
 - **Random access.** A step or base position is reached by decoding one block.
-- **Node lookup.** Only blocks whose id range covers a node can visit it. Graph
-  builders number nodes roughly along the genome, so that is typically one block
-  per haplotype. On a graph with scattered ids more blocks qualify and lookups
-  slow down, but stay correct.
+- **Node lookup.** Only the blocks listed for a node's zone are decoded. On HPRC
+  chr6 the median zone lists about 100 blocks for 1,410 haplotypes. Zones in
+  repeat-rich parts of the graph list far more (the top 1% list tens of
+  thousands), and lookups there are correspondingly slower.
 
 The index is not part of the `.gfaz` format. `gfaz index` writes it to
 `<input>.pidx`; `locate` and `extract-region` use that file when it exists
 (`-x` names another), and build the index in memory otherwise. An index built
-from a different container is rejected.
+from a different container is rejected, and so is one written before the zone
+lists were added (rebuild it with `gfaz index`).
 
 ## Cost
 
 16 threads. "Query" is the whole command, including loading the container.
 
-| Graph | Index build | Index size | `locate`, saved index | `locate`, no index | `extract-region` 100 kb, saved index |
-|---|---|---|---|---|---|
-| HPRC chr6 | 0.4 s | 4 MB | 0.15 s | 0.5 s | 0.36 s |
-| HPRC v1.1 | 5.9 s | 47 MB | 2.2 s | 5.7 s | 7.4 s |
+| Graph | Index build | Index size | `locate`, saved index | `locate`, no index | `extract-region` 100 kb, saved index | `extract-region`, no index |
+|---|---|---|---|---|---|---|
+| HPRC chr6 | 0.5 s | 69 MB | 0.15 s | 0.5 s | 0.44 s | 0.8 s |
+| HPRC v1.1 | 6.2 s | 167 MB | 3.5 s | 7.2 s | 7.7 s | 11.5 s |
 
-With a saved index the remaining time is decoding whole columns of the
-container (rulebook and traversals for both commands; segment sequences and
-links for `extract-region`). The lookup itself takes milliseconds, which is
-what a long-running process that loads the container once would pay per query.
+With a saved index the remaining time is reading the index and decoding whole
+columns of the container (rulebook and traversals for both commands; segment
+sequences and links for `extract-region`). The lookup itself takes
+milliseconds, which is what a long-running process that loads the container
+once would pay per query.
 
 ## Validation
 
