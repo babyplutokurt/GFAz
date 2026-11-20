@@ -125,6 +125,7 @@ SEGMENT_NAMINGS = {
     "sparse": lambda n: str(1000 + 3 * n),
     "named": lambda n: f"s{n}x",
     "mixed": lambda n: f"{n + 5:04d}" if n < 100 else f"utg{n}",
+    "zero_based": lambda n: str(n - 1),
 }
 
 

@@ -15,6 +15,7 @@ kind of naming:
     original names.
 """
 
+import hashlib
 import os
 import random
 import struct
@@ -38,9 +39,12 @@ def naming_schemes():
       "prefixed": (lambda i: f"s{i}", 6),
       "sparse_numbers": (lambda i: str(1000 + 3 * i), 6),
       "shuffled_numbers": (lambda i: str(shuffled[i - 1]), 6),
-      "strings": (lambda i: f"utg{i:06d}l", 6),
+      "padded_with_suffix": (lambda i: f"utg{i:06d}l", 6),
+      "padding_overflows": (lambda i: f"n{i + 9000:04d}", 6),
       "zero_padded": (lambda i: f"{i:05d}", 6),
+      "zero_based": (lambda i: str(i - 1), 6),
       "mixed": (lambda i: str(i) if i % 7 else f"alt_{i}", 6),
+      "unrelated": (lambda i: hashlib.md5(str(i).encode()).hexdigest()[:9], 6),
   }
 
 

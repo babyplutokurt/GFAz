@@ -327,8 +327,11 @@ void GfazHandleGraph::number_nodes() {
     return;
 
   std::vector<nid_t> ids(num_nodes);
-  if (names.plain_numbers()) {
-    ids.assign(names.numbers().begin(), names.numbers().end());
+  const std::vector<uint32_t> &numbers = names.numbers();
+  if (names.plain_numbers() &&
+      std::find(numbers.begin(), numbers.end(), 0u) == numbers.end()) {
+    // Every name is a positive number: no need to format and parse them.
+    ids.assign(numbers.begin(), numbers.end());
   } else {
     bool numeric = true;
     nid_t largest = 0;

@@ -75,7 +75,9 @@ struct CompressedData {
   // Segment names by ID; see core/model/segment_names.hpp. Encoding 0 means
   // the names are the decimal IDs 1..N and nothing is stored.
   uint8_t segment_name_encoding = 0;
-  std::string segment_name_prefix;             // numbered names
+  std::string segment_name_prefix;               // numbered names
+  std::string segment_name_suffix;               // numbered names
+  uint8_t segment_name_width = 0;                // numbered names; 0 = no padding
   ZstdCompressedBlock segment_name_numbers_zstd; // numbered names
   ZstdCompressedBlock segment_names_zstd;        // string names
   ZstdCompressedBlock segment_name_lengths_zstd; // string names

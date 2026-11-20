@@ -305,6 +305,8 @@ void serialize_compressed_data(const CompressedData &data,
   if (data.has_segment_names()) {
     write_val(out, data.segment_name_encoding);
     write_str(out, data.segment_name_prefix);
+    write_str(out, data.segment_name_suffix);
+    write_val(out, data.segment_name_width);
     write_block(out, data.segment_name_numbers_zstd);
     write_block(out, data.segment_names_zstd);
     write_block(out, data.segment_name_lengths_zstd);
@@ -439,6 +441,8 @@ CompressedData deserialize_compressed_data(std::istream &input) {
                                "unknown segment name encoding " +
                                std::to_string(data.segment_name_encoding));
     data.segment_name_prefix = read_str(r);
+    data.segment_name_suffix = read_str(r);
+    data.segment_name_width = read_val<uint8_t>(r);
     data.segment_name_numbers_zstd = read_block(r);
     data.segment_names_zstd = read_block(r);
     data.segment_name_lengths_zstd = read_block(r);
