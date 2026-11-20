@@ -1,6 +1,7 @@
 #include "compute/pav_workflow.hpp"
 
 #include "core/utils/threading_utils.hpp"
+#include "compute/packed_uints.hpp"
 #include "compute/traversal_query.hpp"
 
 #include <algorithm>
@@ -316,14 +317,17 @@ PavResult compute_pav(const CompressedData &data, const PavOptions &options) {
   std::vector<uint64_t> node_offsets(static_cast<size_t>(num_nodes) + 2, 0);
   for (uint32_t node = 1; node <= num_nodes; ++node)
     node_offsets[node + 1] = node_offsets[node] + groups_on_node[node];
-  std::vector<uint32_t> node_to_group_ids(node_offsets[num_nodes + 1]);
+  // Group ids take the fewest bytes that hold them; this table is where the
+  // memory goes.
+  PackedUints node_to_group_ids(node_offsets[num_nodes + 1],
+                                static_cast<uint32_t>(num_groups - 1));
   // Each group takes the next free slot of a node, counting groups_on_node
   // back down, so a node's groups come in no particular order.
   for_each_group_node([&](uint32_t gid, uint32_t node) {
     uint32_t slot;
 #pragma omp atomic capture
     slot = --groups_on_node[node];
-    node_to_group_ids[node_offsets[node] + slot] = gid;
+    node_to_group_ids.set(node_offsets[node] + slot, gid);
   });
   std::vector<uint32_t>().swap(groups_on_node);
   std::vector<uint8_t>().swap(in_range);

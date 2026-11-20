@@ -1,6 +1,7 @@
 #include "compute/similarity_workflow.hpp"
 
 #include "core/utils/threading_utils.hpp"
+#include "compute/packed_uints.hpp"
 #include "compute/traversal_query.hpp"
 
 #include <algorithm>
@@ -25,6 +26,34 @@ using namespace gfaz::tquery;
 // Grouping setup: map every P/W slice to a dense group id and name. Mirrors
 // pav_workflow.cpp:build_metadata (a dedup candidate flagged in
 // docs/EXTENDING_COMPUTE_ENGINE.md §7).
+// Visit counts, one byte each. A node is rarely visited 255 times or more by
+// one group; those counts are kept aside. set() may be called from several
+// threads for different entries; get() only once all are set.
+class VisitCounts {
+public:
+  explicit VisitCounts(uint64_t size) : small_(size) {}
+
+  void set(uint64_t i, uint32_t visits) {
+    if (visits < kLarge) {
+      small_[i] = static_cast<uint8_t>(visits);
+      return;
+    }
+    small_[i] = kLarge;
+#pragma omp critical(gfaz_similarity_large_visits)
+    large_.emplace(i, visits);
+  }
+
+  uint32_t get(uint64_t i) const {
+    const uint8_t visits = small_[i];
+    return visits < kLarge ? visits : large_.at(i);
+  }
+
+private:
+  static constexpr uint8_t kLarge = 255;
+  std::vector<uint8_t> small_;
+  std::unordered_map<uint64_t, uint32_t> large_;
+};
+
 struct GroupMeta {
   std::vector<std::string> group_names;        // gid -> name
   std::vector<uint32_t> group_of_slice;        // slice -> gid
@@ -193,16 +222,16 @@ void similarity_to_tsv(const CompressedData &data,
   // Second decode: fill. Each group takes the next free slot of every node it
   // visits, counting groups_on_node back down, so a node's groups come in no
   // particular order.
-  std::vector<uint32_t> csr_gid(total_entries);
-  std::vector<uint32_t> csr_visits(total_entries);
+  PackedUints csr_gid(total_entries, static_cast<uint32_t>(num_groups - 1));
+  VisitCounts csr_visits(total_entries);
   for_each_group_counted([&](uint32_t gid, const VisitCounter &counter) {
     for (uint32_t node : counter.touched) {
       uint32_t slot;
 #pragma omp atomic capture
       slot = --groups_on_node[node];
       const uint64_t k = node_off[node] + slot;
-      csr_gid[k] = gid;
-      csr_visits[k] = counter.visits[node];
+      csr_gid.set(k, gid);
+      csr_visits.set(k, counter.visits[node]);
     }
   });
   std::vector<uint32_t>().swap(groups_on_node);
@@ -225,7 +254,7 @@ void similarity_to_tsv(const CompressedData &data,
         const uint64_t hi = node_off[node + 1];
         on_node.clear();
         for (uint64_t i = lo; i < hi; ++i)
-          on_node.emplace_back(csr_gid[i], csr_visits[i]);
+          on_node.emplace_back(csr_gid[i], csr_visits.get(i));
         std::sort(on_node.begin(), on_node.end());
         const uint64_t length = segment_lengths[node - 1];
         for (size_t i = 0; i < on_node.size(); ++i) {

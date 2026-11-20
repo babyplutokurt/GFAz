@@ -61,8 +61,9 @@ decoded is kept between steps.
 
 Key properties:
 
-1. Peak memory is the node→groups table for the nodes that lie in a range,
-   plus per-node arrays (12 bytes per node while filling) and one bitmap per
+1. Peak memory is the node→groups table for the nodes that lie in a range
+   (1, 2 or 4 bytes per entry, the fewest that hold a group id; see
+   `compute/packed_uints.hpp`), plus per-node arrays (12 bytes per node while filling) and one bitmap per
    thread. A BED that covers a few regions needs a small table however large
    the graph is; whole-path BEDs need one entry per (node, group) pair.
 2. Traversals are decoded more than once (references twice, everything else
@@ -251,16 +252,17 @@ diff -u "$WORK/odgi.sorted.tsv" "$WORK/gfaz.sorted.tsv" | head -40
 ## Reference benchmark numbers
 
 Whole-path BEDs (one range per path or walk), 16 threads, on a machine with
-other load, old and new binaries run back to back. Outputs are byte-identical.
+other load, so times vary from run to run by tens of percent. Outputs are
+byte-identical.
 
 | Graph, grouping | Before | Now |
 |---|---|---|
-| chr6 (1,410 paths), per path | 17.0 s, 6.6 GB | 9.9 s, 3.3 GB |
-| chr6, `-S` | 12.9 s, 6.2 GB | 7.9 s, 2.9 GB |
-| HPRC v1.1 (30,640 walks), per walk, `-M` | 269 s, 88.4 GB | 130 s, 35.4 GB |
-| HPRC v1.1, `-S` | 168 s, 75.9 GB | 100 s, 22.9 GB |
-| HPRC v2.1 (60,807 walks), per walk, `-M` | killed above 460 GB | 1,124 s, 190 GB |
-| HPRC v2.1, `-S` | not run | 842 s, 110 GB |
+| chr6 (1,410 paths), per path | 17.0 s, 6.6 GB | 6.0 s, 2.9 GB |
+| chr6, `-S` | 12.9 s, 6.2 GB | 4.0 s, 2.4 GB |
+| HPRC v1.1 (30,640 walks), per walk, `-M` | 269 s, 88.4 GB | 152 s, 26.4 GB |
+| HPRC v1.1, `-S` | 168 s, 75.9 GB | 56 s, 15.3 GB |
+| HPRC v2.1 (60,807 walks), per walk, `-M` | killed above 460 GB | 956 s, 112 GB |
+| HPRC v2.1, `-S` | not run | 666 s, 47 GB |
 
 The HPRC v2.1 output has nothing to be compared with: the earlier code did
 not finish on it.
@@ -316,39 +318,36 @@ divergence is specific to mixed P+W or PanSN subpath naming.
 
 In rough priority order.
 
-1. **Narrower group ids.** `node_to_group_ids` holds 32-bit ids; with at
-   most 65,536 groups 16 bits would do and halve the table.
-
-2. **Pin down the numeric divergence vs. odgi.** Build a single-window BED
+1. **Pin down the numeric divergence vs. odgi.** Build a single-window BED
    on a name where the two disagree, hand-trace which group is misclassified
    under `-S`, and fix the parser (or odgi's behaviour, depending on which
    is canonical for downstream tooling).
 
-3. **`-p / --path-groups`** support. Accept odgi's two-column TSV
+2. **`-p / --path-groups`** support. Accept odgi's two-column TSV
    (`path.name<TAB>group.name`) so users can map paths to arbitrary groups.
 
-4. **Auxiliary per-slice node-set sidecar.** Optionally precompute a
+3. **Auxiliary per-slice node-set sidecar.** Optionally precompute a
    Roaring bitmap per path/walk during compression and persist it next to
    the `.gfaz`. The group decodes of `pav` then become "OR a few bitmaps" with no
    grammar decoding at all. Roaring bitmaps for HPRC ≈ tens of MB total,
    smaller than the rule cache. Opt-in so non-PAV users don't pay storage.
 
-5. **`--stats` instrumentation.** Print time spent per phase (rule cache
+4. **`--stats` instrumentation.** Print time spent per phase (rule cache
    build, slice decode, group assembly, BED sweep) and counts (slices
    decoded, distinct chroms). Helps
    future tuning be data-driven instead of speculative.
 
-6. **Streaming output.** For matrix output on huge BEDs, format and emit
+5. **Streaming output.** For matrix output on huge BEDs, format and emit
    rows as soon as their numerator row is finalised so peak memory is
    bounded by `num_groups`, not `num_windows * num_groups`. Currently we
    keep the full numerator array.
 
-7. **Per-walk reference offset cache on disk.** Optional: cache the decoded
+6. **Per-walk reference offset cache on disk.** Optional: cache the decoded
    reference offset stream in a sidecar so repeated PAV queries against
    the same `.gfaz` skip the reference decodes for previously-seen reference
    walks. Pure win for repeated workloads, no help for one-shot.
 
-8. **GPU offload of the traversal decodes.** Slice decoding is embarrassingly parallel
+7. **GPU offload of the traversal decodes.** Slice decoding is embarrassingly parallel
    and dominated by integer arithmetic over compact arrays. Worth
    exploring once the CPU pipeline is fully tuned and we have a clear
    roofline.
