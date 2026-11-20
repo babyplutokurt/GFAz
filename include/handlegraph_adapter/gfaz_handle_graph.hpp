@@ -26,6 +26,7 @@
 // -DGFAZ_BUILD_HANDLEGRAPH=ON; see docs/HANDLEGRAPH_ADAPTER.md.
 
 #include "compute/indexed_paths.hpp"
+#include "handlegraph_adapter/packed_sequences.hpp"
 #include "core/defaults.hpp"
 #include "core/model/compressed_data.hpp"
 
@@ -155,7 +156,16 @@ private:
   class BlockCache;
   BlockCache &thread_cache() const;
 
+  // `owned` is the container when this graph may empty the parts of it that
+  // it has finished reading, so they do not stay in memory next to their
+  // decoded form; null leaves the container untouched.
+  GfazHandleGraph(const CompressedData &data,
+                  const GfazHandleGraphOptions &options, CompressedData *owned);
+
   void number_nodes();
+  nid_t id_of_segment(uint32_t segment) const;
+  // Where a segment's sequence starts in sequences_.
+  uint64_t sequence_begin(uint32_t segment) const;
   void load_sequences(const CompressedData &data);
   void build_adjacency(const CompressedData &data, int num_threads);
   void name_paths(const CompressedData &data,
@@ -168,18 +178,26 @@ private:
   uint64_t instance_id_ = 0; // tells cached blocks of different graphs apart
   size_t cached_blocks_ = 0;
 
-  // Node ids when they are not simply the segment numbers (see number_nodes):
-  // node_ids_[n - 1] is the id of segment n, and nodes_by_id_ is the same
-  // pairing sorted by id. Both are empty when segment n has id n.
-  std::vector<nid_t> node_ids_;
-  std::vector<std::pair<nid_t, uint32_t>> nodes_by_id_;
+  // Node ids when they are not simply the segment numbers (see number_nodes),
+  // as runs: the segments from id_runs_[r].segment up to the next run have the
+  // consecutive ids from id_runs_[r].id. runs_by_id_ lists the runs by id.
+  // Both are empty when segment n has id n.
+  struct IdRun {
+    uint32_t segment;
+    nid_t id;
+  };
+  std::vector<IdRun> id_runs_;
+  std::vector<uint32_t> runs_by_id_;
   nid_t min_node_id_ = 0;
   nid_t max_node_id_ = 0;
 
-  // Segment n occupies
-  // sequences_[sequence_offsets_[n - 1], sequence_offsets_[n]).
-  std::string sequences_;
-  std::vector<uint64_t> sequence_offsets_;
+  // The sequences of all segments back to back. sequence_starts_[k] is where
+  // segment k * kSequenceStride + 1 starts; the segments in between are found
+  // by adding up their lengths.
+  static constexpr uint32_t kSequenceStride = 32;
+  PackedSequences sequences_;
+  std::vector<uint64_t> sequence_starts_;
+  uint64_t total_length_ = 0;
 
   // A handle packs a segment number and an orientation, whatever the node ids
   // are. Successors of every oriented node, as packed handles: the list of

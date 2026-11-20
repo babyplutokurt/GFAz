@@ -276,7 +276,8 @@ if(GFAZ_BUILD_HANDLEGRAPH)
                         "to point at the libhandlegraph include directory")
   endif()
   add_library(gfaz_handlegraph STATIC
-    src/handlegraph_adapter/gfaz_handle_graph.cpp)
+    src/handlegraph_adapter/gfaz_handle_graph.cpp
+    src/handlegraph_adapter/packed_sequences.cpp)
   set_target_properties(gfaz_handlegraph PROPERTIES POSITION_INDEPENDENT_CODE ON)
   configure_gfa_target(gfaz_handlegraph)
   target_include_directories(gfaz_handlegraph SYSTEM PUBLIC

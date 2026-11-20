@@ -9,6 +9,8 @@
 #include <handlegraph/util.hpp>
 
 #include <algorithm>
+#include <exception>
+#include <thread>
 #include <atomic>
 #include <fstream>
 #include <stdexcept>
@@ -129,6 +131,19 @@ private:
 
 GfazHandleGraph::GfazHandleGraph(const CompressedData &data,
                                  const GfazHandleGraphOptions &options)
+    : GfazHandleGraph(data, options, nullptr) {}
+
+namespace {
+
+void release(ZstdCompressedBlock &block) {
+  std::vector<uint8_t>().swap(block.payload);
+}
+
+} // namespace
+
+GfazHandleGraph::GfazHandleGraph(const CompressedData &data,
+                                 const GfazHandleGraphOptions &options,
+                                 CompressedData *owned)
     : paths_(data,
              IndexedPathsOptions{options.index_path, options.block_steps,
                                  options.num_threads}),
@@ -143,9 +158,43 @@ GfazHandleGraph::GfazHandleGraph(const CompressedData &data,
             "gfaz handle graph: a path visits a node that has no segment");
     }
 
+  // The traversals are decoded now.
+  if (owned) {
+    release(owned->rules_first_zstd);
+    release(owned->rules_second_zstd);
+    release(owned->paths_zstd);
+    release(owned->walks_zstd);
+  }
+
   number_nodes();
-  load_sequences(data);
-  build_adjacency(data, options.num_threads);
+
+  // Sequences and edges come from different parts of the container; read them
+  // side by side.
+  std::exception_ptr sequence_error;
+  std::thread sequence_job([&]() {
+    try {
+      ScopedOMPThreads omp_scope(options.num_threads);
+      load_sequences(data);
+    } catch (...) {
+      sequence_error = std::current_exception();
+    }
+  });
+  try {
+    build_adjacency(data, options.num_threads);
+  } catch (...) {
+    sequence_job.join();
+    throw;
+  }
+  sequence_job.join();
+  if (sequence_error)
+    std::rethrow_exception(sequence_error);
+  if (owned) {
+    release(owned->segment_sequences_zstd);
+    release(owned->link_from_ids_zstd);
+    release(owned->link_to_ids_zstd);
+    release(owned->link_from_orients_zstd);
+    release(owned->link_to_orients_zstd);
+  }
   name_paths(data, options.reference_samples);
 }
 
@@ -155,49 +204,87 @@ std::unique_ptr<GfazHandleGraph>
 GfazHandleGraph::load(const std::string &path, GfazHandleGraphOptions options) {
   if (options.index_path.empty() && std::ifstream(path + ".pidx").good())
     options.index_path = path + ".pidx";
-  const CompressedData data = deserialize_compressed_data(path);
-  return std::make_unique<GfazHandleGraph>(data, options);
+  CompressedData data = deserialize_compressed_data(path);
+  return std::unique_ptr<GfazHandleGraph>(
+      new GfazHandleGraph(data, options, &data));
 }
 
 void GfazHandleGraph::load_sequences(const CompressedData &data) {
-  sequences_ = Codec::zstd_decompress_string(data.segment_sequences_zstd);
+  // Decompression comes in small pieces; collect enough of them for the
+  // packing to be worth several threads.
+  constexpr size_t kPackBytes = size_t{64} << 20;
+  std::string pending;
+  pending.reserve(kPackBytes);
+  Codec::zstd_decompress_in_pieces(
+      data.segment_sequences_zstd, [&](const char *text, size_t count) {
+        pending.append(text, count);
+        if (pending.size() >= kPackBytes) {
+          sequences_.append(pending.data(), pending.size());
+          pending.clear();
+        }
+      });
+  sequences_.append(pending.data(), pending.size());
   const std::vector<uint32_t> &lengths = paths_.segment_lengths;
-  sequence_offsets_.resize(lengths.size() + 1);
+  sequence_starts_.reserve(lengths.size() / kSequenceStride + 1);
   uint64_t offset = 0;
   for (size_t i = 0; i < lengths.size(); ++i) {
-    sequence_offsets_[i] = offset;
+    if (i % kSequenceStride == 0)
+      sequence_starts_.push_back(offset);
     offset += lengths[i];
   }
-  sequence_offsets_[lengths.size()] = offset;
+  total_length_ = offset;
   if (offset > sequences_.size())
     throw std::runtime_error(
         "gfaz handle graph: segment sequence column is truncated");
 }
 
+uint64_t GfazHandleGraph::sequence_begin(uint32_t segment) const {
+  const size_t index = segment - 1;
+  const size_t first = index - index % kSequenceStride;
+  uint64_t offset = sequence_starts_[index / kSequenceStride];
+  for (size_t i = first; i < index; ++i)
+    offset += paths_.segment_lengths[i];
+  return offset;
+}
+
 void GfazHandleGraph::build_adjacency(const CompressedData &data,
                                       int num_threads) {
-  const LinkData links = gfa_write_utils::decompress_links(data);
   const uint32_t num_nodes = paths_.num_nodes();
   const size_t num_handles = 2 * static_cast<size_t>(num_nodes);
+
+  // Only the ends of the links are needed, not their overlaps or tags.
+  std::vector<uint32_t> from_ids = Codec::decompress_delta_varint_uint32(
+      data.link_from_ids_zstd, data.num_links);
+  std::vector<uint32_t> to_ids = Codec::decompress_delta_varint_uint32(
+      data.link_to_ids_zstd, data.num_links);
+  std::vector<char> from_orients = Codec::decompress_orientations(
+      data.link_from_orients_zstd, data.num_links);
+  std::vector<char> to_orients =
+      Codec::decompress_orientations(data.link_to_orients_zstd, data.num_links);
+  const size_t num_links =
+      std::min({from_ids.size(), to_ids.size(), from_orients.size(),
+                to_orients.size()});
 
   // Each link is stored from both ends: a -> b, and flip(b) -> flip(a). Call
   // visit(from, to) with packed handles for every stored direction.
   auto for_each_direction = [&](auto &&visit) {
-    for (size_t i = 0; i < links.from_ids.size(); ++i) {
-      const uint32_t from_id = links.from_ids[i];
-      const uint32_t to_id = links.to_ids[i];
+    for (size_t i = 0; i < num_links; ++i) {
+      const uint32_t from_id = from_ids[i];
+      const uint32_t to_id = to_ids[i];
       if (from_id == 0 || to_id == 0 || from_id > num_nodes || to_id > num_nodes)
         continue;
-      const uint32_t a = (from_id << 1) | (links.from_orients[i] == '-');
-      const uint32_t b = (to_id << 1) | (links.to_orients[i] == '-');
+      const uint32_t a = (from_id << 1) | (from_orients[i] == '-');
+      const uint32_t b = (to_id << 1) | (to_orients[i] == '-');
       visit(a, b);
       if ((b ^ 1) != a || (a ^ 1) != b)
         visit(b ^ 1, a ^ 1);
     }
   };
 
-  // Counting pass, then fill (handles start at 2, hence the shift).
-  std::vector<uint32_t> offsets(num_handles + 1, 0);
+  // Count the successors of every handle, then turn the counts into list
+  // starts (handles start at 2, hence the shift).
+  std::vector<uint32_t> &offsets = edge_offsets_;
+  offsets.assign(num_handles + 1, 0);
   uint64_t total = 0;
   for_each_direction([&](uint32_t from, uint32_t) {
     ++offsets[from - 2 + 1];
@@ -207,15 +294,22 @@ void GfazHandleGraph::build_adjacency(const CompressedData &data,
     throw std::runtime_error("gfaz handle graph: too many links");
   for (size_t h = 0; h < num_handles; ++h)
     offsets[h + 1] += offsets[h];
-  std::vector<uint32_t> targets(total);
-  {
-    std::vector<uint32_t> cursor(offsets.begin(), offsets.end() - 1);
-    for_each_direction(
-        [&](uint32_t from, uint32_t to) { targets[cursor[from - 2]++] = to; });
-  }
 
-  // Sort each list and drop repeated links, then close the gaps.
-  std::vector<uint32_t> kept(num_handles, 0);
+  // Fill, advancing each list's start as its cursor. Afterwards the start of
+  // list h sits where the start of list h + 1 belongs; shift them back.
+  std::vector<uint32_t> targets(total);
+  for_each_direction(
+      [&](uint32_t from, uint32_t to) { targets[offsets[from - 2]++] = to; });
+  for (size_t h = num_handles; h > 0; --h)
+    offsets[h] = offsets[h - 1];
+  offsets[0] = 0;
+  std::vector<uint32_t>().swap(from_ids);
+  std::vector<uint32_t>().swap(to_ids);
+  std::vector<char>().swap(from_orients);
+  std::vector<char>().swap(to_orients);
+
+  // Sort each list and drop repeated links. A dropped slot is marked with 0,
+  // which is not a handle.
   {
     ScopedOMPThreads omp_scope(num_threads);
 #pragma omp parallel for schedule(dynamic, 4096)
@@ -223,26 +317,33 @@ void GfazHandleGraph::build_adjacency(const CompressedData &data,
       uint32_t *begin = targets.data() + offsets[h];
       uint32_t *end = targets.data() + offsets[h + 1];
       std::sort(begin, end);
-      kept[h] = static_cast<uint32_t>(std::unique(begin, end) - begin);
+      std::fill(std::unique(begin, end), end, 0);
     }
   }
-  edge_offsets_.assign(num_handles + 1, 0);
+
+  // Close the gaps. The write position never passes the read position, so
+  // both the targets and the starts are rewritten in place.
   size_t write = 0;
   edge_count_ = 0;
   for (size_t h = 0; h < num_handles; ++h) {
-    edge_offsets_[h] = static_cast<uint32_t>(write);
+    const size_t begin = offsets[h];
+    const size_t end = offsets[h + 1];
+    offsets[h] = static_cast<uint32_t>(write);
     const uint32_t from = static_cast<uint32_t>(h + 2);
-    for (uint32_t i = 0; i < kept[h]; ++i) {
-      const uint32_t to = targets[offsets[h] + i];
+    for (size_t i = begin; i < end && targets[i] != 0; ++i) {
+      const uint32_t to = targets[i];
       targets[write++] = to;
       // Count an edge at the smaller of its two stored directions.
       if (std::make_pair(from, to) <= std::make_pair(to ^ 1, from ^ 1))
         ++edge_count_;
     }
   }
-  edge_offsets_[num_handles] = static_cast<uint32_t>(write);
+  offsets[num_handles] = static_cast<uint32_t>(write);
+  // Give back the slots of dropped links only when there are many: shrinking
+  // copies the whole array.
   targets.resize(write);
-  targets.shrink_to_fit();
+  if (targets.capacity() - targets.size() > targets.size() / 16)
+    targets.shrink_to_fit();
   edge_targets_ = std::move(targets);
 }
 
@@ -326,17 +427,30 @@ void GfazHandleGraph::number_nodes() {
   if (names.dense())
     return;
 
-  std::vector<nid_t> ids(num_nodes);
+  // Ids come out one segment at a time and are kept as runs of consecutive
+  // values.
+  std::vector<IdRun> runs;
+  nid_t previous = 0;
+  auto add = [&](uint32_t segment, nid_t id) {
+    if (runs.empty() || id != previous + 1)
+      runs.push_back({segment, id});
+    previous = id;
+  };
+
   // Names that are all positive numbers need no formatting and parsing.
   bool positive_numbers = names.plain_numbers();
   if (positive_numbers) {
     SegmentNames::RunHint hint;
-    for (uint32_t segment = 1; segment <= num_nodes; ++segment) {
-      ids[segment - 1] = names.number(segment, hint);
-      positive_numbers = positive_numbers && ids[segment - 1] > 0;
+    for (uint32_t segment = 1; segment <= num_nodes && positive_numbers;
+         ++segment) {
+      const nid_t id = names.number(segment, hint);
+      positive_numbers = id > 0;
+      if (positive_numbers)
+        add(segment, id);
     }
   }
   if (!positive_numbers) {
+    runs.clear();
     bool numeric = true;
     nid_t largest = 0;
     std::string name;
@@ -355,38 +469,70 @@ void GfazHandleGraph::number_nodes() {
       if (!numeric)
         id = largest + 1;
       largest = std::max(largest, id);
-      ids[segment - 1] = id;
+      add(segment, id);
     }
   }
+  if (runs.empty() || (runs.size() == 1 && runs[0].id == 1))
+    return; // segment n has id n
 
-  std::vector<std::pair<nid_t, uint32_t>> by_id(num_nodes);
-  bool identity = true;
-  for (uint32_t i = 0; i < num_nodes; ++i) {
-    by_id[i] = {ids[i], i + 1};
-    identity = identity && ids[i] == static_cast<nid_t>(i + 1);
-  }
-  if (identity)
-    return;
-  std::sort(by_id.begin(), by_id.end());
+  // The last id of a run, given where the next run starts.
+  auto last_id = [&](uint32_t r) {
+    const uint32_t end =
+        r + 1 < runs.size() ? runs[r + 1].segment : num_nodes + 1;
+    return runs[r].id + static_cast<nid_t>(end - runs[r].segment) - 1;
+  };
+  std::vector<uint32_t> by_id(runs.size());
+  for (uint32_t r = 0; r < by_id.size(); ++r)
+    by_id[r] = r;
+  std::sort(by_id.begin(), by_id.end(),
+            [&](uint32_t a, uint32_t b) { return runs[a].id < runs[b].id; });
   // Two names with one value ("7" and "007") cannot both be that id.
   for (size_t i = 1; i < by_id.size(); ++i)
-    if (by_id[i].first == by_id[i - 1].first)
-      return;
-  node_ids_ = std::move(ids);
-  nodes_by_id_ = std::move(by_id);
-  min_node_id_ = nodes_by_id_.front().first;
-  max_node_id_ = nodes_by_id_.back().first;
+    if (runs[by_id[i]].id <= last_id(by_id[i - 1]))
+      throw std::runtime_error(
+          "gfaz handle graph: two segment names give the node id " +
+          std::to_string(runs[by_id[i]].id));
+  min_node_id_ = runs[by_id.front()].id;
+  max_node_id_ = last_id(by_id.back());
+  id_runs_ = std::move(runs);
+  runs_by_id_ = std::move(by_id);
+}
+
+handlegraph::nid_t GfazHandleGraph::id_of_segment(uint32_t segment) const {
+  if (id_runs_.empty())
+    return static_cast<nid_t>(segment);
+  // Lookups come in runs of neighbouring segments: try the run found last.
+  thread_local size_t hint = 0;
+  size_t r = hint;
+  if (r >= id_runs_.size() || id_runs_[r].segment > segment ||
+      (r + 1 < id_runs_.size() && id_runs_[r + 1].segment <= segment)) {
+    const auto it = std::upper_bound(
+        id_runs_.begin(), id_runs_.end(), segment,
+        [](uint32_t value, const IdRun &run) { return value < run.segment; });
+    r = static_cast<size_t>(it - id_runs_.begin()) - 1;
+    hint = r;
+  }
+  return id_runs_[r].id + static_cast<nid_t>(segment - id_runs_[r].segment);
 }
 
 uint32_t GfazHandleGraph::segment_of(nid_t node_id) const {
-  if (node_ids_.empty())
+  if (id_runs_.empty())
     return node_id >= 1 && static_cast<uint64_t>(node_id) <= paths_.num_nodes()
                ? static_cast<uint32_t>(node_id)
                : 0;
-  const auto it =
-      std::lower_bound(nodes_by_id_.begin(), nodes_by_id_.end(),
-                       std::make_pair(node_id, uint32_t{0}));
-  return it != nodes_by_id_.end() && it->first == node_id ? it->second : 0;
+  // The last run that starts at or before the id, if the id is inside it.
+  const auto it = std::upper_bound(
+      runs_by_id_.begin(), runs_by_id_.end(), node_id,
+      [&](nid_t value, uint32_t r) { return value < id_runs_[r].id; });
+  if (it == runs_by_id_.begin())
+    return 0;
+  const uint32_t r = *(it - 1);
+  const uint32_t end = r + 1 < id_runs_.size() ? id_runs_[r + 1].segment
+                                               : paths_.num_nodes() + 1;
+  const uint64_t offset = static_cast<uint64_t>(node_id - id_runs_[r].id);
+  return offset < end - id_runs_[r].segment
+             ? id_runs_[r].segment + static_cast<uint32_t>(offset)
+             : 0;
 }
 
 bool GfazHandleGraph::has_node(nid_t node_id) const {
@@ -399,9 +545,7 @@ handlegraph::handle_t GfazHandleGraph::get_handle(const nid_t &node_id,
 }
 
 handlegraph::nid_t GfazHandleGraph::get_id(const handle_t &handle) const {
-  const uint32_t segment = segment_of_handle(handle);
-  return node_ids_.empty() ? static_cast<nid_t>(segment)
-                           : node_ids_[segment - 1];
+  return id_of_segment(segment_of_handle(handle));
 }
 
 std::vector<handlegraph::oriented_node_range_t> GfazHandleGraph::translate_back(
@@ -448,15 +592,16 @@ size_t GfazHandleGraph::get_degree(const handle_t &handle, bool go_left) const {
 size_t GfazHandleGraph::get_edge_count() const { return edge_count_; }
 
 size_t GfazHandleGraph::get_total_length() const {
-  return sequence_offsets_.back();
+  return total_length_;
 }
 
 char GfazHandleGraph::get_base(const handle_t &handle, size_t index) const {
   const uint32_t id = segment_of_handle(handle);
-  const uint64_t begin = sequence_offsets_[id - 1];
+  const uint64_t begin = sequence_begin(id);
   if (!get_is_reverse(handle))
-    return sequences_[begin + index];
-  return complement_base(sequences_[sequence_offsets_[id] - 1 - index]);
+    return sequences_.at(begin + index);
+  return complement_base(
+      sequences_.at(begin + paths_.segment_lengths[id - 1] - 1 - index));
 }
 
 std::string GfazHandleGraph::get_subsequence(const handle_t &handle,
@@ -466,10 +611,10 @@ std::string GfazHandleGraph::get_subsequence(const handle_t &handle,
   index = std::min(index, length);
   size = std::min(size, length - index);
   if (!get_is_reverse(handle))
-    return sequences_.substr(sequence_offsets_[id - 1] + index, size);
+    return sequences_.substr(sequence_begin(id) + index, size);
   // The reverse strand reads the stored sequence backwards from its end.
   std::string result =
-      sequences_.substr(sequence_offsets_[id] - index - size, size);
+      sequences_.substr(sequence_begin(id) + length - index - size, size);
   reverse_complement_inplace(result);
   return result;
 }

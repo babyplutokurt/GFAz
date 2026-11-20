@@ -9,10 +9,11 @@
 // there, and the smallest and largest node id it visits. That is enough for:
 //   - random access: decode from the block that holds a step or a base position
 //     instead of from the start of the haplotype;
-//   - node lookup: only blocks whose [min_node, max_node] range covers a node
-//     can visit it, and pangenome graphs keep node ids close to genome order, so
-//     those are few.
-// The index is a few tens of bytes per block and is independent of the
+//   - node lookup: node ids are grouped into zones of kZoneNodes consecutive
+//     ids, and every zone lists the blocks that visit one of its nodes. Only
+//     those blocks can visit a node of the zone. On a pangenome graph that is
+//     about one block per haplotype crossing the locus.
+// The index is a few hundred bytes per block and is independent of the
 // container format: it is built from a TraversalSet and can be saved next to
 // the .gfaz (`gfaz index`), never inside it.
 
@@ -87,12 +88,14 @@ public:
   size_t block_of_step(size_t hap, uint32_t step) const;
   size_t block_of_bp(size_t hap, uint64_t bp) const;
 
-  // Call visit(hap, block) for every block whose node range intersects
-  // [min_node, max_node]. Each block is reported once, in no particular order.
+  // Call visit(hap, block) for every block that may visit a node in
+  // [min_node, max_node]: one that visits a node in a zone the range touches
+  // and whose own node range intersects it. Each block is reported once, in
+  // increasing (hap, block) order.
   template <typename Visitor>
   void for_each_block_overlapping(uint32_t min_node, uint32_t max_node,
                                   Visitor &&visit) const {
-    if (min_node > max_node || zone_starts_.empty())
+    if (min_node > max_node || zone_starts_.size() < 2)
       return;
     auto report = [&](uint32_t stored) {
       const PathBlock &b = blocks_[stored];
@@ -102,26 +105,33 @@ public:
       }
     };
     const size_t num_zones = zone_starts_.size() - 1;
-    const size_t first_zone = min_node >> zone_shift_;
+    const size_t first_zone = min_node >> kZoneShift;
     const size_t last_zone =
-        std::min<size_t>(max_node >> zone_shift_, num_zones - 1);
-    for (size_t zone = first_zone; zone <= last_zone; ++zone) {
-      for (uint64_t i = zone_starts_[zone]; i < zone_starts_[zone + 1]; ++i) {
-        // A block is listed in every zone it spans; report it from the first
-        // one this query looks at.
-        const uint32_t stored = zone_blocks_[i];
-        const size_t home = blocks_[stored].min_node >> zone_shift_;
-        if (zone == std::max(home, first_zone))
-          report(stored);
-      }
+        std::min<size_t>(max_node >> kZoneShift, num_zones - 1);
+    if (first_zone > last_zone)
+      return;
+    if (first_zone == last_zone) {
+      for (uint64_t i = zone_starts_[first_zone];
+           i < zone_starts_[first_zone + 1]; ++i)
+        report(zone_blocks_[i]);
+      return;
     }
-    for (uint32_t stored : wide_blocks_)
+    // A block is listed in every zone it visits: merge the lists.
+    std::vector<uint32_t> listed(zone_blocks_.begin() + zone_starts_[first_zone],
+                                 zone_blocks_.begin() +
+                                     zone_starts_[last_zone + 1]);
+    std::sort(listed.begin(), listed.end());
+    listed.erase(std::unique(listed.begin(), listed.end()), listed.end());
+    for (uint32_t stored : listed)
       report(stored);
   }
 
+  // Node ids per zone of the node lookup.
+  static constexpr uint32_t kZoneShift = 8;
+  static constexpr uint32_t kZoneNodes = uint32_t{1} << kZoneShift;
+
 private:
   size_t haplotype_of(uint32_t stored_block) const;
-  void build_zone_map();
 
   // Blocks of all haplotypes back to back, each haplotype followed by its end
   // sentinel. first_block_[hap] indexes blocks_; it has one extra entry.
@@ -130,13 +140,10 @@ private:
 
   uint32_t block_steps_ = 0;
 
-  // Zone map: node ids are bucketed into zones of 2^zone_shift_ ids, and each
-  // zone lists the blocks that span it. Blocks spanning many zones go to
-  // wide_blocks_ and are checked on every query.
-  uint32_t zone_shift_ = 0;
-  std::vector<uint64_t> zone_starts_;
+  // Zone map in CSR form: zone_blocks_[zone_starts_[z] .. zone_starts_[z + 1])
+  // are the stored blocks that visit a node id in zone z, in increasing order.
+  std::vector<uint64_t> zone_starts_{0};
   std::vector<uint32_t> zone_blocks_;
-  std::vector<uint32_t> wide_blocks_;
 };
 
 } // namespace gfaz
