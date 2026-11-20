@@ -271,13 +271,14 @@ std::string format_path_line(const std::string &path_name,
   line += path_name;
   line += '\t';
 
+  gfaz::SegmentNames::RunHint hint;
   for (size_t i = 0; i < path_size; ++i) {
     if (i > 0)
       line += ',';
 
     const int32_t node = path_data[i];
     const bool reverse = node < 0;
-    names.append(line, static_cast<uint32_t>(reverse ? -node : node));
+    names.append(line, static_cast<uint32_t>(reverse ? -node : node), hint);
     line += (reverse ? '-' : '+');
   }
 
@@ -304,11 +305,12 @@ std::string format_walk_line(const std::string &sample_id, uint32_t hap_index,
   line += (seq_end >= 0) ? std::to_string(seq_end) : "*";
   line += '\t';
 
+  gfaz::SegmentNames::RunHint hint;
   for (size_t i = 0; i < walk_size; ++i) {
     const int32_t node = walk_data[i];
     const bool reverse = node < 0;
     line += (reverse ? '<' : '>');
-    names.append(line, static_cast<uint32_t>(reverse ? -node : node));
+    names.append(line, static_cast<uint32_t>(reverse ? -node : node), hint);
   }
 
   line += '\n';
@@ -323,10 +325,11 @@ void write_segments(
   std::string line;
   line.reserve(4096);
   size_t segment_seq_offset = 0;
+  gfaz::SegmentNames::RunHint hint;
   for (size_t i = 0; i < segment_lengths.size(); ++i) {
     line.clear();
     line += "S\t";
-    names.append(line, static_cast<uint32_t>(i + 1));
+    names.append(line, static_cast<uint32_t>(i + 1), hint);
     line += '\t';
 
     const uint32_t len = segment_lengths[i];
@@ -354,14 +357,15 @@ void write_links(
     const FieldOffsets &link_offsets, const gfaz::SegmentNames &names) {
   std::string line;
   line.reserve(4096);
+  gfaz::SegmentNames::RunHint from_hint, to_hint;
   for (size_t i = 0; i < link_from_ids.size(); ++i) {
     line.clear();
     line += "L\t";
-    names.append(line, link_from_ids[i]);
+    names.append(line, link_from_ids[i], from_hint);
     line += '\t';
     line += link_from_orients[i];
     line += '\t';
-    names.append(line, link_to_ids[i]);
+    names.append(line, link_to_ids[i], to_hint);
     line += '\t';
     line += link_to_orients[i];
     line += '\t';

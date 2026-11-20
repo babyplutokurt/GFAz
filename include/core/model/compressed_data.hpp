@@ -78,7 +78,11 @@ struct CompressedData {
   std::string segment_name_prefix;               // numbered names
   std::string segment_name_suffix;               // numbered names
   uint8_t segment_name_width = 0;                // numbered names; 0 = no padding
-  ZstdCompressedBlock segment_name_numbers_zstd; // numbered names
+  // Numbered names: one number per segment (run count 0), or the first number
+  // and the first segment of each run of consecutive numbers.
+  uint64_t segment_name_run_count = 0;
+  ZstdCompressedBlock segment_name_numbers_zstd;
+  ZstdCompressedBlock segment_name_run_starts_zstd;
   ZstdCompressedBlock segment_names_zstd;        // string names
   ZstdCompressedBlock segment_name_lengths_zstd; // string names
 

@@ -162,7 +162,7 @@ public:
     if (names.dense())
       put_number(id);
     else
-      cursor_ += names.write(id, cursor_);
+      cursor_ += names.write(id, cursor_, run_hint_);
   }
   void append(std::string_view text) {
     ensure(text.size());
@@ -187,6 +187,7 @@ private:
     limit_ = data_.get() + new_capacity;
   }
 
+  gfaz::SegmentNames::RunHint run_hint_; // put_name's last run of names
   std::unique_ptr<char[]> data_;
   char *cursor_ = nullptr;
   char *limit_ = nullptr;
@@ -730,9 +731,10 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
           size_t offset = block_starts[block];
           buffer.reserve((block_starts[block + 1] - offset) +
                          (end - begin) * 48);
+          gfaz::SegmentNames::RunHint hint;
           for (size_t i = begin; i < end; ++i) {
             buffer += "S\t";
-            names.append(buffer, static_cast<uint32_t>(i + 1));
+            names.append(buffer, static_cast<uint32_t>(i + 1), hint);
             buffer += '\t';
             buffer.append(segment_sequences, offset, segment_lengths[i]);
             offset += segment_lengths[i];
@@ -766,13 +768,16 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
       out, link_block_rows, num_threads,
       [&](size_t, size_t begin, size_t end, std::string &buffer) {
         buffer.reserve((end - begin) * 48);
+        // Links are stored near-sorted by their ends, so each end mostly
+        // stays in the run of names it was last found in.
+        gfaz::SegmentNames::RunHint from_hint, to_hint;
         for (size_t i = begin; i < end; ++i) {
           buffer += "L\t";
-          names.append(buffer, link_from_ids[i]);
+          names.append(buffer, link_from_ids[i], from_hint);
           buffer += '\t';
           buffer += link_from_orients[i];
           buffer += '\t';
-          names.append(buffer, link_to_ids[i]);
+          names.append(buffer, link_to_ids[i], to_hint);
           buffer += '\t';
           buffer += link_to_orients[i];
           buffer += '\t';

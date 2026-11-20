@@ -150,13 +150,14 @@ std::string format_path_line(const std::string &path_name,
   line += path_name;
   line += '\t';
 
+  gfaz::SegmentNames::RunHint hint;
   for (size_t i = 0; i < path.size(); ++i) {
     if (i > 0)
       line += ',';
 
     const gfaz::NodeId node = path[i];
     const bool is_reverse = node < 0;
-    names.append(line, static_cast<uint32_t>(is_reverse ? -node : node));
+    names.append(line, static_cast<uint32_t>(is_reverse ? -node : node), hint);
     line += (is_reverse ? '-' : '+');
   }
 
@@ -183,10 +184,11 @@ std::string format_walk_line(const std::string &sample_id, uint32_t hap_index,
   line += (seq_end >= 0) ? std::to_string(seq_end) : "*";
   line += '\t';
 
+  gfaz::SegmentNames::RunHint hint;
   for (gfaz::NodeId node : walk) {
     const bool is_reverse = node < 0;
     line += (is_reverse ? '<' : '>');
-    names.append(line, static_cast<uint32_t>(is_reverse ? -node : node));
+    names.append(line, static_cast<uint32_t>(is_reverse ? -node : node), hint);
   }
 
   line += '\n';

@@ -15,6 +15,8 @@ namespace {
 constexpr const char *kErrorPrefix = "Segment names error: ";
 // Most digits a zero-padded number may have.
 constexpr size_t kMaxWidth = 18;
+// Numbers are kept as runs when there are this many segments per run or more.
+constexpr size_t kRunsWorthIt = 4;
 
 // The digits of `text` as a number; false if it is not all digits or does not
 // fit 32 bits.
@@ -129,7 +131,7 @@ SegmentNames SegmentNames::from_strings(std::string concat,
     names.prefix_ = std::string(prefix);
     names.suffix_ = std::string(suffix);
     names.width_ = padded ? static_cast<uint8_t>(first_digits.size()) : 0;
-    names.numbers_ = std::move(numbers);
+    names.set_numbers(std::move(numbers));
     names.note_plain();
     return names;
   }
@@ -156,9 +158,40 @@ SegmentNames SegmentNames::from_numbers(std::vector<uint32_t> numbers) {
     return names;
   names.encoding_ = SegmentNameEncoding::kNumbered;
   names.count_ = numbers.size();
-  names.numbers_ = std::move(numbers);
+  names.set_numbers(std::move(numbers));
   names.note_plain();
   return names;
+}
+
+void SegmentNames::set_numbers(std::vector<uint32_t> numbers) {
+  const size_t count = numbers.size();
+  size_t runs = count == 0 ? 0 : 1;
+  for (size_t i = 1; i < count; ++i)
+    runs += numbers[i] != numbers[i - 1] + 1;
+  // Runs take two values each and a search to read; use them when they are
+  // clearly the smaller layout.
+  if (runs * kRunsWorthIt > count) {
+    numbers_ = std::move(numbers);
+    return;
+  }
+  run_begin_.reserve(runs);
+  run_number_.reserve(runs);
+  for (size_t i = 0; i < count; ++i) {
+    if (i == 0 || numbers[i] != numbers[i - 1] + 1) {
+      run_begin_.push_back(static_cast<uint32_t>(i + 1));
+      run_number_.push_back(numbers[i]);
+    }
+  }
+}
+
+void SegmentNames::find_run(uint32_t id, RunHint &hint) const {
+  const size_t run = static_cast<size_t>(
+      std::upper_bound(run_begin_.begin(), run_begin_.end(), id) -
+      run_begin_.begin() - 1);
+  hint.begin = run_begin_[run];
+  hint.end = run + 1 < run_begin_.size() ? run_begin_[run + 1]
+                                         : static_cast<uint32_t>(count_ + 1);
+  hint.first_number = run_number_[run];
 }
 
 SegmentNames
@@ -193,12 +226,30 @@ SegmentNames SegmentNames::decode(const CompressedData &data) {
     if (names.width_ > kMaxWidth)
       throw std::runtime_error(std::string(kErrorPrefix) +
                                "segment number width is out of range");
-    names.numbers_ = Codec::decompress_delta_varint_uint32(
-        data.segment_name_numbers_zstd, count);
-    if (names.numbers_.size() != count)
-      throw std::runtime_error(std::string(kErrorPrefix) +
-                               "segment number column is truncated");
     names.count_ = count;
+    const size_t runs = data.segment_name_run_count;
+    if (runs == 0) {
+      names.numbers_ = Codec::decompress_delta_varint_uint32(
+          data.segment_name_numbers_zstd, count);
+      if (names.numbers_.size() != count)
+        throw std::runtime_error(std::string(kErrorPrefix) +
+                                 "segment number column is truncated");
+    } else {
+      names.run_number_ = Codec::decompress_delta_varint_uint32(
+          data.segment_name_numbers_zstd, runs);
+      names.run_begin_ = Codec::decompress_delta_varint_uint32(
+          data.segment_name_run_starts_zstd, runs);
+      if (names.run_number_.size() != runs || names.run_begin_.size() != runs)
+        throw std::runtime_error(std::string(kErrorPrefix) +
+                                 "segment number runs are truncated");
+      // Runs start at segment 1 and at strictly increasing segments after it.
+      bool ordered = names.run_begin_[0] == 1 && names.run_begin_[runs - 1] <= count;
+      for (size_t run = 1; run < runs && ordered; ++run)
+        ordered = names.run_begin_[run] > names.run_begin_[run - 1];
+      if (!ordered)
+        throw std::runtime_error(std::string(kErrorPrefix) +
+                                 "segment number runs do not cover the segments");
+    }
     names.max_length_ = names.prefix_.size() + names.suffix_.size() +
                         std::max<size_t>(10, names.width_);
     names.note_plain();
@@ -237,7 +288,9 @@ void SegmentNames::encode(CompressedData &data) const {
   data.segment_name_prefix.clear();
   data.segment_name_suffix.clear();
   data.segment_name_width = 0;
+  data.segment_name_run_count = 0;
   data.segment_name_numbers_zstd = {};
+  data.segment_name_run_starts_zstd = {};
   data.segment_names_zstd = {};
   data.segment_name_lengths_zstd = {};
   switch (encoding_) {
@@ -247,8 +300,16 @@ void SegmentNames::encode(CompressedData &data) const {
     data.segment_name_prefix = prefix_;
     data.segment_name_suffix = suffix_;
     data.segment_name_width = width_;
-    data.segment_name_numbers_zstd =
-        Codec::compress_delta_varint_uint32(numbers_);
+    if (run_begin_.empty()) {
+      data.segment_name_numbers_zstd =
+          Codec::compress_delta_varint_uint32(numbers_);
+    } else {
+      data.segment_name_run_count = run_begin_.size();
+      data.segment_name_numbers_zstd =
+          Codec::compress_delta_varint_uint32(run_number_);
+      data.segment_name_run_starts_zstd =
+          Codec::compress_delta_varint_uint32(run_begin_);
+    }
     break;
   case SegmentNameEncoding::kStrings: {
     std::vector<uint32_t> lengths(offsets_.size() - 1);
@@ -261,7 +322,8 @@ void SegmentNames::encode(CompressedData &data) const {
   }
 }
 
-size_t SegmentNames::write_general(uint32_t id, char *out) const {
+size_t SegmentNames::write_general(uint32_t id, char *out,
+                                   RunHint &hint) const {
   if (stored(id)) {
     if (encoding_ == SegmentNameEncoding::kStrings) {
       const size_t length = offsets_[id] - offsets_[id - 1];
@@ -272,7 +334,7 @@ size_t SegmentNames::write_general(uint32_t id, char *out) const {
     char *cursor = out + prefix_.size();
     char digits[10];
     const size_t count = static_cast<size_t>(
-        std::to_chars(digits, digits + 10, numbers_[id - 1]).ptr - digits);
+        std::to_chars(digits, digits + 10, number(id, hint)).ptr - digits);
     for (size_t pad = count; pad < width_; ++pad)
       *cursor++ = '0';
     std::memcpy(cursor, digits, count);
@@ -283,15 +345,16 @@ size_t SegmentNames::write_general(uint32_t id, char *out) const {
   return static_cast<size_t>(std::to_chars(out, out + 10, id).ptr - out);
 }
 
-void SegmentNames::append(std::string &out, uint32_t id) const {
+void SegmentNames::append(std::string &out, uint32_t id,
+                          RunHint &hint) const {
   char buffer[64];
   if (max_length_ <= sizeof(buffer)) {
-    out.append(buffer, write(id, buffer));
+    out.append(buffer, write(id, buffer, hint));
     return;
   }
   const size_t used = out.size();
   out.resize(used + max_length_);
-  out.resize(used + write(id, out.data() + used));
+  out.resize(used + write(id, out.data() + used, hint));
 }
 
 std::string SegmentNames::name(uint32_t id) const {
@@ -307,9 +370,12 @@ SegmentNameLookup::SegmentNameLookup(const SegmentNames &names,
   case SegmentNameEncoding::kDense:
     break;
   case SegmentNameEncoding::kNumbered:
-    by_number_.reserve(names.numbers_.size());
-    for (size_t i = 0; i < names.numbers_.size(); ++i)
-      by_number_.emplace_back(names.numbers_[i], static_cast<uint32_t>(i + 1));
+    by_number_.reserve(names.size());
+    {
+      SegmentNames::RunHint hint;
+      for (uint32_t id = 1; id <= names.size(); ++id)
+        by_number_.emplace_back(names.number(id, hint), id);
+    }
     std::sort(by_number_.begin(), by_number_.end());
     break;
   case SegmentNameEncoding::kStrings:
