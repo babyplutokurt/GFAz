@@ -259,12 +259,16 @@ void initialize_output_metadata(CompressionContext &ctx) {
 void compress_segment_names(CompressionContext &ctx) {
   auto &segments = ctx.graph.segments;
   const gfaz::SegmentNames names =
-      segments.node_name_lengths.empty()
-          ? gfaz::SegmentNames::from_id_table(segments.node_id_to_name)
-          : gfaz::SegmentNames::from_strings(
-                std::move(segments.node_names_concat),
-                segments.node_name_lengths);
+      !segments.node_name_numbers.empty()
+          ? gfaz::SegmentNames::from_numbers(
+                std::move(segments.node_name_numbers))
+          : !segments.node_name_lengths.empty()
+                ? gfaz::SegmentNames::from_strings(
+                      std::move(segments.node_names_concat),
+                      segments.node_name_lengths)
+                : gfaz::SegmentNames::from_id_table(segments.node_id_to_name);
   names.encode(ctx.out);
+  segments.node_name_numbers = {};
   segments.node_names_concat = {};
   segments.node_name_lengths = {};
 }
