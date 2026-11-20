@@ -10,7 +10,9 @@
 //   - numbered: every name is one shared prefix, a decimal number and one
 //     shared suffix; the number is either written plainly or zero-padded to
 //     one width ("s1", "s2", ...; plain numbers that are not 1..N in file
-//     order; "utg000001l", "utg000002l", ...). Costs a few bits per segment;
+//     order; "utg000001l", "utg000002l", ...). Numbers that mostly count up
+//     by one are kept as runs (first number, length), so a graph numbered
+//     from 3463 with a gap now and then costs a few bytes per gap;
 //   - strings:  anything else, kept as text.
 //
 // Code that prints a segment goes through SegmentNames::append / write, so it
@@ -58,10 +60,30 @@ public:
   bool dense() const { return encoding_ == SegmentNameEncoding::kDense; }
   // Number of stored names; 0 for dense names.
   size_t size() const { return count_; }
-  // True when every stored name is a plain decimal number; numbers()[id - 1]
-  // is then the number segment `id` is called by.
+  // True when every stored name is a plain decimal number: number(id).
   bool plain_numbers() const { return plain_; }
-  const std::vector<uint32_t> &numbers() const { return numbers_; }
+
+  // Remembers the run of consecutive numbers last looked up. Code that prints
+  // many names in a row (the steps of a path) keeps one and passes it in, so
+  // that a name in the same run needs no search.
+  struct RunHint {
+    uint32_t begin = 0; // IDs [begin, end) are numbered first_number, +1, ...
+    uint32_t end = 0;
+    uint32_t first_number = 0;
+  };
+
+  // The number in the name of stored segment `id` (numbered names only).
+  uint32_t number(uint32_t id, RunHint &hint) const {
+    if (run_begin_.empty())
+      return numbers_[id - 1];
+    if (id - hint.begin >= hint.end - hint.begin)
+      find_run(id, hint);
+    return hint.first_number + (id - hint.begin);
+  }
+  uint32_t number(uint32_t id) const {
+    RunHint hint;
+    return number(id, hint);
+  }
 
   // The longest text write() can produce.
   size_t max_length() const { return max_length_; }
@@ -70,20 +92,31 @@ public:
   // stored names is written as its decimal number.
   // Inline for names that are plain numbers, which is what a path step of a
   // large graph usually prints.
-  size_t write(uint32_t id, char *out) const {
+  size_t write(uint32_t id, char *out, RunHint &hint) const {
     if (plain_ && stored(id))
       return static_cast<size_t>(
-          std::to_chars(out, out + 10, numbers_[id - 1]).ptr - out);
-    return write_general(id, out);
+          std::to_chars(out, out + 10, number(id, hint)).ptr - out);
+    return write_general(id, out, hint);
   }
-  void append(std::string &out, uint32_t id) const;
+  size_t write(uint32_t id, char *out) const {
+    RunHint hint;
+    return write(id, out, hint);
+  }
+  void append(std::string &out, uint32_t id, RunHint &hint) const;
+  void append(std::string &out, uint32_t id) const {
+    RunHint hint;
+    append(out, id, hint);
+  }
   std::string name(uint32_t id) const;
 
 private:
   friend class SegmentNameLookup;
 
   bool stored(uint32_t id) const { return id != 0 && id <= count_; }
-  size_t write_general(uint32_t id, char *out) const;
+  size_t write_general(uint32_t id, char *out, RunHint &hint) const;
+  void find_run(uint32_t id, RunHint &hint) const;
+  // Take the numbers of a numbered form, as runs when that is smaller.
+  void set_numbers(std::vector<uint32_t> numbers);
 
   // Call after the numbered fields are set.
   void note_plain() {
@@ -100,7 +133,12 @@ private:
   std::string prefix_;
   std::string suffix_;
   uint8_t width_ = 0;
-  std::vector<uint32_t> numbers_; // numbers_[id - 1]
+  // The numbers, in one of two layouts: numbers_[id - 1], or runs of
+  // consecutive numbers, run r covering the IDs from run_begin_[r] (up to the
+  // next run) and starting at run_number_[r].
+  std::vector<uint32_t> numbers_;
+  std::vector<uint32_t> run_begin_;
+  std::vector<uint32_t> run_number_;
   // Strings: name of `id` is concat_[offsets_[id - 1], offsets_[id]).
   std::string concat_;
   std::vector<uint64_t> offsets_;

@@ -123,6 +123,7 @@ def expected_region(graph: Graph, regions, max_gap: int):
 SEGMENT_NAMINGS = {
     "dense": str,
     "sparse": lambda n: str(1000 + 3 * n),
+    "gapped": lambda n: str(3462 + n + 7 * (n // 40)),
     "named": lambda n: f"s{n}x",
     "mixed": lambda n: f"{n + 5:04d}" if n < 100 else f"utg{n}",
     "zero_based": lambda n: str(n - 1),

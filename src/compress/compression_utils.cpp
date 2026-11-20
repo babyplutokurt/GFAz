@@ -257,6 +257,7 @@ void print_compression_stats(const gfaz::CompressedData &d, size_t num_segments,
   const size_t seg_names = d.segment_name_prefix.size() +
                            d.segment_name_suffix.size() +
                            d.segment_name_numbers_zstd.payload.size() +
+                           d.segment_name_run_starts_zstd.payload.size() +
                            d.segment_names_zstd.payload.size() +
                            d.segment_name_lengths_zstd.payload.size();
   total += seg_names;

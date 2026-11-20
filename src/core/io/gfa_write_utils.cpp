@@ -271,13 +271,14 @@ std::string format_path_line(const std::string &path_name,
   line += path_name;
   line += '\t';
 
+  gfaz::SegmentNames::RunHint hint;
   for (size_t i = 0; i < path_size; ++i) {
     if (i > 0)
       line += ',';
 
     const int32_t node = path_data[i];
     const bool reverse = node < 0;
-    names.append(line, static_cast<uint32_t>(reverse ? -node : node));
+    names.append(line, static_cast<uint32_t>(reverse ? -node : node), hint);
     line += (reverse ? '-' : '+');
   }
 
@@ -304,11 +305,12 @@ std::string format_walk_line(const std::string &sample_id, uint32_t hap_index,
   line += (seq_end >= 0) ? std::to_string(seq_end) : "*";
   line += '\t';
 
+  gfaz::SegmentNames::RunHint hint;
   for (size_t i = 0; i < walk_size; ++i) {
     const int32_t node = walk_data[i];
     const bool reverse = node < 0;
     line += (reverse ? '<' : '>');
-    names.append(line, static_cast<uint32_t>(reverse ? -node : node));
+    names.append(line, static_cast<uint32_t>(reverse ? -node : node), hint);
   }
 
   line += '\n';
@@ -319,9 +321,10 @@ void append_segment_line(std::string &line, uint32_t node_id,
                          const char *sequence, size_t length,
                          const std::vector<gfaz::OptionalFieldColumn> &fields,
                          const FieldOffsets &field_offsets,
-                         const gfaz::SegmentNames &names) {
+                         const gfaz::SegmentNames &names,
+                         gfaz::SegmentNames::RunHint &hint) {
   line += "S\t";
-  names.append(line, node_id);
+  names.append(line, node_id, hint);
   line += '\t';
   line.append(sequence, length);
   append_optional_fields(line, fields, field_offsets, node_id - 1);
@@ -332,13 +335,15 @@ void append_link_line(std::string &line, const gfaz::LinkData &links,
                       size_t index,
                       const std::vector<gfaz::OptionalFieldColumn> &fields,
                       const FieldOffsets &field_offsets,
-                      const gfaz::SegmentNames &names) {
+                      const gfaz::SegmentNames &names,
+                      gfaz::SegmentNames::RunHint &from_hint,
+                      gfaz::SegmentNames::RunHint &to_hint) {
   line += "L\t";
-  names.append(line, links.from_ids[index]);
+  names.append(line, links.from_ids[index], from_hint);
   line += '\t';
   line += links.from_orients[index];
   line += '\t';
-  names.append(line, links.to_ids[index]);
+  names.append(line, links.to_ids[index], to_hint);
   line += '\t';
   line += links.to_orients[index];
   line += '\t';
@@ -377,6 +382,7 @@ void write_segments(
   std::string line;
   line.reserve(4096);
   size_t segment_seq_offset = 0;
+  gfaz::SegmentNames::RunHint hint;
   for (size_t i = 0; i < segment_lengths.size(); ++i) {
     const uint32_t len = segment_lengths[i];
     if (segment_seq_offset + len > segment_sequences.size()) {
@@ -386,7 +392,7 @@ void write_segments(
     line.clear();
     append_segment_line(line, static_cast<uint32_t>(i + 1),
                         segment_sequences.data() + segment_seq_offset, len,
-                        segment_optional_fields, segment_offsets, names);
+                        segment_optional_fields, segment_offsets, names, hint);
     segment_seq_offset += len;
     out.write(line.data(), static_cast<std::streamsize>(line.size()));
   }
@@ -403,14 +409,15 @@ void write_links(
     const FieldOffsets &link_offsets, const gfaz::SegmentNames &names) {
   std::string line;
   line.reserve(4096);
+  gfaz::SegmentNames::RunHint from_hint, to_hint;
   for (size_t i = 0; i < link_from_ids.size(); ++i) {
     line.clear();
     line += "L\t";
-    names.append(line, link_from_ids[i]);
+    names.append(line, link_from_ids[i], from_hint);
     line += '\t';
     line += link_from_orients[i];
     line += '\t';
-    names.append(line, link_to_ids[i]);
+    names.append(line, link_to_ids[i], to_hint);
     line += '\t';
     line += link_to_orients[i];
     line += '\t';

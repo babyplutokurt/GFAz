@@ -88,9 +88,10 @@ void depth_to_tsv(const CompressedData &data, const DepthOptions &options,
     out << "#node.id\tdepth\tdepth.uniq\n";
     const SegmentNames names = SegmentNames::decode(data);
     std::string name;
+    SegmentNames::RunHint hint;
     for (uint32_t v = 1; v <= num_nodes; ++v) {
       name.clear();
-      names.append(name, v);
+      names.append(name, v, hint);
       out << name << '\t' << node_total[v] << '\t' << node_uniq[v] << '\n';
     }
     return;

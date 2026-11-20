@@ -270,6 +270,7 @@ void write_segments(const CompressedData &data,
   const wu::FieldOffsets field_offsets = wu::build_field_offsets(fields);
 
   std::string line;
+  SegmentNames::RunHint hint;
   size_t offset = 0;
   for (size_t i = 0; i < segment_lengths.size(); ++i) {
     const uint32_t length = segment_lengths[i];
@@ -279,7 +280,7 @@ void write_segments(const CompressedData &data,
       line.clear();
       wu::append_segment_line(line, static_cast<uint32_t>(i + 1),
                               sequences.data() + offset, length, fields,
-                              field_offsets, names);
+                              field_offsets, names, hint);
       out.write(line.data(), static_cast<std::streamsize>(line.size()));
     }
     offset += length;
@@ -302,11 +303,13 @@ void write_links(const CompressedData &data,
     return node < node_selected.size() && node_selected[node];
   };
   std::string line;
+  SegmentNames::RunHint from_hint, to_hint;
   for (size_t i = 0; i < links.from_ids.size(); ++i) {
     if (!selected(links.from_ids[i]) || !selected(links.to_ids[i]))
       continue;
     line.clear();
-    wu::append_link_line(line, links, i, fields, field_offsets, names);
+    wu::append_link_line(line, links, i, fields, field_offsets, names,
+                         from_hint, to_hint);
     out.write(line.data(), static_cast<std::streamsize>(line.size()));
   }
 }
