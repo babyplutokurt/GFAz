@@ -3,6 +3,7 @@
 #include "core/io/gfa_write_utils.hpp"
 #include "core/codec/codec.hpp"
 #include "core/codec/serialization.hpp"
+#include "core/model/segment_names.hpp"
 #include "core/utils/threading_utils.hpp"
 
 #include <algorithm>
@@ -335,6 +336,9 @@ void decode_gfa_records(const CompressedData &data, GfaRecordVisitor &visitor,
   if (!data.header_line.empty())
     visitor.on_header(data.header_line);
 
+  const gfaz::SegmentNames segment_names = gfaz::SegmentNames::decode(data);
+  gfaz::SegmentNames::RunHint name_hint;
+  std::string segment_name;
   size_t sequence_offset = 0;
   for (size_t i = 0; i < segment_lengths.size(); ++i) {
     const size_t length = segment_lengths[i];
@@ -345,7 +349,10 @@ void decode_gfa_records(const CompressedData &data, GfaRecordVisitor &visitor,
         segment_sequences.substr(sequence_offset, length);
     const GfaTagList tags =
         tags_for_row(segment_optional_fields, segment_field_offsets, i);
-    visitor.on_segment(static_cast<uint32_t>(i + 1), sequence, tags);
+    const uint32_t id = static_cast<uint32_t>(i + 1);
+    segment_name.clear();
+    segment_names.append(segment_name, id, name_hint);
+    visitor.on_named_segment(id, segment_name, sequence, tags);
     sequence_offset += length;
   }
 
