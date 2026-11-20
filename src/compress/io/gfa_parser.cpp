@@ -569,8 +569,10 @@ void append_optional_value(gfaz::OptionalFieldColumn &col, char type,
   }
 }
 
+// True if `name` is the decimal number `expected` as it would be printed, so
+// that writing the ID back reproduces the name ("007" does not match 7).
 bool numeric_name_matches_id(std::string_view name, uint32_t expected) {
-  if (name.empty())
+  if (name.empty() || name[0] == '0')
     return false;
   uint64_t value = 0;
   for (char c : name) {
@@ -2441,6 +2443,48 @@ gfaz::GfaGraph GfaParser::parse(const std::string &gfa_file_path, int num_thread
   return graph;
 }
 
+// Copy the name field of every S-line, in file order, into the flattened
+// name columns of `segments`.
+static void collect_segment_names(const char *data, const LineOffsets &offsets,
+                                  const std::vector<size_t> &row_bases,
+                                  gfaz::SegmentData &segments) {
+  const size_t count = offsets.size();
+  const size_t chunk_count = row_bases.size() - 1;
+  auto &lengths = segments.node_name_lengths;
+  lengths.resize(count);
+  std::vector<size_t> name_bases(chunk_count + 1, 0);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1)
+#endif
+  for (size_t chunk = 0; chunk < chunk_count; ++chunk) {
+    size_t bytes = 0;
+    for (size_t i = row_bases[chunk]; i < row_bases[chunk + 1]; ++i) {
+      const std::string_view line(data + offsets[i].offset, offsets[i].length);
+      size_t pos = 1;
+      const std::string_view name = next_field(line, pos);
+      lengths[i] = static_cast<uint32_t>(name.size());
+      bytes += name.size();
+    }
+    name_bases[chunk + 1] = bytes;
+  }
+  for (size_t chunk = 0; chunk < chunk_count; ++chunk)
+    name_bases[chunk + 1] += name_bases[chunk];
+  segments.node_names_concat.resize(name_bases.back());
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1)
+#endif
+  for (size_t chunk = 0; chunk < chunk_count; ++chunk) {
+    char *out = segments.node_names_concat.data() + name_bases[chunk];
+    for (size_t i = row_bases[chunk]; i < row_bases[chunk + 1]; ++i) {
+      const std::string_view line(data + offsets[i].offset, offsets[i].length);
+      size_t pos = 1;
+      const std::string_view name = next_field(line, pos);
+      std::memcpy(out, name.data(), name.size());
+      out += name.size();
+    }
+  }
+}
+
 bool GfaParser::parse_segments_in_chunks(
     const char *data, const LineOffsets &offsets,
     size_t page_size, bool direct_segment_columns, gfaz::GfaGraph &graph) {
@@ -2649,6 +2693,10 @@ bool GfaParser::parse_segments_in_chunks(
   if (!dense) {
     all_segment_names_numeric_ = false;
     numeric_name_table_ = std::move(table);
+    // The names are not the IDs, so the container has to carry them. Without
+    // direct columns they are already in node_id_to_name.
+    if (direct_segment_columns)
+      collect_segment_names(data, offsets, row_bases, graph.segments);
   }
   return true;
 }

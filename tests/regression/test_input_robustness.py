@@ -88,9 +88,9 @@ def test_numeric_to_string_id_fallback(cli: Path):
     for expected in (
         "S\t1\tA",
         "S\t2\tC",
-        "S\t3\tG",
-        "L\t1\t+\t3\t+\t0M",
-        "P\tmixed\t1+,2+,3+\t*",
+        "S\talpha\tG",
+        "L\t1\t+\talpha\t+\t0M",
+        "P\tmixed\t1+,2+,alpha+\t*",
     ):
       if expected not in out:
         raise AssertionError(

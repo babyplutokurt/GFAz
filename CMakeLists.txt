@@ -132,6 +132,7 @@ endif()
 set(GFAZ_CORE_SOURCES
   src/core/codec/codec.cpp
   src/core/codec/serialization.cpp
+  src/core/model/segment_names.cpp
   src/core/utils/runtime_utils.cpp
 )
 

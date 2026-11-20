@@ -78,8 +78,9 @@ reference allele. Per-analysis timings and memory are reported in the paper.
 - CPU in-memory decompression is still available through `decompress_gfa(...)`
   and `gfaz decompress --legacy`.
 - GPU backend is still experimental.
-- Segment names are reconstructed canonically during decompression as dense
-  1-based numeric IDs.
+- Segment names are kept. A graph whose segments are named `1..N` in file
+  order stores nothing for them; any other naming adds a name column to the
+  container (format version 6 instead of 5).
 
 ## Build
 

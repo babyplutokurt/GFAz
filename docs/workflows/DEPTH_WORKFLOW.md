@@ -39,11 +39,10 @@ visiting the node. Rows are emitted in node-id order (thread-count invariant).
 ## Concordance with odgi
 
 The summary is a pure aggregate and agrees with `odgi depth -S` byte-for-byte.
-The `-d` table is keyed by node id; gfaz uses its own 1-based ids, so it matches
-`odgi depth -d` byte-for-byte **only when the GFA segment names are already
-1..N** (true for the test fixture — the same node-id caveat as `gfaz
-deconstruct`'s AT/ID). On graphs with arbitrary segment names the depth *values*
-are correct but the ids are gfaz's own.
+The `-d` table is keyed by the GFA's segment name, in S-line order. It matches
+`odgi depth -d` byte-for-byte when the segment names are numbers (true for the
+test fixture); for other names odgi prints its own node IDs, and the depth
+*values* still agree.
 
 `tests/concordance/test_depth_vs_odgi.py` checks both modes against committed
 odgi goldens (`tests/golden/depth_fixture.{summarize,per_node}.golden`) with the
@@ -86,7 +85,7 @@ we extend parity later.
 | `odgi depth` mode | Output | gfaz | Notes / what it would take |
 |---|---|---|---|
 | `-S` summarize | `#node.count graph.length step.count path.length mean.node.depth mean.graph.depth` | ✅ byte-exact (gfaz default) | derived from the per-node counter |
-| `-d` graph depth table | `#node.id depth depth.uniq` | ✅ byte-exact* | *ids coincide with odgi only when GFA segment names are 1..N |
+| `-d` graph depth table | `#node.id depth depth.uniq` | ✅ byte-exact* | *ids coincide with odgi when GFA segment names are numbers |
 | _default_ per-path table | `#path start end mean.depth` | ❌ | needs the global per-node depth first, then a second per-path weighted-mean pass (`mean = Σ_step depth(n)·len(n) / path_len`) |
 | `-v` graph depth vector | per-base depth, one line | ❌ | expand the per-node depth across each base |
 | `-D` path depth | per-base depth per path | ❌ | second per-path pass over the global node depth |

@@ -295,19 +295,19 @@ def test_subrange_reference(cli: Path, gfaz: Path):
 def test_graph_info_at(cli: Path, gfaz: Path):
   """`-a` adds graph annotations for vg parity without changing the variant call.
 
-  On the subrange fixture, gfaz renumbers segments 1,2,3,10,21,22,23,24 to
-  1..8 in declaration order, so chr1's snarl is >1..>3 with REF interior node 2
-  (C) and ALT node 10->4 (T), and chr2's is >5..>8 with REF node 6 (A) / ALT
-  node 23->7 (T). With `-a` we expect, relative to the default output:
+  The subrange fixture names its segments 1,2,3,10,21,22,23,24, and AT / ID
+  use those names: chr1's snarl is >1..>3 with REF interior node 2 (C) and ALT
+  node 10 (T), and chr2's is >21..>24 with REF node 22 (A) / ALT node 23 (T).
+  With `-a` we expect, relative to the default output:
     - CHROM = full PanSN base name (REF#0#chr1) and matching ##contig ids;
-    - ID    = snarl boundary id (>src>sink) in gfaz's node space;
+    - ID    = snarl boundary id (>src>sink);
     - INFO gains ;AT=<ref-path>,<alt-path> (REF first), plus the AT header line;
     - everything else (POS/REF/ALT/AC/AN/AF/NS/GT) identical to the default.
   """
   expected = [
       "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG001",
-      "REF#0#chr1\t1005\t>1>3\tC\tT\t.\t.\tAC=1;AN=1;AF=1;NS=1;AT=>1>2>3,>1>4>3\tGT\t1",
-      "REF#0#chr2\t503\t>5>8\tA\tT\t.\t.\tAC=1;AN=1;AF=1;NS=1;AT=>5>6>8,>5>7>8\tGT\t1",
+      "REF#0#chr1\t1005\t>1>3\tC\tT\t.\t.\tAC=1;AN=1;AF=1;NS=1;AT=>1>2>3,>1>10>3\tGT\t1",
+      "REF#0#chr2\t503\t>21>24\tA\tT\t.\t.\tAC=1;AN=1;AF=1;NS=1;AT=>21>22>24,>21>23>24\tGT\t1",
   ]
   result = run_command(
       [str(cli), "deconstruct", "-i", str(gfaz), "-P", "REF", "-S", "-a"]

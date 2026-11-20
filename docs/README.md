@@ -12,7 +12,7 @@ This directory holds the project documentation. The top-level
 ## Internals
 
 - [WORKFLOW.md](WORKFLOW.md) — CPU/GPU compression & decompression workflows and
-  the shared `.gfaz` serialization contract (magic `GFAZ`, version 5).
+  the shared `.gfaz` serialization contract (magic `GFAZ`, version 5, or 6 when segment names are stored).
 
 ## Extending the compute engine
 

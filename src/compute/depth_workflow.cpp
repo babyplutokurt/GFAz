@@ -1,5 +1,6 @@
 #include "compute/depth_workflow.hpp"
 
+#include "core/model/segment_names.hpp"
 #include "core/utils/threading_utils.hpp"
 #include "compute/traversal_query.hpp"
 
@@ -85,8 +86,13 @@ void depth_to_tsv(const CompressedData &data, const DepthOptions &options,
 
   if (options.per_node) {
     out << "#node.id\tdepth\tdepth.uniq\n";
-    for (uint32_t v = 1; v <= num_nodes; ++v)
-      out << v << '\t' << node_total[v] << '\t' << node_uniq[v] << '\n';
+    const SegmentNames names = SegmentNames::decode(data);
+    std::string name;
+    for (uint32_t v = 1; v <= num_nodes; ++v) {
+      name.clear();
+      names.append(name, v);
+      out << name << '\t' << node_total[v] << '\t' << node_uniq[v] << '\n';
+    }
     return;
   }
 

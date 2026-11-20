@@ -128,7 +128,7 @@ def normalize_depth(text: str) -> str:
   """Header line verbatim + body lines sorted. gfaz emits the -d table in node-id
   order; odgi emits it in internal (thread-dependent) order, so compare after
   sorting the body. The summary is header + one line (sorting is a no-op). Node
-  ids match only when the GFA segment names are 1..N (true for the fixtures)."""
+  ids match when the GFA segment names are numbers (true for the fixtures)."""
   lines = [ln for ln in text.splitlines() if ln.strip() != ""]
   if not lines:
     return ""

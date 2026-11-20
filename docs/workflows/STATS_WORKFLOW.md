@@ -55,8 +55,7 @@ gfaz counts both P- and W-lines.)
 - The summary reads only the compressed container metadata (segment lengths,
   link count, path/walk counts, pre-grammar traversal lengths) — no traversal
   decode, no graph object.
-- Node counts are independent of node identity; gfaz uses its own 1-based node
-  ids and never recovers the original GFA segment names.
+- Node counts are independent of node identity, so segment names play no part.
 - `-b` reports only A/C/G/T (matching odgi's four-row output); other characters
   (e.g. `N`) are not tallied.
 

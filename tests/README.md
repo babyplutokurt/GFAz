@@ -43,6 +43,9 @@
   repeated 2-mers (per-thread tables, or sorting every 2-mer; pinned with
   `GFAZ_RULE_SCAN=sets|sets-legacy|all`) and the default per-round choice give
   a byte-identical `.gfaz`.
+- `test_segment_names.py` checks that segment names other than `1..N` survive
+  compression (round trip, `extract-path`/`extract-walk`, `add-haplotypes`,
+  `depth -d`) and that `1..N` graphs are still written as format version 5.
 - `test_degenerate_inputs.py` covers degenerate-but-valid graphs (segments-only,
   walks-only, header-only) round-tripping cleanly, and invalid invocations
   (missing/malformed BED, unresolved pav/deconstruct reference) failing with a

@@ -1196,9 +1196,13 @@ PYBIND11_MODULE(gfa_compression, m) {
           success = false;
         }
 
-        // Segment names are reconstructed canonically as dense 1-based IDs
-        // during decompression, so raw node_names storage is not required to
-        // round-trip exactly.
+        // Compare segment names
+        if (original.node_names.data != decompressed.node_names.data ||
+            original.node_names.lengths != decompressed.node_names.lengths) {
+          std::cerr << "GPU Verification Failed: node_names mismatch."
+                    << std::endl;
+          success = false;
+        }
 
         // Compare path names
         if (original.path_names.data != decompressed.path_names.data) {

@@ -1,5 +1,6 @@
 #include "compress/compression_workflow.hpp"
 #include "core/codec/codec.hpp"
+#include "core/model/segment_names.hpp"
 #include "compress/grammar/packed_2mer.hpp"
 #include "compress/grammar/path_encoder.hpp"
 #include "compress/grammar/rule_generator.hpp"
@@ -251,6 +252,21 @@ void initialize_output_metadata(CompressionContext &ctx) {
                          total_node_count(ctx.graph.walks.walks);
   }
   ctx.data_size_mb = ctx.total_elements * sizeof(int32_t) / (1024.0 * 1024.0);
+}
+
+// Store the segment names in the output, unless they are just the IDs. Must
+// run before the parser's name tables are released.
+void compress_segment_names(CompressionContext &ctx) {
+  auto &segments = ctx.graph.segments;
+  const gfaz::SegmentNames names =
+      segments.node_name_lengths.empty()
+          ? gfaz::SegmentNames::from_id_table(segments.node_id_to_name)
+          : gfaz::SegmentNames::from_strings(
+                std::move(segments.node_names_concat),
+                segments.node_name_lengths);
+  names.encode(ctx.out);
+  segments.node_names_concat = {};
+  segments.node_name_lengths = {};
 }
 
 void prepare_id_space_for_traversal_transform(CompressionContext &ctx) {
@@ -1066,6 +1082,7 @@ gfaz::CompressedData compress_gfa_with_options(const std::string &gfa_file_path,
 
   // Stage 1: initialize shared output metadata and traversal symbol space.
   initialize_output_metadata(ctx);
+  compress_segment_names(ctx);
   prepare_id_space_for_traversal_transform(ctx);
 
   auto compress_total_start = std::chrono::high_resolution_clock::now();

@@ -314,5 +314,5 @@ Legacy GPU alias names are retained for compatibility in CUDA builds.
 ## Semantic Notes
 
 - `GfaGraph` now groups S-line state in `segments` (`SegmentData`) and P-line state in `paths_data` (`PathData`), while retaining `walks`, `links`, `jumps`, and `containments` as separate record groups.
-- Segment names are reconstructed canonically during decompression as dense 1-based numeric IDs.
-- Round-trip verification is therefore based on graph semantics rather than original segment-name strings.
+- Segments are identified by dense 1-based IDs in S-line order. Their names are kept in the container (`SegmentNames`, `include/core/model/segment_names.hpp`) unless they are exactly `1..N`, and every writer prints the original name.
+- Records are regrouped by type on decompression, so round-trip verification compares line sets rather than line order.

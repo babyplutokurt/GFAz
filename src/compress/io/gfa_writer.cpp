@@ -1,6 +1,7 @@
 #include "compress/io/gfa_writer.hpp"
 #include "compress/io/gfa_write_utils.hpp"
 #include "core/codec/codec.hpp"
+#include "core/model/segment_names.hpp"
 #include "core/utils/debug_log.hpp"
 #include "core/utils/runtime_utils.hpp"
 #include "core/utils/threading_utils.hpp"
@@ -157,6 +158,12 @@ public:
   void put_number(uint32_t value) {
     cursor_ = std::to_chars(cursor_, limit_, value).ptr;
   }
+  void put_name(const gfaz::SegmentNames &names, uint32_t id) {
+    if (names.dense())
+      put_number(id);
+    else
+      cursor_ += names.write(id, cursor_);
+  }
   void append(std::string_view text) {
     ensure(text.size());
     std::memcpy(cursor_, text.data(), text.size());
@@ -184,9 +191,6 @@ private:
   char *cursor_ = nullptr;
   char *limit_ = nullptr;
 };
-
-// Longest text of one step: orientation, ten digits and a separator.
-constexpr size_t kMaxStepBytes = 12;
 
 template <typename Formatter>
 void write_sequence_batch_stream(std::ofstream &out, size_t total_count,
@@ -530,6 +534,7 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
   std::vector<char> link_to_orients;
   std::vector<uint32_t> link_overlap_nums;
   std::vector<char> link_overlap_ops;
+  gfaz::SegmentNames names;
   auto t0 = Clock::now();
 
   std::vector<gfaz::OptionalFieldColumn> segment_optional_fields(
@@ -602,6 +607,7 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
     segment_lengths = gfaz::Codec::zstd_decompress_uint32_vector(
         data.segment_seq_lengths_zstd);
   });
+  decode_jobs.push_back([&] { names = gfaz::SegmentNames::decode(data); });
   decode_jobs.push_back([&] {
     path_names =
         decompress_string_column(data.names_zstd, data.name_lengths_zstd);
@@ -726,7 +732,7 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
                          (end - begin) * 48);
           for (size_t i = begin; i < end; ++i) {
             buffer += "S\t";
-            append_numeric_node_name(buffer, static_cast<uint32_t>(i + 1));
+            names.append(buffer, static_cast<uint32_t>(i + 1));
             buffer += '\t';
             buffer.append(segment_sequences, offset, segment_lengths[i]);
             offset += segment_lengths[i];
@@ -762,11 +768,11 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
         buffer.reserve((end - begin) * 48);
         for (size_t i = begin; i < end; ++i) {
           buffer += "L\t";
-          append_numeric_node_name(buffer, link_from_ids[i]);
+          names.append(buffer, link_from_ids[i]);
           buffer += '\t';
           buffer += link_from_orients[i];
           buffer += '\t';
-          append_numeric_node_name(buffer, link_to_ids[i]);
+          names.append(buffer, link_to_ids[i]);
           buffer += '\t';
           buffer += link_to_orients[i];
           buffer += '\t';
@@ -788,11 +794,11 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
   for (size_t i = 0; i < jump_from_ids.size(); ++i) {
     line.clear();
     line += "J\t";
-    append_numeric_node_name(line, jump_from_ids[i]);
+    names.append(line, jump_from_ids[i]);
     line += '\t';
     line += jump_from_orients[i];
     line += '\t';
-    append_numeric_node_name(line, jump_to_ids[i]);
+    names.append(line, jump_to_ids[i]);
     line += '\t';
     line += jump_to_orients[i];
     line += '\t';
@@ -812,11 +818,11 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
   for (size_t i = 0; i < containment_container_ids.size(); ++i) {
     line.clear();
     line += "C\t";
-    append_numeric_node_name(line, containment_container_ids[i]);
+    names.append(line, containment_container_ids[i]);
     line += '\t';
     line += containment_container_orients[i];
     line += '\t';
-    append_numeric_node_name(line, containment_contained_ids[i]);
+    names.append(line, containment_contained_ids[i]);
     line += '\t';
     line += containment_contained_orients[i];
     line += '\t';
@@ -836,6 +842,8 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
     debug_stages.push_back({"stream containments", elapsed_ms(t0, t1)});
 
   const uint32_t min_rule_id = data.min_rule_id();
+  // Longest text of one step: orientation, name and a separator.
+  const size_t max_step_bytes = names.max_length() + 2;
 
   t0 = Clock::now();
   write_sequence_batch_stream(out, data.sequence_lengths.size(), num_threads,
@@ -862,13 +870,14 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
                                     paths_flat, path_offsets, index, rules_first,
                                     rules_second, min_rule_id, data.delta_round,
                                     [&](gfaz::NodeId node) {
-                                      path_line.ensure(kMaxStepBytes);
+                                      path_line.ensure(max_step_bytes);
                                       if (!first_node)
                                         path_line.put(',');
                                       first_node = false;
                                       const bool reverse = node < 0;
-                                      path_line.put_number(static_cast<uint32_t>(
-                                          reverse ? -node : node));
+                                      path_line.put_name(
+                                          names, static_cast<uint32_t>(
+                                                     reverse ? -node : node));
                                       path_line.put(reverse ? '-' : '+');
                                     });
                                 path_line.append('\t');
@@ -931,10 +940,11 @@ void write_gfa_from_compressed_data(const gfaz::CompressedData &data,
                                     rules_second, min_rule_id, data.delta_round,
                                     [&](gfaz::NodeId node) {
                                       const bool reverse = node < 0;
-                                      walk_line.ensure(kMaxStepBytes);
+                                      walk_line.ensure(max_step_bytes);
                                       walk_line.put(reverse ? '<' : '>');
-                                      walk_line.put_number(static_cast<uint32_t>(
-                                          reverse ? -node : node));
+                                      walk_line.put_name(
+                                          names, static_cast<uint32_t>(
+                                                     reverse ? -node : node));
                                     });
                                 walk_line.append('\n');
                                 return walk_line;

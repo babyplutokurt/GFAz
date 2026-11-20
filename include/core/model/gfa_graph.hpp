@@ -83,6 +83,11 @@ struct SegmentData {
   // columns consumed by the entropy codec, avoiding per-segment strings.
   std::string node_sequences_concat;
   std::vector<uint32_t> node_sequence_lengths;
+  // Segment names in ID order, flattened. Filled only by a parser that wrote
+  // the columns above without building node_id_to_name, and only when the
+  // names are not the decimal IDs 1..N.
+  std::string node_names_concat;
+  std::vector<uint32_t> node_name_lengths;
   std::vector<OptionalFieldColumn> optional_fields;
 
   size_t size() const {

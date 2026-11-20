@@ -168,9 +168,6 @@ OPTIONS:
 OUTPUT:
     Writes the reconstructed P-lines to stdout, in the same order as requested.
 
-NOTE:
-    The current .gfaz format reconstructs segment names canonically, so
-    segment references are emitted as numeric IDs.
 
 )";
 }
@@ -195,8 +192,6 @@ NOTE:
     Walk lookup uses the full W-line identifier tuple:
     (sample_id, hap_index, seq_id, seq_start, seq_end).
     Use '*' for seq_start / seq_end values from the original W-line.
-    The current .gfaz format reconstructs segment names canonically, so
-    segment references are emitted as numeric IDs.
 
 )";
 }
@@ -216,8 +211,7 @@ BEHAVIOR:
     - The append file must contain only H/P lines or only H/W lines.
     - The existing rulebook is reused; no new grammar rules are generated.
     - Appended path/walk names must be unique.
-    - Because the .gfaz format reconstructs segment names canonically,
-      appended paths/walks must use numeric segment IDs.
+    - Appended paths/walks name segments as the compressed GFA did.
     - If no output path is provided, writes <input>.updated.gfaz.
     - If delta encoding causes appended IDs to collide with the stored rule
       region, the command fails without writing output.
@@ -363,8 +357,7 @@ OUTPUT:
 
 NOTES:
     Computed directly from the compressed container metadata (no traversal
-    decode for the summary), so it is near-instant. Node counts are independent
-    of node identity; gfaz uses its own 1-based node ids.
+    decode for the summary), so it is near-instant.
 
 )";
 }
@@ -398,8 +391,8 @@ OUTPUT:
 NOTES:
     Streams the compressed P/W traversals into a single shared per-node counter
     (peak memory ~ num_nodes, not num_nodes x threads), so it does not
-    materialize a full graph. The -d node ids are gfaz's own 1-based ids, so the
-    table matches odgi byte-for-byte only when the GFA segment names are 1..N.
+    materialize a full graph. The -d table lists segments by their GFA names,
+    in S-line order.
 
 )";
 }

@@ -263,9 +263,10 @@ decode_rules(const gfaz::CompressedData &data) {
   return {std::move(first), std::move(second)};
 }
 
-std::string format_path_line_numeric(const std::string &path_name,
-                                     const int32_t *path_data, size_t path_size,
-                                     const std::string &overlap) {
+std::string format_path_line(const std::string &path_name,
+                             const int32_t *path_data, size_t path_size,
+                             const std::string &overlap,
+                             const gfaz::SegmentNames &names) {
   std::string line = "P\t";
   line += path_name;
   line += '\t';
@@ -276,8 +277,7 @@ std::string format_path_line_numeric(const std::string &path_name,
 
     const int32_t node = path_data[i];
     const bool reverse = node < 0;
-    append_numeric_node_name(
-        line, static_cast<uint32_t>(reverse ? -node : node));
+    names.append(line, static_cast<uint32_t>(reverse ? -node : node));
     line += (reverse ? '-' : '+');
   }
 
@@ -287,12 +287,11 @@ std::string format_path_line_numeric(const std::string &path_name,
   return line;
 }
 
-std::string format_walk_line_numeric(const std::string &sample_id,
-                                     uint32_t hap_index,
-                                     const std::string &seq_id,
-                                     int64_t seq_start, int64_t seq_end,
-                                     const int32_t *walk_data,
-                                     size_t walk_size) {
+std::string format_walk_line(const std::string &sample_id, uint32_t hap_index,
+                             const std::string &seq_id, int64_t seq_start,
+                             int64_t seq_end, const int32_t *walk_data,
+                             size_t walk_size,
+                             const gfaz::SegmentNames &names) {
   std::string line = "W\t";
   line += sample_id;
   line += '\t';
@@ -309,27 +308,25 @@ std::string format_walk_line_numeric(const std::string &sample_id,
     const int32_t node = walk_data[i];
     const bool reverse = node < 0;
     line += (reverse ? '<' : '>');
-    append_numeric_node_name(
-        line, static_cast<uint32_t>(reverse ? -node : node));
+    names.append(line, static_cast<uint32_t>(reverse ? -node : node));
   }
 
   line += '\n';
   return line;
 }
 
-void write_segments_numeric(std::ofstream &out,
-                            const std::string &segment_sequences,
-                            const std::vector<uint32_t> &segment_lengths,
-                            const std::vector<gfaz::OptionalFieldColumn>
-                                &segment_optional_fields,
-                            const FieldOffsets &segment_offsets) {
+void write_segments(
+    std::ofstream &out, const std::string &segment_sequences,
+    const std::vector<uint32_t> &segment_lengths,
+    const std::vector<gfaz::OptionalFieldColumn> &segment_optional_fields,
+    const FieldOffsets &segment_offsets, const gfaz::SegmentNames &names) {
   std::string line;
   line.reserve(4096);
   size_t segment_seq_offset = 0;
   for (size_t i = 0; i < segment_lengths.size(); ++i) {
     line.clear();
     line += "S\t";
-    append_numeric_node_name(line, static_cast<uint32_t>(i + 1));
+    names.append(line, static_cast<uint32_t>(i + 1));
     line += '\t';
 
     const uint32_t len = segment_lengths[i];
@@ -346,7 +343,7 @@ void write_segments_numeric(std::ofstream &out,
   }
 }
 
-void write_links_numeric(
+void write_links(
     std::ofstream &out, const std::vector<uint32_t> &link_from_ids,
     const std::vector<uint32_t> &link_to_ids,
     const std::vector<char> &link_from_orients,
@@ -354,17 +351,17 @@ void write_links_numeric(
     const std::vector<uint32_t> &link_overlap_nums,
     const std::vector<char> &link_overlap_ops,
     const std::vector<gfaz::OptionalFieldColumn> &link_optional_fields,
-    const FieldOffsets &link_offsets) {
+    const FieldOffsets &link_offsets, const gfaz::SegmentNames &names) {
   std::string line;
   line.reserve(4096);
   for (size_t i = 0; i < link_from_ids.size(); ++i) {
     line.clear();
     line += "L\t";
-    append_numeric_node_name(line, link_from_ids[i]);
+    names.append(line, link_from_ids[i]);
     line += '\t';
     line += link_from_orients[i];
     line += '\t';
-    append_numeric_node_name(line, link_to_ids[i]);
+    names.append(line, link_to_ids[i]);
     line += '\t';
     line += link_to_orients[i];
     line += '\t';
@@ -380,23 +377,23 @@ void write_links_numeric(
   }
 }
 
-void write_jumps_numeric(std::ofstream &out,
-                         const std::vector<uint32_t> &jump_from_ids,
-                         const std::vector<uint32_t> &jump_to_ids,
-                         const std::vector<char> &jump_from_orients,
-                         const std::vector<char> &jump_to_orients,
-                         const std::vector<std::string> &jump_distances,
-                         const std::vector<std::string> &jump_rest_fields) {
+void write_jumps(std::ofstream &out, const std::vector<uint32_t> &jump_from_ids,
+                 const std::vector<uint32_t> &jump_to_ids,
+                 const std::vector<char> &jump_from_orients,
+                 const std::vector<char> &jump_to_orients,
+                 const std::vector<std::string> &jump_distances,
+                 const std::vector<std::string> &jump_rest_fields,
+                 const gfaz::SegmentNames &names) {
   std::string line;
   line.reserve(4096);
   for (size_t i = 0; i < jump_from_ids.size(); ++i) {
     line.clear();
     line += "J\t";
-    append_numeric_node_name(line, jump_from_ids[i]);
+    names.append(line, jump_from_ids[i]);
     line += '\t';
     line += jump_from_orients[i];
     line += '\t';
-    append_numeric_node_name(line, jump_to_ids[i]);
+    names.append(line, jump_to_ids[i]);
     line += '\t';
     line += jump_to_orients[i];
     line += '\t';
@@ -410,25 +407,25 @@ void write_jumps_numeric(std::ofstream &out,
   }
 }
 
-void write_containments_numeric(
-    std::ofstream &out,
-    const std::vector<uint32_t> &containment_container_ids,
-    const std::vector<uint32_t> &containment_contained_ids,
-    const std::vector<char> &containment_container_orients,
-    const std::vector<char> &containment_contained_orients,
-    const std::vector<uint32_t> &containment_positions,
-    const std::vector<std::string> &containment_overlaps,
-    const std::vector<std::string> &containment_rest_fields) {
+void write_containments(std::ofstream &out,
+                        const std::vector<uint32_t> &containment_container_ids,
+                        const std::vector<uint32_t> &containment_contained_ids,
+                        const std::vector<char> &containment_container_orients,
+                        const std::vector<char> &containment_contained_orients,
+                        const std::vector<uint32_t> &containment_positions,
+                        const std::vector<std::string> &containment_overlaps,
+                        const std::vector<std::string> &containment_rest_fields,
+                        const gfaz::SegmentNames &names) {
   std::string line;
   line.reserve(4096);
   for (size_t i = 0; i < containment_container_ids.size(); ++i) {
     line.clear();
     line += "C\t";
-    append_numeric_node_name(line, containment_container_ids[i]);
+    names.append(line, containment_container_ids[i]);
     line += '\t';
     line += containment_container_orients[i];
     line += '\t';
-    append_numeric_node_name(line, containment_contained_ids[i]);
+    names.append(line, containment_contained_ids[i]);
     line += '\t';
     line += containment_contained_orients[i];
     line += '\t';

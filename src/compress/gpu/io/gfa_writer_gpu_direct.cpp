@@ -80,6 +80,7 @@ decode_gpu_direct_writer_static_fields(const gfaz::CompressedData &data) {
 
   fields.segment_offsets = build_field_offsets(fields.segment_optional_fields);
   fields.link_offsets = build_field_offsets(fields.link_optional_fields);
+  fields.segment_names = gfaz::SegmentNames::decode(data);
   fields.decode_ms = elapsed_ms(start, Clock::now());
   return fields;
 }
@@ -92,6 +93,7 @@ GpuPathWriterMetadata decode_gpu_path_writer_metadata(const gfaz::CompressedData
       decompress_string_column(data.names_zstd, data.name_lengths_zstd);
   metadata.overlaps =
       decompress_string_column(data.overlaps_zstd, data.overlap_lengths_zstd);
+  metadata.segment_names = gfaz::SegmentNames::decode(data);
   metadata.decode_ms = elapsed_ms(start, Clock::now());
   return metadata;
 }
@@ -110,6 +112,7 @@ GpuWalkWriterMetadata decode_gpu_walk_writer_metadata(const gfaz::CompressedData
       data.walk_seq_starts_zstd, data.walk_lengths.size());
   metadata.seq_ends = gfaz::Codec::decompress_varint_int64(data.walk_seq_ends_zstd,
                                                      data.walk_lengths.size());
+  metadata.segment_names = gfaz::SegmentNames::decode(data);
   metadata.decode_ms = elapsed_ms(start, Clock::now());
   return metadata;
 }
@@ -120,22 +123,22 @@ void write_gpu_direct_writer_static_fields(
   if (!data.header_line.empty())
     out << data.header_line << '\n';
 
-  write_segments_numeric(out, fields.segment_sequences, fields.segment_lengths,
-                         fields.segment_optional_fields, fields.segment_offsets);
-  write_links_numeric(out, fields.link_from_ids, fields.link_to_ids,
-                      fields.link_from_orients, fields.link_to_orients,
-                      fields.link_overlap_nums, fields.link_overlap_ops,
-                      fields.link_optional_fields, fields.link_offsets);
-  write_jumps_numeric(out, fields.jump_from_ids, fields.jump_to_ids,
-                      fields.jump_from_orients, fields.jump_to_orients,
-                      fields.jump_distances, fields.jump_rest_fields);
-  write_containments_numeric(out, fields.containment_container_ids,
-                             fields.containment_contained_ids,
-                             fields.containment_container_orients,
-                             fields.containment_contained_orients,
-                             fields.containment_positions,
-                             fields.containment_overlaps,
-                             fields.containment_rest_fields);
+  const gfaz::SegmentNames &names = fields.segment_names;
+  write_segments(out, fields.segment_sequences, fields.segment_lengths,
+                 fields.segment_optional_fields, fields.segment_offsets, names);
+  write_links(out, fields.link_from_ids, fields.link_to_ids,
+              fields.link_from_orients, fields.link_to_orients,
+              fields.link_overlap_nums, fields.link_overlap_ops,
+              fields.link_optional_fields, fields.link_offsets, names);
+  write_jumps(out, fields.jump_from_ids, fields.jump_to_ids,
+              fields.jump_from_orients, fields.jump_to_orients,
+              fields.jump_distances, fields.jump_rest_fields, names);
+  write_containments(out, fields.containment_container_ids,
+                     fields.containment_contained_ids,
+                     fields.containment_container_orients,
+                     fields.containment_contained_orients,
+                     fields.containment_positions, fields.containment_overlaps,
+                     fields.containment_rest_fields, names);
 }
 
 void write_gpu_path_chunk_lines(std::ofstream &out,
@@ -153,7 +156,8 @@ void write_gpu_path_chunk_lines(std::ofstream &out,
         (global_index < metadata.overlaps.size()) ? metadata.overlaps[global_index]
                                                   : "";
     const std::string line =
-        format_path_line_numeric(name, buffer.host_nodes + offset, length, overlap);
+        format_path_line(name, buffer.host_nodes + offset, length, overlap,
+                         metadata.segment_names);
     out.write(line.data(), static_cast<std::streamsize>(line.size()));
     offset += length;
   }
@@ -185,9 +189,9 @@ void write_gpu_walk_chunk_lines(std::ofstream &out,
     const int64_t seq_end = (global_index < metadata.seq_ends.size())
                                 ? metadata.seq_ends[global_index]
                                 : -1;
-    const std::string line = format_walk_line_numeric(
+    const std::string line = format_walk_line(
         sample_id, hap_index, seq_id, seq_start, seq_end,
-        buffer.host_nodes + offset, length);
+        buffer.host_nodes + offset, length, metadata.segment_names);
     out.write(line.data(), static_cast<std::streamsize>(line.size()));
     offset += length;
   }
