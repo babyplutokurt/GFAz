@@ -19,8 +19,8 @@
 //     the index lists for the node's zone of ids, decoding the ones not in the
 //     thread's cache. Neighbouring nodes share blocks, so a local neighbourhood
 //     is cheap. Zones inside repeats list far too many blocks for that; their
-//     visits are kept in a RepeatIndex, built when a node is first asked
-//     about, and read from there without decoding.
+//     visits are kept in a RepeatIndex, built when a node of such a zone is
+//     first asked about, and read from there without decoding.
 //
 // Node ids follow the GFA the way vg's GFA import does: segment names that are
 // numbers are the node ids, and other names get new ids; the names themselves
@@ -169,7 +169,7 @@ private:
   // asking for sequences or paths starts all three side by side, since a
   // caller that walks paths or reads bases goes on to use the rest. The
   // repeat index is not in the container: it is built from the paths, when
-  // the steps on a node are first asked for.
+  // the steps on a node of a crowded zone are first asked for.
   enum Part { kSequences, kEdges, kPaths, kRepeats, kNumParts };
   static constexpr int kNumContainerParts = kRepeats;
   class Loader;
@@ -201,13 +201,19 @@ private:
     require(kSequences);
     return sequences_;
   }
+  const PathIndex &path_index() const;
   const PathStore &path_store() const {
     require(kPaths);
     return *path_store_;
   }
-  const RepeatIndex &repeats() const {
+  // The repeat index if it lists the visits of a segment, null otherwise.
+  // Only a segment in a crowded zone has the index built.
+  const RepeatIndex *repeats_covering(uint32_t segment) const {
+    const size_t zone = segment >> PathIndex::kZoneShift;
+    if (path_index().zone_block_count(zone) <= options_.repeat_zone_blocks)
+      return nullptr;
     require(kRepeats);
-    return *repeats_;
+    return repeats_.get();
   }
   // The decoded block holding a step, from this thread's cache.
   const DecodedBlock &block_with_step(size_t path, uint32_t step) const;

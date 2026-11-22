@@ -133,6 +133,10 @@ public:
   static constexpr uint32_t kZoneShift = 8;
   static constexpr uint32_t kZoneNodes = uint32_t{1} << kZoneShift;
   size_t num_zones() const { return zone_starts_.size() - 1; }
+  // How many blocks visit a node of a zone; 0 for a zone past the last one.
+  size_t zone_block_count(size_t zone) const {
+    return zone < num_zones() ? zone_starts_[zone + 1] - zone_starts_[zone] : 0;
+  }
 
 private:
   size_t haplotype_of(uint32_t stored_block) const;
