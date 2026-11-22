@@ -18,7 +18,9 @@
 //   - the steps on a node (for_each_step_on_handle): a scan of every block
 //     the index lists for the node's zone of ids, decoding the ones not in the
 //     thread's cache. Neighbouring nodes share blocks, so a local neighbourhood
-//     is cheap; repeat-rich zones list many blocks and are slow.
+//     is cheap. Zones inside repeats list far too many blocks for that; their
+//     visits are kept in a RepeatIndex, built when a node is first asked
+//     about, and read from there without decoding.
 //
 // Node ids follow the GFA the way vg's GFA import does: segment names that are
 // numbers are the node ids, and other names get new ids; the names themselves
@@ -26,6 +28,7 @@
 // -DGFAZ_BUILD_HANDLEGRAPH=ON; see docs/HANDLEGRAPH_ADAPTER.md.
 
 #include "compute/indexed_paths.hpp"
+#include "compute/repeat_index.hpp"
 #include "handlegraph_adapter/packed_sequences.hpp"
 #include "core/defaults.hpp"
 #include "core/model/compressed_data.hpp"
@@ -55,6 +58,9 @@ struct GfazHandleGraphOptions {
   // crossing one locus, so that asking for the steps on a run of neighbouring
   // nodes decodes each block once. One block is about 12 bytes per step.
   size_t cached_blocks = 1024;
+  // Zones of node ids listed by more index blocks than this keep the visits of
+  // their nodes in memory (8 bytes a visit), as the cache cannot serve them.
+  size_t repeat_zone_blocks = 256;
   // Samples whose W-lines (and PanSN-named P-lines) are reference paths, in
   // addition to those listed in the header's RS:Z tag.
   std::unordered_set<std::string> reference_samples;
@@ -161,8 +167,11 @@ private:
   // The parts that take time to read from the container. Each is read at
   // most once, on its own thread. Asking for the edges reads only them;
   // asking for sequences or paths starts all three side by side, since a
-  // caller that walks paths or reads bases goes on to use the rest.
-  enum Part { kSequences, kEdges, kPaths, kNumParts };
+  // caller that walks paths or reads bases goes on to use the rest. The
+  // repeat index is not in the container: it is built from the paths, when
+  // the steps on a node are first asked for.
+  enum Part { kSequences, kEdges, kPaths, kRepeats, kNumParts };
+  static constexpr int kNumContainerParts = kRepeats;
   class Loader;
   struct PathStore;
   void require(Part part) const {
@@ -195,6 +204,10 @@ private:
   const PathStore &path_store() const {
     require(kPaths);
     return *path_store_;
+  }
+  const RepeatIndex &repeats() const {
+    require(kRepeats);
+    return *repeats_;
   }
   // The decoded block holding a step, from this thread's cache.
   const DecodedBlock &block_with_step(size_t path, uint32_t step) const;
@@ -243,6 +256,7 @@ private:
 
   // Decoded traversals and their index.
   std::unique_ptr<PathStore> path_store_;
+  std::unique_ptr<RepeatIndex> repeats_;
 
   // Set once a part is loaded. The loader is declared last so that its
   // threads end before anything they write to goes away.

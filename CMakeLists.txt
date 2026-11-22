@@ -168,6 +168,7 @@ set(GFAZ_COMPUTE_SOURCES
   src/compute/indexed_paths.cpp
   src/compute/traversal_set.cpp
   src/compute/path_index.cpp
+  src/compute/repeat_index.cpp
   src/compute/haplotype_catalog.cpp
   src/compute/deconstruct_workflow.cpp
   src/compute/snarl_finder.cpp

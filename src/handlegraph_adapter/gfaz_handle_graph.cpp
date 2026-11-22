@@ -234,9 +234,9 @@ GfazHandleGraph::GfazHandleGraph(const CompressedData &data,
   loader_ = std::make_unique<Loader>(*this, data, std::move(owned));
   if (load_now) {
     // The caller's container may not outlive this constructor.
-    for (int part = 0; part < kNumParts; ++part)
+    for (int part = 0; part < kNumContainerParts; ++part)
       loader_->start(static_cast<Part>(part));
-    for (int part = 0; part < kNumParts; ++part)
+    for (int part = 0; part < kNumContainerParts; ++part)
       loader_->wait(static_cast<Part>(part));
   }
 }
@@ -260,8 +260,10 @@ GfazHandleGraph::load(const std::string &path, GfazHandleGraphOptions options) {
 }
 
 void GfazHandleGraph::wait_for(Part part) const {
-  if (part != kEdges)
-    for (int other = 0; other < kNumParts; ++other)
+  if (part == kRepeats)
+    require(kPaths);
+  else if (part != kEdges)
+    for (int other = 0; other < kNumContainerParts; ++other)
       loader_->start(static_cast<Part>(other));
   loader_->start(part);
   loader_->wait(part);
@@ -287,6 +289,11 @@ void GfazHandleGraph::load_part(Part part, const CompressedData &data,
     break;
   case kPaths:
     load_paths(data, owned);
+    break;
+  case kRepeats:
+    repeats_ = std::make_unique<RepeatIndex>(RepeatIndex::build(
+        path_store_->access,
+        RepeatIndexOptions{options_.repeat_zone_blocks, options_.num_threads}));
     break;
   default:
     break;
@@ -891,6 +898,12 @@ bool GfazHandleGraph::for_each_path_handle_impl(
 bool GfazHandleGraph::for_each_step_on_handle_impl(
     const handle_t &handle,
     const std::function<bool(const step_handle_t &)> &iteratee) const {
+  const uint32_t node = segment_of_handle(handle);
+  const RepeatIndex &repeats = this->repeats();
+  if (repeats.covers(node))
+    return repeats.for_each_visit(node, [&](size_t path, uint32_t step) {
+      return iteratee(make_step(path, step));
+    });
   return for_each_step_position_on_handle(
       handle, [&](const step_handle_t &step, const bool &, const size_t &) {
         return iteratee(step);
@@ -937,17 +950,6 @@ bool GfazHandleGraph::for_each_step_position_on_handle(
   const uint32_t node = segment_of_handle(handle);
   const bool handle_reverse = get_is_reverse(handle);
 
-  // Only blocks whose node-id range covers the node can visit it. They go
-  // through the block cache, so asking about a run of neighbouring nodes
-  // decodes each block once.
-  std::vector<std::pair<uint32_t, uint32_t>> blocks;
-  path_store().index.for_each_block_overlapping(
-      node, node, [&](size_t path, size_t block) {
-        blocks.emplace_back(static_cast<uint32_t>(path),
-                            static_cast<uint32_t>(block));
-      });
-  std::sort(blocks.begin(), blocks.end());
-
   // Collect the visits before calling back: the callback may use the graph and
   // recycle the cached blocks being read here.
   struct Visit {
@@ -956,14 +958,39 @@ bool GfazHandleGraph::for_each_step_position_on_handle(
     bool reverse;
   };
   std::vector<Visit> visits;
-  for (const auto &[path, block] : blocks) {
-    const DecodedBlock &decoded = decoded_block(path, block);
-    for (size_t i = 0; i < decoded.nodes.size(); ++i) {
-      const NodeId visited = decoded.nodes[i];
-      if (tquery::abs_node_id(visited) == node)
-        visits.push_back({make_step(path, decoded.step_begin + i),
-                          decoded.positions[i],
-                          (visited < 0) != handle_reverse});
+
+  const RepeatIndex &repeats = this->repeats();
+  if (repeats.covers(node)) {
+    // The visits are known; only their blocks are decoded.
+    const PathIndex &index = path_store().index;
+    repeats.for_each_visit(node, [&](size_t path, uint32_t step) {
+      const DecodedBlock &decoded =
+          decoded_block(path, index.block_of_step(path, step));
+      const size_t i = step - decoded.step_begin;
+      visits.push_back({make_step(path, step), decoded.positions[i],
+                        (decoded.nodes[i] < 0) != handle_reverse});
+      return true;
+    });
+  } else {
+    // Only the blocks listed for the node's zone can visit it. They go
+    // through the block cache, so asking about a run of neighbouring nodes
+    // decodes each block once.
+    std::vector<std::pair<uint32_t, uint32_t>> blocks;
+    path_store().index.for_each_block_overlapping(
+        node, node, [&](size_t path, size_t block) {
+          blocks.emplace_back(static_cast<uint32_t>(path),
+                              static_cast<uint32_t>(block));
+        });
+    std::sort(blocks.begin(), blocks.end());
+    for (const auto &[path, block] : blocks) {
+      const DecodedBlock &decoded = decoded_block(path, block);
+      for (size_t i = 0; i < decoded.nodes.size(); ++i) {
+        const NodeId visited = decoded.nodes[i];
+        if (tquery::abs_node_id(visited) == node)
+          visits.push_back({make_step(path, decoded.step_begin + i),
+                            decoded.positions[i],
+                            (visited < 0) != handle_reverse});
+      }
     }
   }
   for (const Visit &visit : visits)

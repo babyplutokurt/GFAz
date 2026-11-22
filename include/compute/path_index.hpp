@@ -132,6 +132,7 @@ public:
   // Node ids per zone of the node lookup.
   static constexpr uint32_t kZoneShift = 8;
   static constexpr uint32_t kZoneNodes = uint32_t{1} << kZoneShift;
+  size_t num_zones() const { return zone_starts_.size() - 1; }
 
 private:
   size_t haplotype_of(uint32_t stored_block) const;
