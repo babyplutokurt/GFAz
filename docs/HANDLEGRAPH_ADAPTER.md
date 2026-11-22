@@ -72,18 +72,30 @@ in the constructor and frees nothing.
 | Node, sequence, edge and degree queries | O(1); a sequence is unpacked on request |
 | Walking a path (`get_next_step`, `get_previous_step`, `for_each_step_in_path`) | Amortized O(1): one block decode per `block_steps` steps |
 | `get_step_at_position`, `get_position_of_step`, `get_path_length` | One block decode, or none if the block is cached |
-| `for_each_step_on_handle`, `for_each_step_position_on_handle`, `steps_of_handle` | One block decode per block listed for the node's zone of 256 ids |
+| `for_each_step_on_handle`, `for_each_step_position_on_handle`, `steps_of_handle` | One block decode per block listed for the node's zone of 256 ids; in a repeat zone, a read of the node's stored visits |
 
 The last row is the one to watch. The index lists, for each zone of 256 node
 ids, the blocks that visit a node in it: about 100 blocks for a typical zone of
-HPRC chr6, but tens of thousands in repeat-rich zones. A smaller `block_steps`
-(default 1024 here, 4096 for the CLI) makes each decode cheaper and the index
-larger. `load` therefore uses the saved index `<path>.pidx` only when its
-blocks are no longer than `block_steps`, and builds one otherwise; write it
-with `gfaz index -b 1024` for this adapter. (`vg deconstruct` on chr6 takes
-85 s with 1024-step blocks and 103 s with 4096-step ones.) An index named in
-`GfazHandleGraphOptions::index_path` is always used. GBWT-based graphs answer
-the query natively.
+HPRC chr6. A smaller `block_steps` (default 1024 here, 4096 for the CLI) makes
+each decode cheaper and the index larger. `load` therefore uses the saved index
+`<path>.pidx` only when its blocks are no longer than `block_steps`, and builds
+one otherwise; write it with `gfaz index -b 1024` for this adapter.
+(`vg deconstruct` on chr6 takes 85 s with 1024-step blocks and 103 s with
+4096-step ones.) An index named in `GfazHandleGraphOptions::index_path` is
+always used. GBWT-based graphs answer the query natively.
+
+Zones inside repeats are different: on chr6, 4% of the zones (satellite
+arrays) are each listed by about 50,000 blocks, which no block cache holds, and
+one lookup there used to decode some 50 million steps. For every zone listed by
+more than `repeat_zone_blocks` blocks (default 256) the adapter keeps a
+`RepeatIndex` (`include/compute/repeat_index.hpp`): every visit of every node
+of the zone as (path, step), 8 bytes a visit. `for_each_step_on_handle` on such
+a node reads the list and decodes nothing; the position variant decodes only
+the blocks that hold a visit. The index is built from the paths the first time
+the steps on a node are asked for, so commands that never ask do not pay for
+it. On chr6 it takes about 2 s to build and holds 144 million visits (36% of
+all steps) in 1.1 GB. With it `vg call` on chr6 went from 1,161 s to 88 s at 16
+threads, with the same VCF.
 
 The graph cannot be modified. Algorithms that need a mutable graph must convert
 first.

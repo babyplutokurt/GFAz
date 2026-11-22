@@ -68,6 +68,14 @@ def main():
                          str(cached_blocks)]),
             f"adapter check {gfa.name} block_steps={block_steps} "
             f"cached_blocks={cached_blocks}")
+      # The fixtures have no zone crowded enough for the repeat index; a
+      # threshold of 0 or 1 blocks puts all or some of their zones in it.
+      for repeat_zone_blocks in (0, 1):
+        require_success(
+            run_command([str(CHECKER), str(gfaz), str(full), "7", "2",
+                         str(repeat_zone_blocks)]),
+            f"adapter check {gfa.name} "
+            f"repeat_zone_blocks={repeat_zone_blocks}")
       # A saved index next to the container is used when its blocks are no
       # longer than the ones asked for, and passed over otherwise.
       require_success(run_command([cli, "index", "-i", str(gfaz), "-b", "4"]),
