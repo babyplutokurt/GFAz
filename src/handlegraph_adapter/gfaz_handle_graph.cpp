@@ -771,6 +771,10 @@ bool GfazHandleGraph::for_each_handle_impl(
 // PathHandleGraph
 // ---------------------------------------------------------------------------
 
+const PathIndex &GfazHandleGraph::path_index() const {
+  return path_store().index;
+}
+
 GfazHandleGraph::BlockCache &GfazHandleGraph::thread_cache() const {
   // One cache per thread and per graph. A thread that reads several graphs
   // keeps a cache for each; they are dropped when the thread ends.
@@ -899,9 +903,8 @@ bool GfazHandleGraph::for_each_step_on_handle_impl(
     const handle_t &handle,
     const std::function<bool(const step_handle_t &)> &iteratee) const {
   const uint32_t node = segment_of_handle(handle);
-  const RepeatIndex &repeats = this->repeats();
-  if (repeats.covers(node))
-    return repeats.for_each_visit(node, [&](size_t path, uint32_t step) {
+  if (const RepeatIndex *repeats = repeats_covering(node))
+    return repeats->for_each_visit(node, [&](size_t path, uint32_t step) {
       return iteratee(make_step(path, step));
     });
   return for_each_step_position_on_handle(
@@ -959,11 +962,10 @@ bool GfazHandleGraph::for_each_step_position_on_handle(
   };
   std::vector<Visit> visits;
 
-  const RepeatIndex &repeats = this->repeats();
-  if (repeats.covers(node)) {
+  if (const RepeatIndex *repeats = repeats_covering(node)) {
     // The visits are known; only their blocks are decoded.
     const PathIndex &index = path_store().index;
-    repeats.for_each_visit(node, [&](size_t path, uint32_t step) {
+    repeats->for_each_visit(node, [&](size_t path, uint32_t step) {
       const DecodedBlock &decoded =
           decoded_block(path, index.block_of_step(path, step));
       const size_t i = step - decoded.step_begin;

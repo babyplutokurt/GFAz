@@ -24,16 +24,15 @@ RepeatIndex RepeatIndex::build(const PathAccess &paths,
   std::vector<std::pair<uint32_t, uint32_t>> blocks; // (haplotype, block)
   uint32_t num_slots = 0;
   for (size_t zone = 0; zone < num_zones; ++zone) {
+    if (index.zone_block_count(zone) <= options.min_zone_blocks)
+      continue;
+    out.zone_slot_[zone] = num_slots++;
     const uint32_t first = static_cast<uint32_t>(zone << PathIndex::kZoneShift);
-    const uint32_t last = first + (PathIndex::kZoneNodes - 1);
-    const size_t before = blocks.size();
-    index.for_each_block_overlapping(first, last, [&](size_t hap, size_t b) {
-      blocks.emplace_back(static_cast<uint32_t>(hap), static_cast<uint32_t>(b));
-    });
-    if (blocks.size() - before > options.min_zone_blocks)
-      out.zone_slot_[zone] = num_slots++;
-    else
-      blocks.resize(before);
+    index.for_each_block_overlapping(
+        first, first + (PathIndex::kZoneNodes - 1), [&](size_t hap, size_t b) {
+          blocks.emplace_back(static_cast<uint32_t>(hap),
+                              static_cast<uint32_t>(b));
+        });
   }
   std::sort(blocks.begin(), blocks.end());
   blocks.erase(std::unique(blocks.begin(), blocks.end()), blocks.end());

@@ -92,8 +92,8 @@ more than `repeat_zone_blocks` blocks (default 256) the adapter keeps a
 of the zone as (path, step), 8 bytes a visit. `for_each_step_on_handle` on such
 a node reads the list and decodes nothing; the position variant decodes only
 the blocks that hold a visit. The index is built from the paths the first time
-the steps on a node are asked for, so commands that never ask do not pay for
-it. On chr6 it takes about 2 s to build and holds 144 million visits (36% of
+the steps on a node of such a zone are asked for, so commands that stay out of
+repeats do not pay for it. On chr6 it takes about 2 s to build and holds 144 million visits (36% of
 all steps) in 1.1 GB. With it `vg call` on chr6 went from 1,161 s to 88 s at 16
 threads, with the same VCF.
 
