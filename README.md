@@ -1,369 +1,163 @@
-# GFAz: State-of-the-Art Graphical Fragment Assembly Compression
+# GFAz
 
-GFAz is a C++/CUDA library and command-line tool for compressing and
-decompressing Graphical Fragment Assembly (GFA) files.
+GFAz compresses pangenome graphs in GFA format into a small `.gfaz` file, and
+runs analyses directly on that file without decompressing it.
 
-In our current benchmarks, GFAz reaches up to 20x higher compression ratio than
-Gzip and 13x higher compression ratio than Zstd. At 16 CPU threads it reaches
-up to 3.4 GB/s compression and 8.5 GB/s decompression; the experimental GPU
-backend reaches up to 4.8 GB/s compression and 9.4 GB/s decompression.
+- **Small.** Up to 84x smaller than the GFA on whole-genome HPRC graphs: up to
+  20x smaller than Gzip and 13x smaller than Zstd.
+- **Fast.** Gigabytes of GFA per second on 16 CPU threads, in both directions.
+- **Usable compressed.** `gfaz` computes growth curves, presence/absence,
+  depth, VCFs and region extracts from the `.gfaz`, and
+  [vg can read it as a graph](docs/VG_INTEGRATION.md).
+- **Lossless.** Decompression gives back the GFA records, including the
+  original segment names.
 
-It has two execution backends:
+## Example: HPRC v2.1
 
-- CPU
-- GPU (experimental, CUDA build required)
+The HPRC v2.1 Minigraph-Cactus graph is 396 GB of GFA. GFAz stores it in under
+5 GB.
 
-Both backends produce and consume the same `.gfaz` container format. The backend
-changes how transforms are computed, not the on-disk format.
+| Step | Time | Throughput | Peak memory |
+|---|---|---|---|
+| `gfaz compress` | 122 s | 3.2 GB/s | 161 GB |
+| `gfaz compress --memory-budget 2G` | 125 s | 3.2 GB/s | 30 GB |
+| `gfaz decompress` to `/dev/null` | 50 s | 7.9 GB/s | 25 GB |
+| `gfaz decompress` to an NVMe file | 180 s | 2.2 GB/s | 27 GB |
 
-## Performance
+16 threads on an AMD Ryzen Threadripper PRO 9955WX with 512 GB of memory, input
+in the page cache. Time is the wall time of the whole command, and throughput
+is the GFA size over that time. `--memory-budget` gives the same output, byte
+for byte. Seven more graphs, from 0.1 GB to 384 GB, are in
+[docs/WORKFLOW.md](docs/WORKFLOW.md#measured-cpu-throughput-and-memory).
 
-Measured on an AMD Ryzen Threadripper PRO 9955WX (16 cores), 512 GB DDR5-6400
-memory, a Samsung SSD 990 PRO NVMe drive, and an NVIDIA RTX Pro 6000. GFAz CPU
-runs use 16 threads. Compression throughput is end-to-end CLI wall time
-(parsing, compression, serialization) over the input GFA size; decompression
-writes to `/dev/null`.
+An experimental GPU backend reaches up to 4.8 GB/s compression and 9.4 GB/s
+decompression. It reads and writes the same `.gfaz` format.
 
-- Compression ratio: up to 84x on whole-genome HPRC graphs, up to 20x higher
-  than Gzip and 13x higher than Zstd.
-- CPU throughput: up to 3.4 GB/s compression and 8.5 GB/s decompression.
-  The 396 GB HPRC v2.1 graph compresses in under 2.5 minutes.
-- CPU memory: `--memory-budget` cuts compression peak memory by 2.6-5.5x on
-  whole-genome graphs (HPRC v2.1: 161 GB to 30 GB) for the same output; see
-  [docs/WORKFLOW.md](docs/WORKFLOW.md#measured-cpu-throughput-and-memory) for
-  per-dataset time and memory.
-- GPU backend (experimental): up to 4.8 GB/s compression and 9.4 GB/s
-  decompression.
+### Analyses on the compressed file
 
-Per-dataset results and the comparison against Gzip, Zstd, sqz, and GBZ are
-reported in the paper (see [Citation](#citation)).
+At 16 threads, against tools that read the uncompressed GFA (`vg deconstruct`,
+Panacus, `odgi`), `gfaz` runs up to 614x faster with up to 27x lower peak
+memory where both complete. It finishes whole-genome analyses on the HPRC v2.x
+graphs, where `vg` and `odgi` cannot load the input on a 512 GB machine.
 
-## Compute Engine Performance
-
-Beyond compression, `gfaz` runs pangenome analyses **directly on the compressed
-`.gfaz` container**, with no decompression back to GFA. Measured at 16 threads
-against tools that read the uncompressed GFA (`vg deconstruct`, Panacus,
-`odgi`), `gfaz` runs up to 614x faster with up to 27x lower peak memory where
-both complete, and it finishes whole-genome analyses on the HPRC v2.x graphs
-(about 400 GB of GFA) from a container under 5 GB, where `vg` and `odgi` cannot
-load the input on a 512 GB node.
-
-Outputs match the baselines: `growth` reproduces Panacus's curve exactly at
-every point, `pav` matrices are identical to `odgi`'s, and `deconstruct`
-reproduces more than 99.99% of `vg`'s sites at the same position with the same
-reference allele. Per-analysis timings and memory are reported in the paper.
-
-## What It Does
-
-- Compresses GFA text into a shared `CompressedData` / `.gfaz` representation.
-- Supports CPU and GPU compression against the same file format.
-- Supports cross-backend decompression:
-  CPU-compressed files can be decompressed with the GPU path, and GPU-compressed
-  files can be decompressed with the CPU path.
-- Exposes both a CLI (`gfaz`) and Python bindings (`gfa_compression`).
-- Supports path and walk extraction from `.gfaz` without full round-trip
-  conversion.
-- Supports appending path-only or walk-only haplotypes to an existing `.gfaz`
-  file using the stored rulebook.
-- Runs pangenome analyses — `deconstruct` (GFA→VCF), `growth`, and `pav` —
-  directly on the compressed `.gfaz`, without decompressing back to GFA
-  (see [Compute Engine Performance](#compute-engine-performance)).
-
-## Current Model
-
-- Shared container: CPU and GPU workflows both serialize to the same `.gfaz`
-  file format.
-- CPU decompression default: streaming direct-writer mode, which reduces peak
-  memory usage.
-- CPU in-memory decompression is still available through `decompress_gfa(...)`
-  and `gfaz decompress --legacy`.
-- GPU backend is still experimental.
-- Segment names are kept, in the cheapest of three forms: nothing at all when
-  they are `1..N` in file order (format version 5, as before); a shared prefix
-  and suffix plus one number per segment for names like `3463`, `s17` or
-  `utg000042l`; plain text for anything else. The last two make the file
-  format version 6.
+Outputs match the baselines: `growth` reproduces Panacus's curve exactly, `pav`
+matrices are identical to `odgi`'s, and `deconstruct` reproduces more than
+99.99% of `vg`'s sites at the same position with the same reference allele.
+Per-dataset results and the comparisons against Gzip, Zstd, sqz and GBZ are in
+the paper (see [Citation](#citation)).
 
 ## Build
-
-Initialize the environment first:
 
 ```bash
 conda activate gfa
 git submodule update --init --recursive
-```
-
-CPU-only build:
-
-```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
 ```
 
-CPU + GPU build:
+The command-line tool is `build/bin/gfaz`. For the GPU backend add
+`-DENABLE_CUDA=ON -DCUDA_PATH=/usr/local/cuda-12.8`; other options are in
+[docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md).
+
+## Quick start
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_CUDA=ON -DCUDA_PATH=/usr/local/cuda-12.8
-cmake --build build -j"$(nproc)"
+gfaz compress graph.gfa                 # writes graph.gfa.gfaz
+gfaz decompress graph.gfa.gfaz          # writes the GFA back
 ```
 
-The CLI binary is:
+To compress a large graph on a machine with less memory, keep at most 2 GiB of
+path and walk data in memory and put the rest in a temporary file on fast local
+storage:
 
 ```bash
-build/bin/gfaz
+gfaz compress --memory-budget 2G --tmp-dir /path/on/nvme graph.gfa
 ```
 
-## CLI
+## Commands
 
-Compression:
+Every command except `compress` reads the `.gfaz`. `gfaz <command> --help`
+lists the options.
+
+| Command | What it does | Details |
+|---|---|---|
+| `compress` | GFA to `.gfaz` | [WORKFLOW](docs/WORKFLOW.md) |
+| `decompress` | `.gfaz` back to GFA | [WORKFLOW](docs/WORKFLOW.md) |
+| `extract-path`, `extract-walk` | Print chosen P-lines or W-lines | |
+| `add-haplotypes` | Append paths or walks to an existing `.gfaz` | |
+| `stats` | Graph size summary, as `odgi stats` | [STATS](docs/workflows/STATS_WORKFLOW.md) |
+| `growth` | Pangenome growth curve, as Panacus | [GROWTH](docs/workflows/GROWTH_WORKFLOW.md) |
+| `pav` | Presence/absence over BED ranges, as `odgi pav` | [PAV](docs/workflows/PAV_WORKFLOW.md) |
+| `similarity` | All-vs-all similarity matrix, as `odgi similarity` | [SIMILARITY](docs/workflows/SIMILARITY_WORKFLOW.md) |
+| `depth` | Node coverage depth, as `odgi depth` | [DEPTH](docs/workflows/DEPTH_WORKFLOW.md) |
+| `deconstruct` | VCF against a reference path, as `vg deconstruct` | [DECONSTRUCT](docs/workflows/DECONSTRUCT_WORKFLOW.md) |
+| `extract-region` | Subgraph around a reference region, as GFA | [REGION](docs/workflows/REGION_WORKFLOW.md) |
+| `locate` | Where every path and walk visits a node | [LOCATE](docs/workflows/LOCATE_WORKFLOW.md) |
+| `index` | Save the path index `extract-region` and `locate` use | [LOCATE](docs/workflows/LOCATE_WORKFLOW.md) |
+
+Some examples:
 
 ```bash
-# CPU compression
-build/bin/gfaz compress example.gfa
+# Growth curve, grouping haplotypes by sample
+gfaz growth -i graph.gfaz -j 16 -G sample
 
-# GPU compression; still writes the same .gfaz container
-build/bin/gfaz compress --gpu example.gfa
+# VCF against a reference, one record per top-level snarl
+gfaz deconstruct -i graph.gfaz -r chr1 -t 16 > graph.vcf
+
+# The subgraph around a region, with every haplotype that passes through it
+gfaz extract-region -i graph.gfaz -r 'CHM13#0#chr6:30000000-30100000' > mhc.gfa
 ```
 
-Lower-memory CPU compression (same output, byte for byte):
+Things to know:
 
-```bash
-# Keep at most 2 GiB of path/walk data in RAM; stream the rest through a temp
-# file on fast local storage
-build/bin/gfaz compress --memory-budget 2G --tmp-dir /path/on/nvme example.gfa
-```
+- **Missing segments.** `compress` stops if a path, walk or link names a
+  segment that has no S-line. `--allow-missing-segments` drops those
+  references with a warning instead.
+- **GPU.** `--gpu` on `compress` or `decompress` uses the GPU backend. In a
+  CPU-only build it falls back to the CPU with a warning.
+- **In-memory decompression.** `decompress` streams the GFA out by default.
+  `--legacy` rebuilds the whole graph in memory first.
 
-A path, walk, link, jump or containment that references a segment with no
-S-line is reported as an error. To compress such a file anyway:
+## From Python and from other tools
 
-```bash
-# Unknown segment names are dropped (with a warning); in a graph whose
-# segments are named 1..N, numbers above N are kept
-build/bin/gfaz compress --allow-missing-segments example.gfa
-```
+- **Python.** The `gfa_compression` module compresses, decompresses and reads
+  paths in place. See [docs/PYTHON.md](docs/PYTHON.md).
 
-Decompression:
+  ```python
+  import gfa_compression as gfac
 
-```bash
-# CPU default: streaming direct-writer path
-build/bin/gfaz decompress example.gfa.gfaz
+  gfac.serialize(gfac.compress_file("graph.gfa"), "graph.gfaz")
+  reader = gfac.PathReader("graph.gfaz")
+  ```
 
-# CPU legacy: full in-memory graph reconstruction
-build/bin/gfaz decompress --legacy example.gfa.gfaz
+- **vg.** vg accepts a `.gfaz` wherever it accepts a graph. See
+  [docs/VG_INTEGRATION.md](docs/VG_INTEGRATION.md).
+- **libhandlegraph.** `GfazHandleGraph` presents a `.gfaz` as a read-only
+  handle graph to any libhandlegraph tool. See
+  [docs/HANDLEGRAPH_ADAPTER.md](docs/HANDLEGRAPH_ADAPTER.md).
 
-# GPU default: rolling-output GPU path
-build/bin/gfaz decompress --gpu example.gfa.gfaz
-
-# GPU legacy: whole-graph GPU decompression path
-build/bin/gfaz decompress --gpu --gpu-legacy example.gfa.gfaz
-```
-
-Extraction and append workflows:
-
-```bash
-# Extract P-lines by path name
-build/bin/gfaz extract-path example.gfa.gfaz chr1
-
-# Extract a W-line by full identifier tuple
-build/bin/gfaz extract-walk example.gfa.gfaz sample 0 seq1 0 1000
-
-# Append path-only or walk-only haplotypes
-build/bin/gfaz add-haplotypes example.gfa.gfaz new_paths.gfa
-```
-
-Compute-engine workflows (run directly on `.gfaz`, no GFA materialization):
-
-```bash
-# Compute growth curves directly from compressed paths/walks.
-# -G/--group-by selects the grouping: path (default), sample-hap-seq, sample-hap,
-# or sample (the last three mirror Panacus's default, -H, and -S).
-build/bin/gfaz growth -i example.gfa.gfaz -j 8 -G sample-hap-seq
-
-# Compute PAV ratios over BED ranges directly from compressed paths/walks
-build/bin/gfaz pav -i example.gfa.gfaz -b ranges.bed -S -M -t 8
-
-# Derive a VCF relative to a reference path directly from compressed traversals.
-# The default matches `vg deconstruct` (one record per top-level snarl).
-build/bin/gfaz deconstruct -i example.gfa.gfaz -r chr1 -S -t 16 > example.vcf
-
-# Pull the subgraph around a reference region out as GFA, with every haplotype
-# that passes through it.
-build/bin/gfaz extract-region -i example.gfa.gfaz -r 'CHM13#0#chr6:30000000-30100000' > mhc.gfa
-
-# Where every path and walk visits a node. `index` saves the path index both
-# commands use, so later queries skip building it.
-build/bin/gfaz index -i example.gfa.gfaz
-build/bin/gfaz locate -i example.gfa.gfaz -n 2000000
-```
-
-`growth` computes expected node accumulation curves from path/walk group
-coverage (Panacus-equivalent). `pav` computes presence/absence ratios for BED
-intervals by building node-to-group membership from compressed traversals
-(odgi-compatible node semantics; supports `-S`/`-H` grouping, `-M` matrix output,
-and `-B` thresholded binary output). `deconstruct` emits a VCF
-of variant sites relative to a chosen reference path, with per-sample phased
-genotypes (see [DECONSTRUCT_WORKFLOW.md](docs/workflows/DECONSTRUCT_WORKFLOW.md)). All three
-operate on `.gfaz` without materializing the original GFA.
-
-`deconstruct` has three site-finding modes. **The default emits one record per
-top-level snarl** via a global biconnected decomposition, matching
-`vg deconstruct`'s default granularity — producing output identical to `vg` is
-the goal of this workflow. On full human chromosomes it reproduces vg's calls at
-more than 99.99% position concordance while running an order of magnitude faster
-with less memory (see [Compute Engine Performance](#compute-engine-performance)).
-The two legacy modes — `--snarl` (leaf-superbubble
-superset) and `--linear` (the flat reference-anchor heuristic) — are deprecated
-and will be removed in a future release.
-
-`extract-region` and `locate` read positions inside haplotypes through a path
-index instead of streaming every traversal from its start; see
-[REGION_WORKFLOW.md](docs/workflows/REGION_WORKFLOW.md) and
-[LOCATE_WORKFLOW.md](docs/workflows/LOCATE_WORKFLOW.md). The same index backs
-the Python `PathReader` and the libhandlegraph adapter that lets vg and other
-libhandlegraph tools read a `.gfaz` directly
-([HANDLEGRAPH_ADAPTER.md](docs/HANDLEGRAPH_ADAPTER.md)).
-
-Notes:
-
-- In CPU-only builds, `--gpu` falls back to CPU with a warning.
-- CPU decompression defaults to streaming direct-writer mode.
-- GPU decompression defaults to rolling traversal expansion.
-- `extract-path`, `extract-walk`, and `add-haplotypes` all operate on the shared
-  `.gfaz` representation.
-
-## Python
-
-Basic CPU workflow:
-
-```python
-import gfa_compression as gfac
-
-graph = gfac.parse("example.gfa")
-compressed = gfac.compress_file("example.gfa", rounds=8, threshold=2, delta_round=1)
-gfac.serialize(compressed, "example.gfaz")
-
-data = gfac.deserialize("example.gfaz")
-roundtrip_graph = gfac.decompress_data(data)
-gfac.write_gfa(roundtrip_graph, "example.roundtrip.gfa")
-```
-
-`delta_round=0` is supported on the CPU path and disables delta encoding.
-The default remains `1`.
-
-Lower-memory CPU write path:
-
-```python
-import gfa_compression as gfac
-
-data = gfac.deserialize("example.gfaz")
-gfac.write_gfa_from_compressed_data(data, "example.streamed.gfa")
-```
-
-Reading paths in place (no decompression; node ids come back as numpy arrays,
-negative for reverse orientation):
-
-```python
-import gfa_compression as gfac
-
-reader = gfac.PathReader("example.gfaz")       # index_path="example.gfaz.pidx" to reuse `gfaz index`
-ref = reader.haplotypes_on("CHM13#0#chr6")[0]
-first, nodes, starts = reader.steps_in_bases(ref, 30_000_000, 30_100_000)
-visits = reader.locate(int(abs(nodes[0])))     # arrays: haplotype, step, start, reverse
-name = reader.node_name(int(abs(nodes[0])))    # the segment's name in the GFA; node_id(name) goes back
-```
-
-GPU workflow:
-
-```python
-import gfa_compression as gfac
-
-if gfac.has_gpu_backend():
-    graph = gfac.parse("example.gfa")
-    gpu_graph = gfac.convert_to_gpu_layout(graph)
-    compressed = gfac.compress_gpu_graph(gpu_graph, 8)
-    gfac.serialize(compressed, "example_gpu.gfaz")
-```
-
-Useful Python entry points:
-
-- `parse(...)` / `parse_gfa(...)`
-- `compress_file(...)`
-- `decompress_data(...)`
-- `serialize(...)`
-- `deserialize(...)`
-- `write_gfa(...)`
-- `write_gfa_from_compressed_data(...)`
-- `PathReader(...)`: `steps`, `steps_in_bases`, `locate`, `node_lengths`
-- `extract_path_line(...)` / `extract_path_lines(...)`
-- `extract_walk_line(...)`
-- `extract_walk_line_by_name(...)`
-- `extract_walk_lines(...)`
-- `extract_walk_lines_by_name(...)`
-- `add_haplotypes(...)`
-
-CUDA builds also expose:
-
-- `has_gpu_backend()`
-- `convert_to_gpu_layout(...)`
-- `convert_from_gpu_layout(...)`
-- `compress_gfa_gpu(...)`
-- `compress_gpu_graph(...)`
-- `decompress_to_gpu_layout(...)`
-
-## Internal Data Model
-
-The current in-memory CPU graph groups record families as follows:
-
-- `segments` (`SegmentData`) for S-line state
-- `paths_data` (`PathData`) for P-line state
-- `walks` (`WalkData`) for W-line state
-- `links` (`LinkData`) for L-line state
-- `jumps` (`JumpData`) for J-line state
-- `containments` (`ContainmentData`) for C-line state
-
-The serialized `.gfaz` format remains shared across CPU and GPU backends.
-
-## Validation
-
-The whole suite (CLI regressions + golden-file concordance + the binding-based
-round-trip matrix) runs from a single entry point, reported as PASS / SKIP / FAIL:
+## Tests
 
 ```bash
 conda activate gfa
 python3 tests/run_all.py            # PASS / SKIP / FAIL summary
-ctest --test-dir build              # same, via the `gfaz_tests` CTest entry
+ctest --test-dir build              # the same, through CTest
 ```
 
-A suite that cannot run (e.g. the compiled bindings are not importable, or an
-external-tool golden is missing) exits with SKIP rather than FAIL. The GPU paths
-are skipped unless a CUDA build is present. See [tests/README.md](tests/README.md)
-for the full layout. To run just the binding-based round-trip checks:
-
-```bash
-python3 tests/regression/test_compression_regression.py example.gfa
-```
+A suite that cannot run, such as the GPU tests in a CPU-only build, is reported
+as SKIP. See [tests/README.md](tests/README.md).
 
 ## Documentation
 
-Full docs live under [`docs/`](docs/README.md) (see that index for the complete
-list). Highlights:
-
-- [docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md): build instructions and CMake options
-- [docs/WORKFLOW.md](docs/WORKFLOW.md): internal workflow and serialization reference
-- [docs/workflows/GROWTH_WORKFLOW.md](docs/workflows/GROWTH_WORKFLOW.md): growth
-  workflow and comparison with Panacus
-- [docs/workflows/PAV_WORKFLOW.md](docs/workflows/PAV_WORKFLOW.md): PAV workflow
-  and comparison with odgi
-- [docs/workflows/DECONSTRUCT_WORKFLOW.md](docs/workflows/DECONSTRUCT_WORKFLOW.md):
-  GFA→VCF deconstruct workflow, algorithm, and limitations
-- [docs/design/](docs/design/): forward-looking design & roadmap notes
+[docs/README.md](docs/README.md) is the index: build options, the file format
+and compression workflow, one page per command, and how to add a new analysis
+to the compute engine.
 
 ## Limitations
 
-- GPU backend requires a CUDA-enabled build and runtime environment.
-- GPU backend is still experimental.
-- Decompression reconstructs canonical dense numeric segment IDs rather than the
-  original segment-name strings.
+- The GPU backend is experimental and needs a CUDA build.
+- Decompression keeps every record, but may change the order and spacing of
+  records compared with the original file.
 
 ## Citation
 
