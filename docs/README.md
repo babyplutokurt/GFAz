@@ -22,6 +22,8 @@ This directory holds the project documentation. The top-level
 
 ## Using GFAz from other tools
 
+- [PYTHON.md](PYTHON.md) — the `gfa_compression` module: compress, decompress,
+  read paths in place, and the list of entry points.
 - [HANDLEGRAPH_ADAPTER.md](HANDLEGRAPH_ADAPTER.md) — `GfazHandleGraph`, a
   read-only libhandlegraph graph over a `.gfaz`, so vg, odgi and other
   libhandlegraph tools can run on a container without converting it.
