@@ -225,6 +225,10 @@ GfazHandleGraph::GfazHandleGraph(const CompressedData &data,
     : options_(options), instance_id_(next_instance_id.fetch_add(1)),
       segment_lengths_(tquery::load_segment_lengths(data)),
       names_(SegmentNames::decode(data)) {
+  // The parts are read later, on threads of their own, which do not see the
+  // OpenMP thread count of the caller: settle the count now.
+  options_.num_threads =
+      ScopedOMPThreads(options_.num_threads).effective_threads();
   for (const uint32_t length : segment_lengths_)
     total_length_ += length;
   number_nodes();
