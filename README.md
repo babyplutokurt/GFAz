@@ -14,8 +14,8 @@ runs analyses directly on that file without decompressing it.
 
 ## Example: HPRC v2.1
 
-The HPRC v2.1 Minigraph-Cactus graph is 396 GB of GFA. GFAz stores it in under
-5 GB.
+The HPRC v2.1 Minigraph-Cactus graph is 396 GB of GFA. GFAz stores it in
+4.8 GB, a compression ratio of 83x.
 
 | Step | Time | Throughput | Peak memory |
 |---|---|---|---|
